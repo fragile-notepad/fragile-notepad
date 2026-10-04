@@ -145,7 +145,6 @@ pub fn view(
         styles::editor_background,
         interactive,
     ))
-    .into()
 }
 
 fn dialog(
@@ -289,8 +288,7 @@ fn about_content(progress: f32) -> Element<'static, Message> {
                     column(
                         AUTHORS
                                 .iter()
-                                .map(|x| author_entry(x.name, x.email, progress))
-                                .collect::<Vec<_>>(),
+                                .map(|x| author_entry(x.name, x.email, progress)),
                     ).spacing(8).width(Fill),
                 ]
                 .spacing(6),
@@ -382,7 +380,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ("Operating system", std::env::consts::OS.to_owned()),
                 ("Architecture", std::env::consts::ARCH.to_owned()),
                 ("Platform family", std::env::consts::FAMILY.to_owned()),
-                ("Startup probe", format!("{startup_probe}"),),
+                ("Startup probe", startup_probe.to_string(),),
             ],
         ),
         debug_section(
@@ -473,14 +471,9 @@ fn licenses_content(progress: f32) -> Element<'static, Message> {
                 )
             ]
             .spacing(6),
-            column(
-                LICENSES
-                    .iter()
-                    .map(|entry| license_entry(entry, progress))
-                    .collect::<Vec<Element<'static, Message>>>(),
-            )
-            .spacing(10)
-            .width(Fill),
+            column(LICENSES.iter().map(|entry| license_entry(entry, progress)),)
+                .spacing(10)
+                .width(Fill),
         ]
         .spacing(18)
         .padding(iced::Padding::new(0.0).right(10))

@@ -10,6 +10,8 @@ use crate::message::Message;
 
 const ENTRANCE_DURATION: Duration = Duration::from_millis(150);
 
+type FadeBackground = fn(&Theme) -> Color;
+
 // Fade paint colors instead of covering the editor behind a translucent modal.
 pub(super) fn fade_container(
     mut style: iced::widget::container::Style,
@@ -69,7 +71,7 @@ pub fn dropdown_with_key<'a>(
 pub fn fade<'a>(
     content: impl Into<Element<'a, Message>>,
     progress: f32,
-    background: fn(&Theme) -> Color,
+    background: FadeBackground,
     interactive: bool,
 ) -> Element<'a, Message> {
     Element::new(Motion {
@@ -86,7 +88,7 @@ struct Motion<'a> {
     content: Element<'a, Message>,
     distance: f32,
     key: String,
-    fade: Option<(f32, fn(&Theme) -> Color)>,
+    fade: Option<(f32, FadeBackground)>,
     external_progress: Option<f32>,
     interactive: bool,
 }
@@ -224,25 +226,24 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             viewport,
         );
 
-        if let Some((progress, background)) = self.fade {
-            if progress < 1.0 {
-                if let Some(bounds) = layout.bounds().intersection(viewport) {
-                    let mut color = background(theme);
-                    color.a *= 1.0 - progress;
-                    // Renderers batch quads before text and images within each
-                    // layer. A final layer puts the veil above every child,
-                    // including content that creates its own clipping layers.
-                    renderer.with_layer(bounds, |renderer| {
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds,
-                                ..renderer::Quad::default()
-                            },
-                            color,
-                        );
-                    });
-                }
-            }
+        if let Some((progress, background)) = self.fade
+            && progress < 1.0
+            && let Some(bounds) = layout.bounds().intersection(viewport)
+        {
+            let mut color = background(theme);
+            color.a *= 1.0 - progress;
+            // Renderers batch quads before text and images within each
+            // layer. A final layer puts the veil above every child,
+            // including content that creates its own clipping layers.
+            renderer.with_layer(bounds, |renderer| {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds,
+                        ..renderer::Quad::default()
+                    },
+                    color,
+                );
+            });
         }
     }
 

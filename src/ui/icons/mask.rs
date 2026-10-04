@@ -5,10 +5,12 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{LazyLock, Mutex};
 
+pub(super) type IconCache<Icon> = LazyLock<Mutex<HashMap<(Icon, [u8; 4]), image::Handle>>>;
+
 pub fn handle_with_color<Icon>(
     icon: Icon,
     color: Color,
-    cache: &'static LazyLock<Mutex<HashMap<(Icon, [u8; 4]), image::Handle>>>,
+    cache: &'static IconCache<Icon>,
     bytes: fn(Icon) -> &'static [u8],
 ) -> image::Handle
 where

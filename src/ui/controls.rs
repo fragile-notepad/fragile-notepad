@@ -12,11 +12,11 @@ pub fn centered_button_content<'a>(
     container(content).center(Fill).into()
 }
 
-pub fn centered_button_label<'a>(label: &'a str, size: u32) -> Element<'a, Message> {
+pub fn centered_button_label(label: &str, size: u32) -> Element<'_, Message> {
     text(label).size(size).into()
 }
 
-pub fn centered_fill_button_label<'a>(label: &'a str, size: u32) -> Element<'a, Message> {
+pub fn centered_fill_button_label(label: &str, size: u32) -> Element<'_, Message> {
     container(text(label).size(size)).center_x(Fill).into()
 }
 

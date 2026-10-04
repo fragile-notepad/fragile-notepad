@@ -289,25 +289,24 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             Event::Window(window::Event::RedrawRequested(now)) => *now,
             _ => Instant::now(),
         };
-        if let Event::Window(window::Event::RedrawRequested(_)) = event {
-            if state.next_tick.is_none_or(|deadline| now >= deadline) {
-                if let Some(previous) = state.last_tick {
-                    // If presentation stalls without a focus/resize event,
-                    // do not jump the light field forward on its return.
-                    state.elapsed += now
-                        .saturating_duration_since(previous)
-                        .min(FRAME_INTERVAL * 2)
-                        .as_secs_f64();
-                }
-                state.last_tick = Some(now);
-                // Keep the 60 Hz cadence anchored when a display presents late,
-                // without catch-up bursts.
-                let deadline = state.next_tick.unwrap_or(now);
-                let remainder =
-                    now.saturating_duration_since(deadline).as_nanos() % FRAME_INTERVAL.as_nanos();
-                state.next_tick =
-                    Some(now + FRAME_INTERVAL - Duration::from_nanos(remainder as u64));
+        if let Event::Window(window::Event::RedrawRequested(_)) = event
+            && state.next_tick.is_none_or(|deadline| now >= deadline)
+        {
+            if let Some(previous) = state.last_tick {
+                // If presentation stalls without a focus/resize event,
+                // do not jump the light field forward on its return.
+                state.elapsed += now
+                    .saturating_duration_since(previous)
+                    .min(FRAME_INTERVAL * 2)
+                    .as_secs_f64();
             }
+            state.last_tick = Some(now);
+            // Keep the 60 Hz cadence anchored when a display presents late,
+            // without catch-up bursts.
+            let deadline = state.next_tick.unwrap_or(now);
+            let remainder =
+                now.saturating_duration_since(deadline).as_nanos() % FRAME_INTERVAL.as_nanos();
+            state.next_tick = Some(now + FRAME_INTERVAL - Duration::from_nanos(remainder as u64));
         }
         let deadline = *state.next_tick.get_or_insert(now + FRAME_INTERVAL);
         shell.request_redraw_at(deadline);

@@ -139,8 +139,7 @@ where
 }
 
 fn handle_with_color(icon: ShortcutIcon, color: iced::Color) -> image::Handle {
-    static CACHE: LazyLock<Mutex<HashMap<(ShortcutIcon, [u8; 4]), image::Handle>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    static CACHE: mask::IconCache<ShortcutIcon> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
     mask::handle_with_color(icon, color, &CACHE, icon_bytes)
 }

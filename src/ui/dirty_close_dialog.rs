@@ -35,7 +35,6 @@ pub fn view(document: &Document, progress: f32, interactive: bool) -> Element<'_
         styles::editor_background,
         interactive,
     ))
-    .into()
 }
 
 fn dialog(document: &Document, progress: f32) -> Element<'_, Message> {

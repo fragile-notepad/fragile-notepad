@@ -69,8 +69,7 @@ where
 }
 
 pub fn handle_with_color(icon: HeroIcon, color: Color) -> image::Handle {
-    static CACHE: LazyLock<Mutex<HashMap<(HeroIcon, [u8; 4]), image::Handle>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    static CACHE: mask::IconCache<HeroIcon> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
     mask::handle_with_color(icon, color, &CACHE, icon_bytes)
 }

@@ -88,7 +88,6 @@ pub fn view<'a>(
         styles::editor_background,
         interactive,
     ))
-    .into()
 }
 
 #[cfg(test)]

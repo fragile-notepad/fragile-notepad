@@ -1246,12 +1246,9 @@ impl Document {
         {
             return false;
         }
-        let collapsed_before = self.folds.collapsed_ranges().copied().collect::<Vec<_>>();
+        let visibility_before = self.folds.visibility_revision();
         self.folds.recompute(result.folds);
-        let visibility_changed = self.folds.collapsed_ranges().count() != collapsed_before.len()
-            || collapsed_before
-                .iter()
-                .any(|range| !self.folds.is_collapsed(*range));
+        let visibility_changed = self.folds.visibility_revision() != visibility_before;
         if visibility_changed || self.viewport.line_count() != self.buffer.line_count() {
             self.rebuild_viewport();
         }

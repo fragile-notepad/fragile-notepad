@@ -45,13 +45,12 @@ impl FoldModel {
         Self::with_collapsed(ranges, HashSet::new())
     }
 
-    pub fn with_collapsed(ranges: Vec<FoldRange>, collapsed: HashSet<FoldRange>) -> Self {
+    pub fn with_collapsed(ranges: Vec<FoldRange>, mut collapsed: HashSet<FoldRange>) -> Self {
         let ranges = normalize_ranges(ranges);
-        let available = ranges.iter().copied().collect::<HashSet<_>>();
-        let collapsed = collapsed
-            .into_iter()
-            .filter(|range| available.contains(range))
-            .collect();
+        if !collapsed.is_empty() {
+            let available = ranges.iter().copied().collect::<HashSet<_>>();
+            collapsed.retain(|range| available.contains(range));
+        }
 
         Self {
             ranges,
@@ -101,7 +100,13 @@ impl FoldModel {
     }
 
     pub fn set_collapsed(&mut self, range: FoldRange, collapsed: bool) -> bool {
-        if !self.ranges.contains(&range) {
+        if self
+            .ranges
+            .binary_search_by_key(&(range.start_line, range.end_line), |range| {
+                (range.start_line, range.end_line)
+            })
+            .is_err()
+        {
             return false;
         }
 
@@ -124,10 +129,8 @@ impl FoldModel {
 
     pub fn set_all_collapsed(&mut self, collapsed: bool) -> bool {
         if collapsed {
-            let changed = self
-                .ranges
-                .iter()
-                .any(|range| !self.collapsed.contains(range));
+            // Collapsed ranges are a subset of the unique available ranges.
+            let changed = self.collapsed.len() != self.ranges.len();
 
             if changed {
                 self.collapsed = self.ranges.iter().copied().collect();
@@ -225,9 +228,7 @@ fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRang
             finish_indent_candidate(&mut ranges, stack.pop(), previous_nonblank_line);
         }
 
-        if let Some(parent) = stack.last_mut()
-            && indent > parent.indent
-        {
+        if let Some(parent) = stack.last_mut() {
             parent.has_deeper_line = true;
         }
 
@@ -243,7 +244,6 @@ fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRang
         finish_indent_candidate(&mut ranges, Some(candidate), previous_nonblank_line);
     }
 
-    ranges.sort_by_key(|range| (range.start_line, range.end_line));
     ranges
 }
 

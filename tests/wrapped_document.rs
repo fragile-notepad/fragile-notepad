@@ -212,6 +212,34 @@ fn wrapped_reveal_position_finds_deep_continuations_and_unfolds_targets() {
 }
 
 #[test]
+fn wrapped_analysis_preserves_retained_folds_and_reveals_removed_folds() {
+    let mut document = wrapped_document("header\n  abcdefghi\nend\nlast", 5);
+    let range = FoldRange::new(0, 2);
+    document.folds = FoldModel::new(vec![range]);
+    document.refresh_view_models();
+    let expanded_rows = document.viewport.visible_row_count();
+    document.folds.set_collapsed(range, true);
+    document.refresh_view_models();
+    let collapsed_rows = document.viewport.visible_row_count();
+    assert_eq!(document.viewport.document_line_to_visible_row(1), None);
+
+    document.analysis_pending = true;
+    let (_, mut retained) = document.analysis_request().unwrap();
+    retained.folds = vec![range];
+    assert!(document.apply_analysis(retained));
+    assert!(document.folds.is_collapsed(range));
+    assert_eq!(document.viewport.visible_row_count(), collapsed_rows);
+    assert_eq!(document.viewport.document_line_to_visible_row(1), None);
+
+    document.analysis_pending = true;
+    let (_, removed) = document.analysis_request().unwrap();
+    assert!(document.apply_analysis(removed));
+    assert!(!document.folds.is_collapsed(range));
+    assert_eq!(document.viewport.visible_row_count(), expanded_rows);
+    assert!(document.viewport.document_line_to_visible_row(1).is_some());
+}
+
+#[test]
 fn wrapped_background_analysis_preserves_boundary_affinity_when_visibility_is_unchanged() {
     let mut document = wrapped_document("abcdefghijkl", 4);
     document.defer_analysis = true;

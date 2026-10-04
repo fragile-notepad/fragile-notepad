@@ -171,16 +171,13 @@ pub fn hit_test(
         && decorations.settings.show_folding_controls
         && x >= fold_start_x
         && x < fold_end_x
-    {
-        if let Some(decoration) = decorations
+        && let Some(decoration) = decorations
             .line_decorations
             .iter()
             .find(|decoration| decoration.line == line && decoration.has_fold_control)
-        {
-            if let Some(range) = decoration.fold_range {
-                return HitTarget::FoldControl { line, range };
-            }
-        }
+        && let Some(range) = decoration.fold_range
+    {
+        return HitTarget::FoldControl { line, range };
     }
 
     if is_first_row

@@ -73,20 +73,18 @@ impl EditorHistory {
             return;
         }
 
-        if let Some(previous) = self.undo_stack.last_mut() {
-            if previous.after_revision != self.grouping_boundary
-                && self.redo_stack.is_empty()
-                && can_merge_adjacent_insert(&previous.transaction, &transaction)
-            {
-                let after_revision = self.next_revision;
-                self.next_revision += 1;
-                previous.transaction.merge_adjacent_insert(transaction);
-                previous.after_selection_set = previous.transaction.after_selection.into();
-                previous.after_revision = after_revision;
-                self.current_revision = previous.after_revision;
-                self.redo_stack.clear();
-                return;
-            }
+        if let Some(previous) = self.undo_stack.last_mut()
+            && previous.after_revision != self.grouping_boundary
+            && self.redo_stack.is_empty()
+            && can_merge_adjacent_insert(&previous.transaction, &transaction)
+        {
+            let after_revision = self.next_revision;
+            self.next_revision += 1;
+            previous.transaction.merge_adjacent_insert(transaction);
+            previous.after_selection_set = previous.transaction.after_selection.into();
+            previous.after_revision = after_revision;
+            self.current_revision = previous.after_revision;
+            return;
         }
 
         self.record(transaction);
@@ -144,9 +142,7 @@ impl EditorHistory {
         self.break_group();
     }
 
-    pub fn is_dirty(&self, text: &str) -> bool {
-        let _ = text;
-
+    pub fn is_dirty(&self, _text: &str) -> bool {
         self.clean_revision != Some(self.current_revision)
     }
 
@@ -222,7 +218,6 @@ fn can_merge_adjacent_insert(previous: &EditTransaction, next: &EditTransaction)
 
     if !previous.before_selection.is_caret()
         || !previous.after_selection.is_caret()
-        || !next.before_selection.is_caret()
         || !next.after_selection.is_caret()
     {
         return false;

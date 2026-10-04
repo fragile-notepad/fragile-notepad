@@ -597,9 +597,9 @@ fn project_selection_line(
             }
 
             let (start_visual_column, end_visual_column) = rectangular.visual_columns();
-            let line_visual_width = visual_column_for(&text, text.len(), tab_width);
-            let start_column = byte_column_for(&text, start_visual_column, tab_width);
-            let end_column = byte_column_for(&text, end_visual_column, tab_width);
+            let line_visual_width = visual_column_for(text, text.len(), tab_width);
+            let start_column = byte_column_for(text, start_visual_column, tab_width);
+            let end_column = byte_column_for(text, end_visual_column, tab_width);
 
             Some(ProjectedSelectionLine {
                 line,
@@ -644,11 +644,11 @@ fn project_linear_selection_line(
     let start_visual_column = selection
         .anchor_virtual_column
         .filter(|_| start == selection.anchor)
-        .unwrap_or_else(|| visual_column_for(&text, start.column, tab_width));
+        .unwrap_or_else(|| visual_column_for(text, start.column, tab_width));
     let mut end_visual_column = selection
         .cursor_virtual_column
         .filter(|_| end == selection.cursor)
-        .unwrap_or_else(|| visual_column_for(&text, end.column, tab_width));
+        .unwrap_or_else(|| visual_column_for(text, end.column, tab_width));
 
     if start_visual_column == end_visual_column && line < range.end.line {
         end_visual_column = end_visual_column.saturating_add(1);

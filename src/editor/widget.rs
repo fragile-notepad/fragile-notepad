@@ -519,7 +519,7 @@ where
 static DEFAULT_SHORTCUTS: std::sync::LazyLock<ShortcutMap> =
     std::sync::LazyLock::new(ShortcutMap::default);
 
-impl<'a, Message> AdvancedEditor<'a, Message> {
+impl<Message> AdvancedEditor<'_, Message> {
     fn editor_layout(&self, bounds: Rectangle) -> EditorLayout {
         let mut scroll = self.scroll;
         if self.viewport.wrap_columns().is_some() {

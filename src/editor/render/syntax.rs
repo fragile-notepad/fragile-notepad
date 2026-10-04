@@ -471,9 +471,9 @@ impl SyntaxParseRequest {
             } => {
                 let mut lines = Vec::new();
                 for line in targets {
-                    if !parser
+                    if parser
                         .as_ref()
-                        .is_some_and(|parser| parser.next_line == line)
+                        .is_none_or(|parser| parser.next_line != line)
                     {
                         // Starting mid-document is deliberately provisional:
                         // exact parsing later supplies comments/embedded-language

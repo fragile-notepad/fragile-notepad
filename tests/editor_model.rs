@@ -273,7 +273,7 @@ fn editor_model_buffer_maps_large_unicode_byte_offsets_and_lines() {
         .map(|line| format!("line-{line:04}-\u{00e9}\u{597d}"))
         .collect::<Vec<_>>()
         .join("\n");
-    text.push_str("\n");
+    text.push('\n');
     text.push_str("tail");
     let buffer = EditorBuffer::from_text(text.clone());
     let target_prefix = (0..1024)

@@ -85,7 +85,7 @@ impl EditorBuffer {
 
     pub fn line_text(&self, index: usize) -> Option<String> {
         let start = self.byte_to_char_boundary(*self.line_starts.get(index)?)?;
-        let end = self.line_content_end_char(index);
+        let end = self.line_content_end_char(index, start);
 
         Some(self.rope.slice(start..end).to_string())
     }
@@ -146,7 +146,7 @@ impl EditorBuffer {
             .get(line)
             .and_then(|offset| self.byte_to_char_boundary(*offset))
             .unwrap_or(0);
-        let line_end = self.line_content_end_char(line);
+        let line_end = self.line_content_end_char(line, line_start);
         let column =
             previous_char_boundary_in_slice(self.rope.slice(line_start..line_end), position.column);
 
@@ -204,11 +204,7 @@ impl EditorBuffer {
         )
     }
 
-    fn line_content_end_char(&self, index: usize) -> usize {
-        let Some(start_byte) = self.line_starts.get(index).copied() else {
-            return self.rope.len_chars();
-        };
-        let start = self.byte_to_char_boundary(start_byte).unwrap_or(0);
+    fn line_content_end_char(&self, index: usize, start: usize) -> usize {
         let raw_end = if index + 1 < self.line_count() {
             self.line_starts
                 .get(index + 1)

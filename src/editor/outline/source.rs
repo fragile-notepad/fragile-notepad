@@ -9,7 +9,7 @@ pub(super) struct CodeToken {
 }
 
 impl CodeToken {
-    pub(super) fn text<'a>(self, text: &'a str) -> &'a str {
+    pub(super) fn text(self, text: &str) -> &str {
         &text[self.start..self.end]
     }
 }
@@ -77,13 +77,13 @@ impl<'a> OutlineSource<'a> {
         };
         let mut delimiters = plan.structure.delimiters.clone();
         for body in &plan.structure.bodies {
-            if body.kind == OutlineBodyKind::Brace {
-                if let (Some(open), Some(close)) = (&body.open, &body.close) {
-                    delimiters.push(super::schema::RawDelimiter {
-                        open: open.clone(),
-                        close: close.clone(),
-                    });
-                }
+            if body.kind == OutlineBodyKind::Brace
+                && let (Some(open), Some(close)) = (&body.open, &body.close)
+            {
+                delimiters.push(super::schema::RawDelimiter {
+                    open: open.clone(),
+                    close: close.clone(),
+                });
             }
         }
         let mut tokens = Vec::new();
@@ -153,11 +153,11 @@ impl<'a> OutlineSource<'a> {
             for (group, delimiter) in delimiters.iter().enumerate() {
                 if token.text(text) == delimiter.open {
                     stacks[group].push(index);
-                } else if token.text(text) == delimiter.close {
-                    if let Some(open) = stacks[group].pop() {
-                        pairs[open] = Some(index);
-                        pairs[index] = Some(open);
-                    }
+                } else if token.text(text) == delimiter.close
+                    && let Some(open) = stacks[group].pop()
+                {
+                    pairs[open] = Some(index);
+                    pairs[index] = Some(open);
                 }
             }
         }

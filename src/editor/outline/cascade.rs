@@ -302,16 +302,16 @@ impl IntervalCounts {
     }
 }
 
+type PendingAttachment = (
+    super::EditorPosition,
+    super::EditorPosition,
+    Vec<usize>,
+    usize,
+);
+
 #[derive(Default)]
 struct AttachmentIndex {
-    pending: BinaryHeap<
-        Reverse<(
-            super::EditorPosition,
-            super::EditorPosition,
-            Vec<usize>,
-            usize,
-        )>,
-    >,
+    pending: BinaryHeap<Reverse<PendingAttachment>>,
     ends: BinaryHeap<Reverse<(super::EditorPosition, Vec<usize>)>>,
     active: BTreeMap<Vec<usize>, usize>,
 }

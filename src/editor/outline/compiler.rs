@@ -502,11 +502,11 @@ fn compile_rule(
             }
         }
     }
-    if let Some(pattern) = &rule.signature_brace_prefix_pattern {
-        if let Err(error) = regex::Regex::new(pattern) {
-            diagnostics.push(diagnostics::error(format!("outline language {language_name} has invalid {rule_label} signature-brace-prefix-pattern: {error}")));
-            return None;
-        }
+    if let Some(pattern) = &rule.signature_brace_prefix_pattern
+        && let Err(error) = regex::Regex::new(pattern)
+    {
+        diagnostics.push(diagnostics::error(format!("outline language {language_name} has invalid {rule_label} signature-brace-prefix-pattern: {error}")));
+        return None;
     }
     let Some(node_kind) = rule.kind.as_deref().and_then(parse_node_kind) else {
         diagnostics.push(diagnostics::error(format!(

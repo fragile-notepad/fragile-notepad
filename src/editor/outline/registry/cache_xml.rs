@@ -675,9 +675,7 @@ fn parse_cached_rule(node: roxmltree::Node<'_, '_>) -> Option<OutlineRulePlan> {
         keyword: parse_cached_values(node, "keyword", "part", "value"),
         name: parse_name_capture(node.attribute("name")?)?,
         scan: parse_scan_mode(node.attribute("scan")?)?,
-        callable: callable
-            .map(parse_cached_callable)
-            .unwrap_or_else(|| Some(OutlineCallablePlan::default()))?,
+        callable: callable.map(parse_cached_callable).unwrap_or_default(),
         body: parse_body_kind(node.attribute("body")?)?,
         method_containers: parse_cached_node_kinds(node, "method-containers")?,
         declaration_terminator: terminator,
@@ -694,8 +692,8 @@ fn parse_cached_rule(node: roxmltree::Node<'_, '_>) -> Option<OutlineRulePlan> {
     })
 }
 
-fn parse_cached_callable(node: roxmltree::Node<'_, '_>) -> Option<OutlineCallablePlan> {
-    Some(OutlineCallablePlan {
+fn parse_cached_callable(node: roxmltree::Node<'_, '_>) -> OutlineCallablePlan {
+    OutlineCallablePlan {
         assignment_arrow: node
             .attribute("assignment-arrow")
             .filter(|value| !value.is_empty())
@@ -740,7 +738,7 @@ fn parse_cached_callable(node: roxmltree::Node<'_, '_>) -> Option<OutlineCallabl
             "text",
         ),
         control_headers: parse_cached_values(node, "control-headers", "value", "text"),
-    })
+    }
 }
 
 fn parse_cached_lexical(node: roxmltree::Node<'_, '_>) -> Option<OutlineLexicalPlan> {

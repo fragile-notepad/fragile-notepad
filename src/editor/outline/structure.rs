@@ -387,7 +387,7 @@ fn callable_declaration_at(
         .callable_name
         .as_ref()
         .and_then(|pattern| {
-            let captures = pattern.captures(&text[statement.range.start..open_paren].trim_end())?;
+            let captures = pattern.captures(text[statement.range.start..open_paren].trim_end())?;
             let found = pattern
                 .capture_names()
                 .flatten()
@@ -596,18 +596,17 @@ fn keyword_has_declaration_context(
             cursor = previous.start;
             continue;
         }
-        if source.symbol_text(previous.text(text)) == SyntaxSymbol::BracketsClose {
-            if let Some(open) = source.matching_delimiter(previous.start) {
-                if let Some(attribute) = previous_code_token(text, source, open).filter(|token| {
-                    token
-                        .text(text)
-                        .chars()
-                        .all(|ch| source.has_token_role(ch, "attribute-prefix"))
-                }) {
-                    cursor = attribute.start;
-                    continue;
-                }
-            }
+        if source.symbol_text(previous.text(text)) == SyntaxSymbol::BracketsClose
+            && let Some(open) = source.matching_delimiter(previous.start)
+            && let Some(attribute) = previous_code_token(text, source, open).filter(|token| {
+                token
+                    .text(text)
+                    .chars()
+                    .all(|ch| source.has_token_role(ch, "attribute-prefix"))
+            })
+        {
+            cursor = attribute.start;
+            continue;
         }
         return source.is_body_open(text, previous.start)
             || source.is_body_close(text, previous.start)
@@ -752,10 +751,7 @@ fn callable_compound_name_before_parameters(
                 .then(|| callable_operator_name(text, source, rule, prefix, open_paren))
                 .flatten();
         }
-        let Some(start) = operator_token_before(text, source, rule, cursor) else {
-            return None;
-        };
-        cursor = start;
+        cursor = operator_token_before(text, source, rule, cursor)?;
     }
 }
 
@@ -948,11 +944,12 @@ fn arrow_assignment_before(
             SyntaxSymbol::BodyOpen => brace_depth += 1,
             SyntaxSymbol::BodyClose => brace_depth = brace_depth.saturating_sub(1),
             SyntaxSymbol::Assignment
-                if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 =>
+                if paren_depth == 0
+                    && bracket_depth == 0
+                    && brace_depth == 0
+                    && standalone_assignment_at(text, source, cursor) =>
             {
-                if standalone_assignment_at(text, source, cursor) {
-                    assignment = Some(cursor);
-                }
+                assignment = Some(cursor);
             }
             _ => {}
         }
@@ -1041,7 +1038,7 @@ fn code_before_ends_with(text: &str, source: &OutlineSource, before: usize, suff
         let Some(offset) = previous_code_char(text, source, cursor) else {
             return false;
         };
-        if text[offset..].chars().next() != Some(expected) {
+        if !text[offset..].starts_with(expected) {
             return false;
         }
         cursor = offset;
@@ -1494,16 +1491,15 @@ fn callable_signature_terminator(
                 {
                     return None;
                 }
-                if let Some(next) = next_code_token(text, source, cursor + ch.len_utf8()) {
-                    if rule
+                if let Some(next) = next_code_token(text, source, cursor + ch.len_utf8())
+                    && rule
                         .callable
                         .assignment_continuations
                         .iter()
                         .any(|continuation| continuation == next.text(text))
-                    {
-                        cursor = next.end;
-                        continue;
-                    }
+                {
+                    cursor = next.end;
+                    continue;
                 }
                 return None;
             }
@@ -1688,23 +1684,22 @@ fn indent_body_end(
                         || source.is_literal_start(cursor + relative))
             })
             .map(|(relative, _)| cursor + relative);
-        if cursor >= continuation_end {
-            if let Some(first) = first {
-                if indentation_before(text, first) <= header_indent {
-                    return cursor.saturating_sub(line_ending_len_before(text, cursor));
-                }
-            }
+        if cursor >= continuation_end
+            && let Some(first) = first
+            && indentation_before(text, first) <= header_indent
+        {
+            return cursor.saturating_sub(line_ending_len_before(text, cursor));
         }
         for token in source
             .tokens_from(cursor)
             .iter()
             .take_while(|token| token.start < line_end)
         {
-            if source.is_delimiter_open(text, token.start) {
-                if let Some(close) = source.matching_delimiter(token.start) {
-                    continuation_end = continuation_end
-                        .max(source.next_token(close).map_or(close, |token| token.end));
-                }
+            if source.is_delimiter_open(text, token.start)
+                && let Some(close) = source.matching_delimiter(token.start)
+            {
+                continuation_end =
+                    continuation_end.max(source.next_token(close).map_or(close, |token| token.end));
             }
         }
         cursor = next_line_start_offset(text, line_end);
@@ -1723,22 +1718,20 @@ fn end_keyword_signature_terminator(
         let line_end = line_end_offset(text, after_name);
         if let Some(token) =
             next_code_token(text, source, cursor).filter(|token| token.start < line_end)
+            && source.is_delimiter_open(text, token.start)
         {
-            if source.is_delimiter_open(text, token.start) {
-                let close = source.matching_delimiter(token.start)?;
-                cursor = source.next_token(close)?.end;
-            }
+            let close = source.matching_delimiter(token.start)?;
+            cursor = source.next_token(close)?.end;
         }
         if let Some(token) =
             next_code_token(text, source, cursor).filter(|token| token.start < line_end)
+            && token.text(text) == marker
         {
-            if token.text(text) == marker {
-                // A setter's '=' is part of its name and excluded by after_name.
-                return Some(RuleTerminator::Body {
-                    open: token.end,
-                    end: line_end,
-                });
-            }
+            // A setter's '=' is part of its name and excluded by after_name.
+            return Some(RuleTerminator::Body {
+                open: token.end,
+                end: line_end,
+            });
         }
     }
     let end = matching_end_keyword(text, source, after_name).unwrap_or(text.len());

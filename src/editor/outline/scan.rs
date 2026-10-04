@@ -114,11 +114,7 @@ pub(super) fn signature_start(text: &str, source: &OutlineSource, keyword_offset
     let mut start = keyword_offset;
     let mut cursor = keyword_offset;
 
-    loop {
-        let Some(token) = previous_code_token(text, source, cursor) else {
-            break;
-        };
-
+    while let Some(token) = previous_code_token(text, source, cursor) {
         if source
             .plan
             .signature_modifiers

@@ -109,11 +109,10 @@ impl<'a> CallableStatementScanner<'a> {
                     self.brace_prefix,
                     self.start,
                     self.cursor,
-                ) {
-                    if let Some(close) = self.source.matching_delimiter(self.cursor) {
-                        self.cursor = self.source.next_token(close).unwrap().end - len;
-                        return;
-                    }
+                ) && let Some(close) = self.source.matching_delimiter(self.cursor)
+                {
+                    self.cursor = self.source.next_token(close).unwrap().end - len;
+                    return;
                 }
                 self.finish_statement(self.cursor + len, CallableStatementTerminator::Body);
             }

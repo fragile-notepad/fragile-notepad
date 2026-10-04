@@ -53,11 +53,9 @@ impl OutlineCodeMask {
         let mut parentheses = Vec::new();
         let mut braces = Vec::new();
         while cursor < text.len() {
-            if pending_heredocs
-                .front()
-                .is_some_and(|pending| cursor >= pending.body_start)
+            if let Some(pending) =
+                pending_heredocs.pop_front_if(|pending| cursor >= pending.body_start)
             {
-                let pending = pending_heredocs.pop_front().unwrap();
                 let end = heredoc_closers
                     .as_ref()
                     .unwrap()

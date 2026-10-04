@@ -167,7 +167,7 @@ pub fn separator() -> MenuNode {
     MenuNode::Separator
 }
 
-pub fn view<'a>(menu: Menu, tree: MenuTree, active_path: &'a [String]) -> Element<'a, Message> {
+pub fn view(menu: Menu, tree: MenuTree, active_path: &[String]) -> Element<'_, Message> {
     let base_width = panel_width(&tree.entries, tree.width);
     let flyouts = active_flyouts(&tree.entries, active_path, tree.width);
     let base = motion::dropdown_with_key(
@@ -198,13 +198,13 @@ pub fn view<'a>(menu: Menu, tree: MenuTree, active_path: &'a [String]) -> Elemen
     MenuCascade::new(base, layers).into()
 }
 
-fn menu_panel<'a>(
+fn menu_panel(
     entries: Vec<MenuNode>,
     width: f32,
     max_height: Option<f32>,
-    active_path: &'a [String],
+    active_path: &[String],
     depth: usize,
-) -> Element<'a, Message> {
+) -> Element<'_, Message> {
     let content = entries
         .into_iter()
         .fold(column![].spacing(0).padding(3), |column, entry| {
@@ -486,7 +486,8 @@ fn active_flyouts(entries: &[MenuNode], active_path: &[String], min_width: f32) 
             break;
         };
         let x = parent_x + parent_width;
-        let y = parent_y + submenu_y(entries, row_index);
+        let row_offset = submenu_y(entries, row_index);
+        let y = parent_y + row_offset;
         let width = panel_width(children, min_width);
 
         flyouts.push(Flyout {
@@ -495,7 +496,7 @@ fn active_flyouts(entries: &[MenuNode], active_path: &[String], min_width: f32) 
             width,
             x,
             y,
-            row_offset: submenu_y(entries, row_index),
+            row_offset,
         });
 
         parent_x = x;
@@ -593,12 +594,12 @@ fn shortcut_part_width(part: &ShortcutDisplayPart) -> f32 {
     }
 }
 
-fn menu_entry_view<'a>(
+fn menu_entry_view(
     entry: MenuNode,
-    active_path: &'a [String],
+    active_path: &[String],
     depth: usize,
     width: f32,
-) -> Element<'a, Message> {
+) -> Element<'_, Message> {
     match entry {
         MenuNode::Item {
             label,
@@ -618,7 +619,7 @@ fn menu_entry_view<'a>(
             .width(Fill)
             .padding([5, 9])
             .style(styles::menu_dropdown_item)
-            .on_press(message.clone()),
+            .on_press(message),
         )
         .on_enter(Message::MenuPathHovered(MenuPath {
             depth,

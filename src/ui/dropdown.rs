@@ -191,28 +191,27 @@ impl<T: Clone + PartialEq> Widget<Message, Theme, Renderer> for Dropdown<'_, T> 
         if shell.is_event_captured() {
             return;
         }
-        if !self.options.is_empty() && state.visual.get().focused {
-            if let Event::Keyboard(keyboard::Event::KeyPressed {
+        if !self.options.is_empty()
+            && state.visual.get().focused
+            && let Event::Keyboard(keyboard::Event::KeyPressed {
                 key: Key::Named(key),
                 ..
             }) = event
-            {
-                if matches!(
-                    key,
-                    Named::Enter | Named::Space | Named::ArrowDown | Named::ArrowUp
-                ) {
-                    let selected = self
-                        .options
-                        .iter()
-                        .position(|option| Some(option) == self.selected.as_ref())
-                        .unwrap_or(0);
-                    state.open(selected);
-                    shell.capture_event();
-                    shell.invalidate_widgets();
-                    shell.request_redraw();
-                    return;
-                }
-            }
+            && matches!(
+                key,
+                Named::Enter | Named::Space | Named::ArrowDown | Named::ArrowUp
+            )
+        {
+            let selected = self
+                .options
+                .iter()
+                .position(|option| Some(option) == self.selected.as_ref())
+                .unwrap_or(0);
+            state.open(selected);
+            shell.capture_event();
+            shell.invalidate_widgets();
+            shell.request_redraw();
+            return;
         }
         if is_pointer_press(event) && cursor.is_over(layout.bounds()) {
             operation::Focusable::focus(state);

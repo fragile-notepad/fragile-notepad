@@ -62,7 +62,7 @@ pub fn view<'a>(
     };
 
     container(responsive(move |size| {
-        status_bar_for_width(data.clone(), size.width)
+        status_bar_for_width(&data, size.width)
     }))
     .height(Length::Fixed(STATUS_BAR_HEIGHT))
     .width(Fill)
@@ -91,7 +91,7 @@ fn segment<'a>(label: impl Into<String>, width: f32) -> Element<'a, Message> {
         .into()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct StatusBarData {
     path_or_title: String,
     document_status: String,
@@ -131,10 +131,10 @@ impl StatusSegment {
     }
 }
 
-fn status_bar_for_width<'a>(data: StatusBarData, available_width: f32) -> Element<'a, Message> {
+fn status_bar_for_width<'a>(data: &StatusBarData, available_width: f32) -> Element<'a, Message> {
     let visible = visible_status_segments(available_width);
     let mut row = row![
-        container(text(data.path_or_title).size(STATUS_TEXT_SIZE))
+        container(text(data.path_or_title.clone()).size(STATUS_TEXT_SIZE))
             .padding([3, 2])
             .width(Fill)
             .style(styles::status_path)

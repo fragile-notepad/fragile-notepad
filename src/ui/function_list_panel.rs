@@ -24,13 +24,18 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let ready = outline_state.filter(|state| state.status == OutlineStatus::Ready);
     let visible = ready.map_or_else(Vec::new, |state| visible_rows(state, query));
-    let total = ready.map_or(0, |state| {
-        if state.tree.roots.is_empty() {
-            state.functions.len()
-        } else {
-            symbol_count(&state.tree.roots)
-        }
-    });
+    let unfiltered = query.trim().is_empty();
+    let total = if unfiltered {
+        visible.len()
+    } else {
+        ready.map_or(0, |state| {
+            if state.tree.roots.is_empty() {
+                state.functions.len()
+            } else {
+                symbol_count(&state.tree.roots)
+            }
+        })
+    };
     let caret = document.main_selection().cursor;
     let current = visible
         .iter()
@@ -39,7 +44,7 @@ pub fn view<'a>(
         .map(|row| row.range);
     let count = if ready.is_none() {
         String::from("—")
-    } else if query.trim().is_empty() {
+    } else if unfiltered {
         total.to_string()
     } else {
         format!(

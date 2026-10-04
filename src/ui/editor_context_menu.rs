@@ -388,15 +388,11 @@ impl ContextMenu<'_> {
     }
 
     fn hit(&self, layout: Layout<'_>, point: Point) -> Option<(usize, usize)> {
-        if self.state.anchor.is_none() {
-            return None;
-        }
+        self.state.anchor?;
         for (depth, panel) in layout
             .children()
             .take(self.state.path.len() + 1)
             .enumerate()
-            .collect::<Vec<_>>()
-            .into_iter()
             .rev()
         {
             let bounds = panel.bounds();
@@ -719,8 +715,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                     .children()
                     .take(self.state.path.len() + 1)
                     .enumerate()
-                    .filter(|(_, panel)| cursor.is_over(panel.bounds()))
-                    .last()
+                    .rfind(|(_, panel)| cursor.is_over(panel.bounds()))
                 {
                     let pixels = match delta {
                         mouse::ScrollDelta::Lines { y, .. } => y * ROW_HEIGHT * 3.0,
@@ -778,9 +773,8 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                 self.state.scroll_motion = None;
                 let depth = self.state.path.len();
                 let current = self.state.highlighted.get(depth).copied().flatten();
-                let modified_shortcut = (!modifiers.is_empty()
-                    && !(key == &Key::Named(Named::Tab)
-                        && *modifiers == keyboard::Modifiers::SHIFT))
+                let modified_shortcut = (!(modifiers.is_empty()
+                    || key == &Key::Named(Named::Tab) && *modifiers == keyboard::Modifiers::SHIFT))
                     .then(|| {
                         self.settings
                             .shortcuts

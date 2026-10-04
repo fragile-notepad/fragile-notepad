@@ -141,7 +141,7 @@ fn load_utf8_chunks(
             &mut sender,
             &request,
             &mut decoder,
-            &pending,
+            pending,
             false,
             bytes_read,
             total_bytes,
@@ -166,8 +166,7 @@ fn load_utf8_chunks(
             break;
         }
 
-        pending.clear();
-        pending.extend_from_slice(&buffer[..read]);
+        pending = &buffer[..read];
         bytes_read += read as u64;
     }
 
@@ -221,7 +220,7 @@ fn load_utf16_chunks(
         if sender.is_closed() {
             return;
         }
-        let output = decoder.decode(&pending, false);
+        let output = decoder.decode(pending, false);
         if !output.is_empty() {
             send_chunk(
                 &mut sender,
@@ -245,8 +244,7 @@ fn load_utf16_chunks(
             break;
         }
 
-        pending.clear();
-        pending.extend_from_slice(&buffer[..read]);
+        pending = &buffer[..read];
         bytes_read += read as u64;
     }
 
@@ -316,7 +314,7 @@ fn load_windows_1252_chunks(
     let mut buffer = vec![0; chunk_size];
     let mut bytes_read = first_read.len() as u64;
     let mut decoder = encoding_rs::WINDOWS_1252.new_decoder_without_bom_handling();
-    let mut pending = first_read;
+    let mut pending = first_read.as_slice();
     let mut had_errors = forced_had_errors;
     let mut reset_next_chunk = reset_first_chunk;
 
@@ -329,7 +327,7 @@ fn load_windows_1252_chunks(
                 &mut sender,
                 &request,
                 &mut decoder,
-                &pending,
+                pending,
                 false,
                 bytes_read,
                 total_bytes,
@@ -352,8 +350,7 @@ fn load_windows_1252_chunks(
             break;
         }
 
-        pending.clear();
-        pending.extend_from_slice(&buffer[..read]);
+        pending = &buffer[..read];
         bytes_read += read as u64;
     }
 
@@ -396,28 +393,19 @@ fn detect_initial_encoding(bytes: &[u8]) -> TextEncoding {
     }
 }
 
-fn strip_initial_bom(bytes: &[u8], encoding: TextEncoding) -> Vec<u8> {
+fn strip_initial_bom(bytes: &[u8], encoding: TextEncoding) -> &[u8] {
     if encoding == TextEncoding::Utf8Bom {
-        bytes
-            .get(UTF8_BOM_BYTES.len()..)
-            .unwrap_or_default()
-            .to_vec()
+        bytes.get(UTF8_BOM_BYTES.len()..).unwrap_or_default()
     } else {
-        bytes.to_vec()
+        bytes
     }
 }
 
-fn strip_initial_utf16_bom(bytes: &[u8], encoding: TextEncoding) -> Vec<u8> {
+fn strip_initial_utf16_bom(bytes: &[u8], encoding: TextEncoding) -> &[u8] {
     match encoding {
-        TextEncoding::Utf16BeBom => bytes
-            .get(UTF16BE_BOM_BYTES.len()..)
-            .unwrap_or_default()
-            .to_vec(),
-        TextEncoding::Utf16LeBom => bytes
-            .get(UTF16LE_BOM_BYTES.len()..)
-            .unwrap_or_default()
-            .to_vec(),
-        _ => bytes.to_vec(),
+        TextEncoding::Utf16BeBom => bytes.get(UTF16BE_BOM_BYTES.len()..).unwrap_or_default(),
+        TextEncoding::Utf16LeBom => bytes.get(UTF16LE_BOM_BYTES.len()..).unwrap_or_default(),
+        _ => bytes,
     }
 }
 

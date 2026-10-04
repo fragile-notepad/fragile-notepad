@@ -18,12 +18,10 @@ pub fn pick_file(window: &dyn iced::Window) -> impl Future<Output = FileResult<P
     }
 }
 
-pub fn open_file(window: &dyn iced::Window) -> impl Future<Output = FileOpenResult> + use<'_> {
-    async move {
-        let path = pick_file(window).await?;
+pub async fn open_file(window: &dyn iced::Window) -> FileOpenResult {
+    let path = pick_file(window).await?;
 
-        load_file(path).await
-    }
+    load_file(path).await
 }
 
 pub fn save_file_as(

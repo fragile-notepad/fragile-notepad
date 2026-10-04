@@ -263,8 +263,8 @@ pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, Encodi
             bytes.extend_from_slice(strip_text_bom(text).as_bytes());
             Ok(bytes)
         }
-        TextEncoding::Utf16BeBom => encode_utf16(text, true),
-        TextEncoding::Utf16LeBom => encode_utf16(text, false),
+        TextEncoding::Utf16BeBom => Ok(encode_utf16(text, true)),
+        TextEncoding::Utf16LeBom => Ok(encode_utf16(text, false)),
         TextEncoding::Iso8859_1 => encode_iso_8859_1(text),
         other if other.oem_code_page().is_some() => {
             let code_page = other.oem_code_page().expect("checked code page");
@@ -323,16 +323,13 @@ fn decode_with_encoding(encoding: &'static encoding_rs::Encoding, bytes: &[u8]) 
 
 fn decode_utf16(bytes: &[u8], encoding: TextEncoding, big_endian: bool) -> DecodedText {
     let mut had_errors = !bytes.len().is_multiple_of(2);
-    let units = bytes
-        .chunks_exact(2)
-        .map(|chunk| {
-            if big_endian {
-                u16::from_be_bytes([chunk[0], chunk[1]])
-            } else {
-                u16::from_le_bytes([chunk[0], chunk[1]])
-            }
-        })
-        .collect::<Vec<_>>();
+    let units = bytes.chunks_exact(2).map(|chunk| {
+        if big_endian {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        }
+    });
     let text = std::char::decode_utf16(units)
         .map(|result| match result {
             Ok(ch) => ch,
@@ -350,7 +347,7 @@ fn decode_utf16(bytes: &[u8], encoding: TextEncoding, big_endian: bool) -> Decod
     }
 }
 
-fn encode_utf16(text: &str, big_endian: bool) -> Result<Vec<u8>, EncodingError> {
+fn encode_utf16(text: &str, big_endian: bool) -> Vec<u8> {
     let mut bytes = if big_endian {
         UTF16BE_BOM_BYTES.to_vec()
     } else {
@@ -366,7 +363,7 @@ fn encode_utf16(text: &str, big_endian: bool) -> Result<Vec<u8>, EncodingError> 
         bytes.extend_from_slice(&encoded);
     }
 
-    Ok(bytes)
+    bytes
 }
 
 fn encode_iso_8859_1(text: &str) -> Result<Vec<u8>, EncodingError> {

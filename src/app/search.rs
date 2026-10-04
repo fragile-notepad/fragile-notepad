@@ -243,9 +243,13 @@ impl App {
             return;
         };
 
-        let previous_query = self.find.query.clone();
-        let previous_case_sensitive = self.find.case_sensitive;
-        let previous_whole_word = self.find.whole_word;
+        let previous_find = (!persist_query).then(|| {
+            (
+                std::mem::take(&mut self.find.query),
+                self.find.case_sensitive,
+                self.find.whole_word,
+            )
+        });
 
         self.find.set_query(query);
         if !persist_query {
@@ -261,10 +265,10 @@ impl App {
         };
         self.select_active_match(text_match);
 
-        if !persist_query {
-            self.find.query = previous_query;
-            self.find.case_sensitive = previous_case_sensitive;
-            self.find.whole_word = previous_whole_word;
+        if let Some((query, case_sensitive, whole_word)) = previous_find {
+            self.find.query = query;
+            self.find.case_sensitive = case_sensitive;
+            self.find.whole_word = whole_word;
             self.refresh_find_matches();
         }
     }
@@ -713,10 +717,8 @@ impl SearchSubscriber<'_> {
                 let document_changed =
                     super::editor_ops::replace_ranges_for_search(document, replacements);
 
-                if document_changed {
-                    if *document_id == active_id {
-                        document.ensure_caret_visible();
-                    }
+                if document_changed && *document_id == active_id {
+                    document.ensure_caret_visible();
                 }
             }
         }

@@ -278,15 +278,14 @@ impl PreparedSearch {
         &self,
         chunks: impl IntoIterator<Item = &'a str>,
     ) -> Vec<TextMatch> {
-        match (&self.matcher, self.options.mode) {
-            (PreparedMatcher::Literal(query), SearchMode::Normal | SearchMode::Extended) => {
+        match &self.matcher {
+            PreparedMatcher::Literal(query) => {
                 compute_literal_matches_in_chunks(chunks, query, self.options)
             }
-            (PreparedMatcher::Regex(_), SearchMode::Regex) => {
+            PreparedMatcher::Regex(_) => {
                 let text = chunks.into_iter().collect::<String>();
                 self.matches(&text)
             }
-            _ => Vec::new(),
         }
     }
 

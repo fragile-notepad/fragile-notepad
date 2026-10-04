@@ -216,16 +216,14 @@ pub fn include_filter_matches(document: &Document, include_pattern: &str) -> boo
 }
 
 fn matches_one_pattern(document: &Document, pattern: &str) -> bool {
-    let title = document.title();
-    let path = document
-        .path
-        .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| title.clone());
     let pattern = pattern.to_ascii_lowercase();
+    if wildcard_match(&document.title().to_ascii_lowercase(), &pattern) {
+        return true;
+    }
 
-    wildcard_match(&title.to_ascii_lowercase(), &pattern)
-        || wildcard_match(&path.to_ascii_lowercase(), &pattern)
+    document.path.as_ref().is_some_and(|path| {
+        wildcard_match(&path.display().to_string().to_ascii_lowercase(), &pattern)
+    })
 }
 
 fn wildcard_match(value: &str, pattern: &str) -> bool {

@@ -61,6 +61,29 @@ impl App {
     }
 }
 
+impl DocumentAnalysisState {
+    pub(super) fn observe(
+        &self,
+        event: super::events::Event,
+        active: DocumentId,
+        work: &mut super::events::PendingWork,
+    ) {
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
+        let needed = match event {
+            Event::Started | Event::SettingsChanged | Event::AnalysisAvailable => true,
+            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
+            Event::Workspace(
+                W::ContentChanged(id) | W::LoadStateChanged(id) | W::AnalysisInvalidated(id),
+            ) => id == active,
+            _ => false,
+        };
+        if needed {
+            work.request(Work::Analysis);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,28 +141,5 @@ mod tests {
         let _ = app.update(Message::None);
         assert!(!app.lifecycle.is_exiting());
         assert!(app.analysis.in_flight.is_some());
-    }
-}
-
-impl DocumentAnalysisState {
-    pub(super) fn observe(
-        &self,
-        event: super::events::Event,
-        active: DocumentId,
-        work: &mut super::events::PendingWork,
-    ) {
-        use super::events::{Event, Work};
-        use crate::core::workspace::changes::WorkspaceEvent as W;
-        let needed = match event {
-            Event::Started | Event::SettingsChanged | Event::AnalysisAvailable => true,
-            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
-            Event::Workspace(
-                W::ContentChanged(id) | W::LoadStateChanged(id) | W::AnalysisInvalidated(id),
-            ) => id == active,
-            _ => false,
-        };
-        if needed {
-            work.request(Work::Analysis);
-        }
     }
 }

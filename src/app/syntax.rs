@@ -142,10 +142,10 @@ impl SyntaxParsing {
         id: u64,
         result: Result<SyntaxParseResult, String>,
     ) {
-        if !self
+        if self
             .in_flight
             .as_ref()
-            .is_some_and(|pending| pending.id == id)
+            .is_none_or(|pending| pending.id != id)
         {
             return;
         }
@@ -176,6 +176,30 @@ impl SyntaxParsing {
         }
         // This message causes a redraw, and App::update schedules the next
         // batch, first filling the latest viewport and then refining context.
+    }
+}
+
+impl SyntaxParsing {
+    pub(super) fn observe(
+        &self,
+        event: super::events::Event,
+        active: DocumentId,
+        work: &mut super::events::PendingWork,
+    ) {
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
+        let needed = match event {
+            Event::Started | Event::SettingsChanged | Event::SyntaxAvailable => true,
+            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
+            Event::AnalysisCompleted(id)
+            | Event::Workspace(
+                W::ContentChanged(id) | W::ViewChanged(id) | W::LoadStateChanged(id),
+            ) => id == active,
+            _ => false,
+        };
+        if needed {
+            work.request(Work::Syntax);
+        }
     }
 }
 
@@ -468,29 +492,5 @@ mod tests {
         app.session.set_enabled(true);
         let _ = app.update(Message::SyntaxParsed(id, Ok(request.parse())));
         assert!(!app.session.is_dirty());
-    }
-}
-
-impl SyntaxParsing {
-    pub(super) fn observe(
-        &self,
-        event: super::events::Event,
-        active: DocumentId,
-        work: &mut super::events::PendingWork,
-    ) {
-        use super::events::{Event, Work};
-        use crate::core::workspace::changes::WorkspaceEvent as W;
-        let needed = match event {
-            Event::Started | Event::SettingsChanged | Event::SyntaxAvailable => true,
-            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
-            Event::AnalysisCompleted(id)
-            | Event::Workspace(
-                W::ContentChanged(id) | W::ViewChanged(id) | W::LoadStateChanged(id),
-            ) => id == active,
-            _ => false,
-        };
-        if needed {
-            work.request(Work::Syntax);
-        }
     }
 }

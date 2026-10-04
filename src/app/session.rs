@@ -355,10 +355,10 @@ impl SessionState {
                 work.request(Work::Session);
             }
             Event::AnalysisCompleted(id) => {
-                if let Some(ranges) = self.folds.remove(&id) {
-                    if let Some(document) = workspace.document_mut(id) {
-                        document.restore_collapsed_folds(&ranges);
-                    }
+                if let Some(ranges) = self.folds.remove(&id)
+                    && let Some(document) = workspace.document_mut(id)
+                {
+                    document.restore_collapsed_folds(&ranges);
                 }
             }
             _ => {}

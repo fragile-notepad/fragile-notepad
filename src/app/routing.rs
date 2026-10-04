@@ -87,17 +87,17 @@ impl App {
             ApplicationMessage::WindowFocusNext => self.focus_adjacent_window(1),
             ApplicationMessage::WindowFocusPrevious => self.focus_adjacent_window(-1),
             ApplicationMessage::FoldCurrent => {
-                self.update_active_fold_command(EditorAction::FoldCurrent)
+                self.update_active_editor_command(EditorAction::FoldCurrent)
             }
             ApplicationMessage::UnfoldCurrent => {
-                self.update_active_fold_command(EditorAction::UnfoldCurrent)
+                self.update_active_editor_command(EditorAction::UnfoldCurrent)
             }
             ApplicationMessage::ToggleCurrentFold => {
-                self.update_active_fold_command(EditorAction::ToggleCurrentFold)
+                self.update_active_editor_command(EditorAction::ToggleCurrentFold)
             }
-            ApplicationMessage::FoldAll => self.update_active_fold_command(EditorAction::FoldAll),
+            ApplicationMessage::FoldAll => self.update_active_editor_command(EditorAction::FoldAll),
             ApplicationMessage::UnfoldAll => {
-                self.update_active_fold_command(EditorAction::UnfoldAll)
+                self.update_active_editor_command(EditorAction::UnfoldAll)
             }
             ApplicationMessage::GoToMatchingDelimiter => {
                 self.update_active_editor_command(EditorAction::GoToMatchingDelimiter)

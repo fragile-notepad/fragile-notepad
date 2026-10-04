@@ -370,8 +370,10 @@ mod tests {
 
     #[test]
     fn env_override_takes_precedence_over_persisted_settings() {
-        let mut settings = EditorSettings::default();
-        settings.hardware_acceleration = HardwareAccelerationMode::Diagnostic;
+        let mut settings = EditorSettings {
+            hardware_acceleration: HardwareAccelerationMode::Diagnostic,
+            ..EditorSettings::default()
+        };
 
         assert_eq!(
             render_backend_policy(&settings, Some("software")),

@@ -256,20 +256,18 @@ impl App {
             revision: document.revision(),
             snapshot: Arc::new(snapshot),
         };
-        let dialog_options = save_dialog_options(document);
         document.history.break_group();
         self.files.pending_save = Some(request.clone());
 
-        if !force_save_as {
-            if let Some(path) = document.path.clone() {
-                let contents = request.snapshot.as_ref().clone();
+        if !force_save_as && let Some(path) = document.path.clone() {
+            let contents = request.snapshot.as_ref().clone();
 
-                return Task::perform(file_system::save_file(path, contents), move |result| {
-                    Message::FileSaved(request, result)
-                });
-            }
+            return Task::perform(file_system::save_file(path, contents), move |result| {
+                Message::FileSaved(request, result)
+            });
         }
 
+        let dialog_options = save_dialog_options(document);
         let contents = request.snapshot.as_ref().clone();
 
         window::oldest()

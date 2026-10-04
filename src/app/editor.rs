@@ -118,10 +118,8 @@ impl App {
                 .is_some_and(|document| document.redo()),
         };
 
-        if changed {
-            if let Some(document) = self.workspace.active_document_mut() {
-                document.ensure_caret_visible();
-            }
+        if changed && let Some(document) = self.workspace.active_document_mut() {
+            document.ensure_caret_visible();
         }
 
         iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
@@ -472,10 +470,6 @@ impl App {
 mod tests;
 
 impl App {
-    pub(super) fn update_active_fold_command(&mut self, action: EditorAction) -> Task<Message> {
-        self.update_active_editor_command(action)
-    }
-
     pub(super) fn update_active_editor_command(&mut self, action: EditorAction) -> Task<Message> {
         self.menu.close();
 

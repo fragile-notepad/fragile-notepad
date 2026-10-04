@@ -27,10 +27,10 @@ impl<E: BusEvent> Default for MessageBus<E> {
 
 impl<E: BusEvent> MessageBus<E> {
     pub(super) fn publish(&mut self, event: E) {
-        if let Some(key) = event.coalescing_key() {
-            if !self.queued.insert(key) {
-                return;
-            }
+        if let Some(key) = event.coalescing_key()
+            && !self.queued.insert(key)
+        {
+            return;
         }
         self.queue.push_back(event);
     }

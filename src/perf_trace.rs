@@ -87,9 +87,7 @@ fn write_event(event: &str, elapsed_us: u128, detail: fmt::Arguments<'_>) {
 fn trace() -> Option<&'static Mutex<PerfTrace>> {
     TRACE
         .get_or_init(|| {
-            if std::env::var_os("FRAGILE_PERF_TRACE").is_none() {
-                return None;
-            }
+            std::env::var_os("FRAGILE_PERF_TRACE")?;
 
             Some(Mutex::new(PerfTrace::new()?))
         })
@@ -128,6 +126,30 @@ impl PerfTrace {
     }
 }
 
+fn trace_path() -> Option<PathBuf> {
+    let dir = std::env::var_os("FRAGILE_PERF_TRACE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target").join("perf"));
+
+    std::fs::create_dir_all(&dir).ok()?;
+
+    Some(dir.join("fragile-perf.csv"))
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+fn timestamp_us() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_micros())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,28 +178,4 @@ mod tests {
         assert!(content.contains("trace_start"));
         assert!(content.contains("renderer_after"));
     }
-}
-
-fn trace_path() -> Option<PathBuf> {
-    let dir = std::env::var_os("FRAGILE_PERF_TRACE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("target").join("perf"));
-
-    std::fs::create_dir_all(&dir).ok()?;
-
-    Some(dir.join("fragile-perf.csv"))
-}
-
-fn csv_escape(value: &str) -> String {
-    if value.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
-        value.to_owned()
-    }
-}
-
-fn timestamp_us() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_micros())
 }

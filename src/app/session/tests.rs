@@ -329,8 +329,10 @@ fn settings_initialization_merges_early_history_and_preferences() {
     let (mut app, _) = App::new();
     let _ = app.update(Message::ZoomIn);
     app.settings.record_open_history_path("new.txt");
-    let mut loaded = EditorSettings::default();
-    loaded.word_wrap = true;
+    let mut loaded = EditorSettings {
+        word_wrap: true,
+        ..EditorSettings::default()
+    };
     loaded.record_open_history_path("old.txt");
     let _ = app.update(Message::SettingsLoaded(Ok(Some(loaded))));
     assert_eq!(app.settings.zoom, 1.1);
@@ -368,8 +370,10 @@ fn explicit_default_reset_before_settings_load_wins_without_losing_other_prefere
     let _ = app.update(Message::ZoomReset);
     let _ = app.update(Message::ToggleLineNumbers);
     let _ = app.update(Message::ToggleLineNumbers);
-    let mut loaded = EditorSettings::default();
-    loaded.zoom = 2.0;
+    let mut loaded = EditorSettings {
+        zoom: 2.0,
+        ..EditorSettings::default()
+    };
     loaded.decorations.show_line_numbers = false;
     loaded.decorations.show_spaces = true;
     let _ = app.update(Message::SettingsLoaded(Ok(Some(loaded))));

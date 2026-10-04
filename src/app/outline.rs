@@ -71,11 +71,16 @@ impl OutlineParsing {
             self.states.insert(document_id, state);
             return Task::none();
         }
-        if self.state_for(document).is_some_and(|state| {
-            state.status == OutlineStatus::Ready
-                || (state.status == OutlineStatus::Pending
-                    && self.handles.contains_key(&document_id))
-        }) {
+        if self
+            .states
+            .get(&document_id)
+            .filter(|state| state.matches_metadata(&metadata))
+            .is_some_and(|state| {
+                state.status == OutlineStatus::Ready
+                    || (state.status == OutlineStatus::Pending
+                        && self.handles.contains_key(&document_id))
+            })
+        {
             return Task::none();
         }
 
@@ -115,6 +120,77 @@ impl OutlineParsing {
         self.states.remove(&document);
         if let Some(handle) = self.handles.remove(&document) {
             handle.abort();
+        }
+    }
+}
+
+impl App {
+    pub(super) fn active_outline_state(&self) -> Option<&OutlineState> {
+        self.workspace
+            .active_document()
+            .and_then(|document| self.outline_parsing.state_for(document))
+    }
+
+    pub(super) fn complete_outline_parse(&mut self, result: OutlineParseResult) -> Task<Message> {
+        self.outline_parsing
+            .complete(self.workspace.document(result.document_id), result);
+        Task::none()
+    }
+
+    pub(super) fn toggle_function_list(&mut self) -> Task<Message> {
+        self.menu.close();
+
+        self.is_function_list_visible = !self.is_function_list_visible;
+        self.chrome_animation
+            .function_list
+            .set_visible(self.is_function_list_visible);
+
+        iced::widget::operation::focus(if self.is_function_list_visible {
+            crate::ui::function_list_panel::INPUT_ID
+        } else {
+            crate::ui::editor::EDITOR_ID
+        })
+    }
+
+    pub(super) fn select_function_list_entry(
+        &mut self,
+        position: crate::editor::EditorPosition,
+    ) -> Task<Message> {
+        self.menu.close();
+
+        let Some(document) = self.workspace.active_document_mut() else {
+            return Task::none();
+        };
+
+        let position = document.buffer.clamp_position(position);
+        document.set_main_selection(EditorSelection::new(position, position));
+        document.preferred_vertical_column = None;
+        document.reveal_position(position);
+
+        iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
+    }
+}
+
+impl OutlineParsing {
+    pub(super) fn observe(
+        &mut self,
+        event: super::events::Event,
+        active: DocumentId,
+        work: &mut super::events::PendingWork,
+    ) {
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
+        if let Event::Workspace(W::DocumentClosed(id)) = event {
+            self.remove(id);
+        }
+        let needed = match event {
+            Event::Started | Event::SettingsChanged => true,
+            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
+            Event::Workspace(W::ContentChanged(id) | W::LoadStateChanged(id)) => id == active,
+            _ => false,
+        };
+        if needed {
+            work.request(Work::Outline);
         }
     }
 }
@@ -205,76 +281,5 @@ mod tests {
             parsing.state_for(&document).unwrap().status,
             OutlineStatus::Unavailable
         );
-    }
-}
-
-impl App {
-    pub(super) fn active_outline_state(&self) -> Option<&OutlineState> {
-        self.workspace
-            .active_document()
-            .and_then(|document| self.outline_parsing.state_for(document))
-    }
-
-    pub(super) fn complete_outline_parse(&mut self, result: OutlineParseResult) -> Task<Message> {
-        self.outline_parsing
-            .complete(self.workspace.document(result.document_id), result);
-        Task::none()
-    }
-
-    pub(super) fn toggle_function_list(&mut self) -> Task<Message> {
-        self.menu.close();
-
-        self.is_function_list_visible = !self.is_function_list_visible;
-        self.chrome_animation
-            .function_list
-            .set_visible(self.is_function_list_visible);
-
-        iced::widget::operation::focus(if self.is_function_list_visible {
-            crate::ui::function_list_panel::INPUT_ID
-        } else {
-            crate::ui::editor::EDITOR_ID
-        })
-    }
-
-    pub(super) fn select_function_list_entry(
-        &mut self,
-        position: crate::editor::EditorPosition,
-    ) -> Task<Message> {
-        self.menu.close();
-
-        let Some(document) = self.workspace.active_document_mut() else {
-            return Task::none();
-        };
-
-        let position = document.buffer.clamp_position(position);
-        document.set_main_selection(EditorSelection::new(position, position));
-        document.preferred_vertical_column = None;
-        document.reveal_position(position);
-
-        iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
-    }
-}
-
-impl OutlineParsing {
-    pub(super) fn observe(
-        &mut self,
-        event: super::events::Event,
-        active: DocumentId,
-        work: &mut super::events::PendingWork,
-    ) {
-        use super::events::{Event, Work};
-        use crate::core::workspace::changes::WorkspaceEvent as W;
-        if let Event::Workspace(W::DocumentClosed(id)) = event {
-            self.remove(id);
-        }
-        let needed = match event {
-            Event::Started | Event::SettingsChanged => true,
-            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
-            Event::Workspace(W::ContentChanged(id) | W::LoadStateChanged(id)) => id == active,
-            _ => false,
-        };
-        if needed {
-            work.request(Work::Outline);
-        }
     }
 }

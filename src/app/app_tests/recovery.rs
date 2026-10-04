@@ -151,8 +151,10 @@ fn early_zoom_reset_survives_settings_load_from_every_command_entry() {
             _ => reset_key(&app, event::Status::Ignored),
         };
         let _ = app.update(message);
-        let mut loaded = EditorSettings::default();
-        loaded.zoom = 2.0;
+        let loaded = EditorSettings {
+            zoom: 2.0,
+            ..EditorSettings::default()
+        };
         let _ = app.update(Message::SettingsLoaded(Ok(Some(loaded))));
         assert_eq!(app.settings.zoom, 1.0, "entry {input}");
     }
@@ -162,8 +164,10 @@ fn early_zoom_reset_survives_settings_load_from_every_command_entry() {
 fn captured_shortcut_does_not_override_loaded_preferences() {
     let (mut app, _) = App::new();
     let _ = app.update(reset_key(&app, event::Status::Captured));
-    let mut loaded = EditorSettings::default();
-    loaded.zoom = 2.0;
+    let loaded = EditorSettings {
+        zoom: 2.0,
+        ..EditorSettings::default()
+    };
     let _ = app.update(Message::SettingsLoaded(Ok(Some(loaded))));
     assert_eq!(app.settings.zoom, 2.0);
 }

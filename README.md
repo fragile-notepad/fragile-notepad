@@ -5,7 +5,7 @@
 A desktop text editor for notes and source files. Written in Rust with
 [Iced](https://iced.rs), for Windows and Linux.
 
-[Releases](https://github.com/MemoriesDoll/fragile-notepad/releases)
+[Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
 &nbsp;·&nbsp; [Development](DEVELOPMENT.md)
 &nbsp;·&nbsp; [Architecture](ARCHITECTURE.md)
 
@@ -17,7 +17,7 @@ Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build t
 Patched dependencies are included.
 
 ```sh
-git clone https://github.com/MemoriesDoll/fragile-notepad.git
+git clone https://github.com/fragile-notepad/fragile-notepad.git
 cd fragile-notepad
 python -m pip install -r scripts/requirements-assets.txt
 ```

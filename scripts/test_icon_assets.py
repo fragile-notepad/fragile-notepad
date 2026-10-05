@@ -1,5 +1,6 @@
-"""Focused checks for the path-only icon renderer. Run with unittest discover."""
+"""Checks for icon rendering and source artwork. Run with unittest discover."""
 
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -82,16 +83,33 @@ class IconAssetsTest(unittest.TestCase):
         self.assertEqual(mask.getpixel((11, 7)), DEFAULT_COLOR)
 
     def test_complete_icon_sources_have_visible_unclipped_artwork(self):
+        from PIL import Image
+        import resvg_py
+
         for family in (ROOT / "assets/icons").iterdir():
             if not family.is_dir():
                 continue
             for source in (family / "svg").glob("*.svg"):
                 with self.subTest(icon=source.name, family=family.name):
-                    image = rasterize_svg(source, 22, 8, None)
+                    if family.name == "file-types":
+                        # These SVGs use gradients and nested transforms. Check
+                        # native sizes so downsampling halos are not clipping.
+                        size = 32 if source.stem.endswith("-small") else 64
+                        png = resvg_py.svg_to_bytes(
+                            svg_string=source.read_text(encoding="utf-8"),
+                            width=size * 8,
+                            height=size * 8,
+                        )
+                        image = Image.open(BytesIO(png)).convert("RGBA").resize(
+                            (size, size), Image.Resampling.LANCZOS
+                        )
+                    else:
+                        size = 22
+                        image = rasterize_svg(source, size, 8, None)
                     alpha = image.getchannel("A")
                     self.assertGreater(sum(a > 32 for a in alpha.tobytes()), 10)
-                    border = [alpha.getpixel((i, j)) for k in range(22)
-                              for i, j in ((0, k), (21, k), (k, 0), (k, 21))]
+                    border = [alpha.getpixel((i, j)) for k in range(size)
+                              for i, j in ((0, k), (size - 1, k), (k, 0), (k, size - 1))]
                     self.assertLessEqual(max(border), 32, "visible artwork touches canvas edge")
 
 

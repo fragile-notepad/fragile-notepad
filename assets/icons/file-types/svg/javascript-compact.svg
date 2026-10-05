@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 64 64">
+  <title>JavaScript document: JS</title>
+  <desc>Language symbol in the foreground; original Fragile Notepad bunny as a quiet background watermark. All lettering is vector paths.</desc>
+  <defs>
+    <linearGradient id="doc-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FFFFFF" />
+      <stop offset=".55" stop-color="#FDFDFE" />
+      <stop offset="1" stop-color="#FFFDF2" />
+    </linearGradient>
+    <linearGradient id="doc-edge" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#D4DAE2" />
+      <stop offset="1" stop-color="#ABB8C9" />
+    </linearGradient>
+    <linearGradient id="doc-fold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#FFFDF2" />
+    </linearGradient>
+    <clipPath id="doc-clip">
+      <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" />
+    </clipPath>
+    <filter id="doc-watermark">
+      <feColorMatrix type="saturate" values="0" />
+    </filter>
+    <filter id="doc-shadow" x="-.15" y="-.1" width="1.3" height="1.3">
+      <feGaussianBlur stdDeviation=".8" />
+    </filter>
+  </defs>
+  <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" transform="translate(0 1)" fill="#203957" opacity=".12" filter="url(#doc-shadow)" />
+  <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" fill="url(#doc-paper)" stroke="url(#doc-edge)" stroke-width=".85" stroke-linejoin="round" />
+  <g id="brand-watermark" opacity=".035" clip-path="url(#doc-clip)" filter="url(#doc-watermark)">
+    <svg width="43" height="43" viewBox="6 3 50 59" id="brand-logo" x="10.5" y="5">
+      <title>小尺寸专用 · 兔子抱笔记本</title>
+      <desc>Original-reference vector redraw. All visible artwork consists of editable paths, shapes and gradients. No embedded bitmap.</desc>
+      <defs>
+        <linearGradient id="bg" x1="0" y1="1" x2="0.88" y2="0">
+          <stop stop-color="#18365E" />
+          <stop offset=".55" stop-color="#214C83" />
+          <stop offset="1" stop-color="#396AA1" />
+        </linearGradient>
+        <linearGradient id="bgEdge" x1=".1" y1="1" x2=".8" y2="0">
+          <stop stop-color="#365D88" />
+          <stop offset=".5" stop-color="#426C9A" />
+          <stop offset="1" stop-color="#719AC2" />
+        </linearGradient>
+        <linearGradient id="bgSweep" x1="0" y1="1" x2="1" y2="0">
+          <stop stop-color="#0C2149" stop-opacity=".55" />
+          <stop offset="1" stop-color="#3C83D9" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="fur" cx=".37" cy=".24" r=".8">
+          <stop stop-color="#FFFDF9" />
+          <stop offset=".43" stop-color="#FCF9F4" />
+          <stop offset=".72" stop-color="#E9EBF1" />
+          <stop offset="1" stop-color="#C0CDE0" />
+        </radialGradient>
+        <linearGradient id="furSide" x1="0" y1="1" x2=".85" y2="0">
+          <stop stop-color="#B6CAE9" />
+          <stop offset=".6" stop-color="#E9ECF7" />
+          <stop offset="1" stop-color="#FFFCF6" />
+        </linearGradient>
+        <linearGradient id="earPink" x1="0" y1="1" x2=".8" y2="0">
+          <stop stop-color="#DBA6BD" />
+          <stop offset=".5" stop-color="#F0C1CB" />
+          <stop offset="1" stop-color="#F9DDD9" />
+        </linearGradient>
+        <radialGradient id="earFront" cx=".59" cy=".21" r=".86">
+          <stop stop-color="#FFFDF9" />
+          <stop offset=".43" stop-color="#FBF8F4" />
+          <stop offset=".76" stop-color="#E6E9F4" />
+          <stop offset="1" stop-color="#BBCDE8" />
+        </radialGradient>
+        <linearGradient id="earWell" x1=".1" y1=".2" x2=".9" y2=".8">
+          <stop stop-color="#C8AEC3" />
+          <stop offset=".26" stop-color="#E5BEC9" />
+          <stop offset=".59" stop-color="#F6D2D4" />
+          <stop offset=".8" stop-color="#F9DCD8" />
+          <stop offset="1" stop-color="#EBC7D0" />
+        </linearGradient>
+        <linearGradient id="earRim" x1="0" y1=".2" x2="1" y2=".8">
+          <stop stop-color="#D0CBDD" />
+          <stop offset=".35" stop-color="#E6DCE6" />
+          <stop offset=".68" stop-color="#FAF0EC" />
+          <stop offset="1" stop-color="#FFFAF2" />
+        </linearGradient>
+        <linearGradient id="foldShadow" x1=".2" y1="0" x2=".45" y2="1">
+          <stop stop-color="#778AAC" stop-opacity=".65" />
+          <stop offset=".48" stop-color="#A7AEC8" stop-opacity=".38" />
+          <stop offset="1" stop-color="#C8BFD2" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="earRoot" cx=".5" cy=".8" r=".62">
+          <stop stop-color="#7892BA" stop-opacity=".48" />
+          <stop offset=".48" stop-color="#A0B3D0" stop-opacity=".28" />
+          <stop offset="1" stop-color="#C1CDE2" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="furGlow" cx=".38" cy=".2" r=".86">
+          <stop stop-color="#FFFDF9" stop-opacity=".8" />
+          <stop offset=".46" stop-color="#FFFCF7" stop-opacity=".5" />
+          <stop offset="1" stop-color="#FFF9F3" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="furShade" x1="0" y1="0" x2=".35" y2="1">
+          <stop stop-color="#A9C0E3" stop-opacity="0" />
+          <stop offset=".55" stop-color="#A9C0E3" stop-opacity=".16" />
+          <stop offset="1" stop-color="#8EAED7" stop-opacity=".38" />
+        </linearGradient>
+        <radialGradient id="contact">
+          <stop stop-color="#0B244C" stop-opacity=".48" />
+          <stop offset=".45" stop-color="#0B244C" stop-opacity=".26" />
+          <stop offset="1" stop-color="#0B244C" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="coverSheen" cx=".38" cy=".06" r=".92">
+          <stop stop-color="#B3D9FF" stop-opacity=".09" />
+          <stop offset=".52" stop-color="#B3D9FF" stop-opacity=".025" />
+          <stop offset="1" stop-color="#B3D9FF" stop-opacity="0" />
+        </radialGradient>
+        <pattern id="coverWeave" width="4" height="4" patternUnits="userSpaceOnUse">
+          <path d="M0 1H4M1 0V4" fill="none" stroke="#D6E5F0" stroke-width=".35" opacity=".028" />
+          <path d="M0 3H4M3 0V4" fill="none" stroke="#1A406F" stroke-width=".3" opacity=".025" />
+        </pattern>
+        <linearGradient id="pageOcclusion" x1="0" y1="0" x2="0" y2="1">
+          <stop stop-color="#405D89" stop-opacity=".5" />
+          <stop offset="1" stop-color="#91AACA" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="blush">
+          <stop stop-color="#EABBC0" stop-opacity=".57" />
+          <stop offset=".7" stop-color="#EFCBD0" stop-opacity=".32" />
+          <stop offset="1" stop-color="#F8D8DC" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="eye" x1=".2" y1="0" x2=".7" y2="1">
+          <stop stop-color="#172A49" />
+          <stop offset=".62" stop-color="#203954" />
+          <stop offset="1" stop-color="#355473" />
+        </linearGradient>
+        <linearGradient id="cover" x1=".85" y1="1" x2=".12" y2="0">
+          <stop stop-color="#315DA2" />
+          <stop offset=".45" stop-color="#447BB9" />
+          <stop offset="1" stop-color="#6498D3" />
+        </linearGradient>
+        <linearGradient id="coverInset" x1=".85" y1="1" x2=".12" y2="0">
+          <stop stop-color="#315996" />
+          <stop offset=".58" stop-color="#467DB8" />
+          <stop offset="1" stop-color="#6494CB" />
+        </linearGradient>
+        <linearGradient id="coverRim" x1="1" y1="1" x2=".1" y2="0">
+          <stop stop-color="#315489" />
+          <stop offset=".5" stop-color="#5B8BC0" />
+          <stop offset="1" stop-color="#B0CBE6" />
+        </linearGradient>
+        <linearGradient id="pages" x1="0" y1="0" x2=".1" y2="1">
+          <stop stop-color="#FFFCF0" />
+          <stop offset=".6" stop-color="#E3E8F0" />
+          <stop offset="1" stop-color="#BDCDE3" />
+        </linearGradient>
+        <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+          <stop stop-color="#193869" />
+          <stop offset=".15" stop-color="#2F568C" />
+          <stop offset=".5" stop-color="#284C80" />
+          <stop offset=".85" stop-color="#203E6B" />
+          <stop offset="1" stop-color="#112B55" />
+        </linearGradient>
+        <linearGradient id="metal" x1="0" y1="0" x2=".7" y2="1">
+          <stop stop-color="#DCE5EB" />
+          <stop offset=".28" stop-color="#A4B6C8" />
+          <stop offset=".48" stop-color="#D4DEE6" />
+          <stop offset=".76" stop-color="#8B9DAF" />
+          <stop offset="1" stop-color="#536D89" />
+        </linearGradient>
+        <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#F8FBFF" />
+          <stop offset=".65" stop-color="#DCEAFF" />
+          <stop offset="1" stop-color="#ADC8EE" />
+        </linearGradient>
+        <linearGradient id="tab" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#D9F3FF" />
+          <stop offset="1" stop-color="#86C3F0" />
+        </linearGradient>
+        <linearGradient id="logo" x1="0" y1="1" x2="1" y2="0">
+          <stop stop-color="#A7CEF8" />
+          <stop offset="1" stop-color="#E7F7FF" />
+        </linearGradient>
+      </defs>
+      <g id="small-rabbit" inkscape:groupmode="layer" inkscape:label="02 | 兔子">
+        <path d="M31 22C27 17 33 5 40 5C48 4 47 10 43 15L37 23Z" fill="url(#fur)" />
+        <path d="M34 20C34 16 39 8 42 9C45 10 40 16 37 21Z" fill="url(#earPink)" />
+        <path d="M26 23C27 16 22 14 18 17C12 20 8 27 11 30C15 33 19 24 21 24Z" fill="url(#fur)" />
+        <path d="M20 25C21 22 21 20 20 19C23 20 24 22 24 23Z" fill="url(#earPink)" />
+        <path d="M19 35C17 27 23 20 30 20C40 18 46 23 46 31L44 37Z" fill="url(#fur)" />
+        <ellipse cx="27" cy="28.5" rx="1.7" ry="2.4" fill="#192F58" />
+        <ellipse cx="38" cy="26.5" rx="1.7" ry="2.4" fill="#192F58" />
+        <circle cx="27.5" cy="27.7" r=".55" fill="white" />
+        <circle cx="38.5" cy="25.7" r=".55" fill="white" />
+        <path d="M19 47C12 45 13 56 20 55Z" fill="url(#fur)" />
+      </g>
+      <g id="small-book" inkscape:groupmode="layer" inkscape:label="03 | 笔记本" transform="rotate(-10 35 43)">
+        <rect x="22" y="31" width="27" height="27" rx="2.5" fill="#CFDFF2" />
+        <rect x="21" y="29" width="29" height="27" rx="2.5" fill="url(#cover)" stroke="#B6DBFF" stroke-width=".7" />
+        <path d="M45 29V58" stroke="#244474" stroke-width="3" />
+        <path d="M23 34C18 32 17 37 21 37M23 43C18 41 17 46 21 46M23 51C18 49 17 54 21 54" fill="none" stroke="#D5E8FA" stroke-width="1.5" stroke-linecap="round" />
+        <path d="M32 39L29 42L32 45M39 39L42 42L39 45M37 38L34 47" stroke="#D7F0FF" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+      <g id="small-paws" inkscape:groupmode="layer" inkscape:label="04 | 抱本双爪">
+        <ellipse cx="20" cy="40" rx="4.3" ry="5" transform="rotate(32 20 40)" fill="url(#fur)" />
+        <ellipse cx="48" cy="37.5" rx="4.3" ry="4.7" fill="url(#fur)" />
+      </g>
+    </svg>
+  </g>
+  <path d="M45.6 5 L55 14.4 H48.2 C46.764 14.4 45.6 13.236 45.6 11.8 Z" fill="#657F9F" opacity=".035" />
+  <path d="M46 4.3 V11.8 C46 13.015 46.985 14 48.2 14 H55.7" fill="url(#doc-fold)" stroke="#CED5DE" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round" />
+  <g id="foreground-icon">
+    <rect id="language-badge" x="13" y="18" width="38" height="38" rx="4.5" fill="#F7DF1E" />
+    <path id="badge-lettering" fill="#1F2328" transform="translate(21.0460 51.2835) scale(0.013532 -0.013532)" d="M712 514Q712 392 682.0 294.0Q652 196 592.5 127.0Q533 58 444.0 21.0Q355 -16 237 -16Q183 -16 131.0 -9.5Q79 -3 22 11Q25 51 29.0 91.0Q33 131 36 171Q39 193 53.5 206.5Q68 220 95 220Q112 220 139.5 213.0Q167 206 209 206Q266 206 310.0 222.5Q354 239 383.5 275.0Q413 311 428.0 368.5Q443 426 443 508V1446H712ZM1825 1183Q1813 1162 1799.5 1152.5Q1786 1143 1766 1143Q1745 1143 1720.5 1158.5Q1696 1174 1662.0 1193.0Q1628 1212 1582.5 1227.5Q1537 1243 1475 1243Q1419 1243 1377.0 1229.5Q1335 1216 1306.5 1192.0Q1278 1168 1264.0 1134.5Q1250 1101 1250 1061Q1250 1010 1278.5 976.0Q1307 942 1354.0 918.0Q1401 894 1461.0 875.0Q1521 856 1584.0 834.5Q1647 813 1707.0 784.5Q1767 756 1814.0 712.5Q1861 669 1889.5 606.0Q1918 543 1918 453Q1918 355 1884.5 269.5Q1851 184 1786.5 120.5Q1722 57 1629.0 20.5Q1536 -16 1416 -16Q1347 -16 1280.0 -2.5Q1213 11 1151.5 36.0Q1090 61 1036.0 96.0Q982 131 940 174L1019 303Q1029 317 1045.0 326.5Q1061 336 1079 336Q1104 336 1133.0 315.5Q1162 295 1202.0 270.0Q1242 245 1295.5 224.5Q1349 204 1424 204Q1539 204 1602.0 258.5Q1665 313 1665 415Q1665 472 1636.5 508.0Q1608 544 1561.0 568.5Q1514 593 1454.0 610.0Q1394 627 1332.0 647.0Q1270 667 1210.0 695.0Q1150 723 1103.0 768.0Q1056 813 1027.5 880.5Q999 948 999 1047Q999 1126 1030.5 1201.0Q1062 1276 1122.0 1334.0Q1182 1392 1270.0 1427.0Q1358 1462 1472 1462Q1600 1462 1708.0 1422.0Q1816 1382 1892 1310Z" />
+  </g>
+</svg>

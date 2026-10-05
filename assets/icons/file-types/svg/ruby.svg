@@ -1,0 +1,433 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 64 64">
+  <title>Ruby document: RB</title>
+  <desc>Language symbol in the foreground; original Fragile Notepad bunny as a quiet background watermark. All lettering is vector paths.</desc>
+  <metadata>The MIT License (MIT)
+Copyright (c) 2025 Material Extensions
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Language symbol adapted from Material Icon Theme: ruby.svg. See symbols/README.md for source revision.</metadata>
+  <defs>
+    <linearGradient id="doc-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FFFFFF" />
+      <stop offset=".55" stop-color="#FDFDFE" />
+      <stop offset="1" stop-color="#FCF3F2" />
+    </linearGradient>
+    <linearGradient id="doc-edge" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#D4DAE2" />
+      <stop offset="1" stop-color="#ABB8C9" />
+    </linearGradient>
+    <linearGradient id="doc-fold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#FCF3F2" />
+    </linearGradient>
+    <clipPath id="doc-clip">
+      <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" />
+    </clipPath>
+    <filter id="doc-watermark">
+      <feColorMatrix type="saturate" values="0" />
+    </filter>
+    <filter id="doc-shadow" x="-.15" y="-.1" width="1.3" height="1.3">
+      <feGaussianBlur stdDeviation=".8" />
+    </filter>
+  </defs>
+  <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" transform="translate(0 1)" fill="#203957" opacity=".12" filter="url(#doc-shadow)" />
+  <path d="M12.5 4 H45.648 C45.873 4 46.09 4.09 46.25 4.25 L55.75 13.75 C55.91 13.91 56 14.127 56 14.352 V55.5 C56 57.9853 53.9853 60 51.5 60 H12.5 C10.0147 60 8 57.9853 8 55.5 V8.5 C8 6.0147 10.0147 4 12.5 4 Z" fill="url(#doc-paper)" stroke="url(#doc-edge)" stroke-width=".85" stroke-linejoin="round" />
+  <g id="brand-watermark" opacity=".035" clip-path="url(#doc-clip)" filter="url(#doc-watermark)">
+    <svg width="43" height="43" viewBox="100 95 800 825" id="brand-logo" x="10.5" y="6">
+      <title>蓝色毛绒兔子抱笔记本 · 分层矢量母版</title>
+      <desc>Original-reference vector redraw. All visible artwork consists of editable paths, shapes and gradients. No embedded bitmap.</desc>
+      <defs>
+        <linearGradient id="bg" x1="0" y1="1" x2="0.88" y2="0">
+          <stop stop-color="#18365E" />
+          <stop offset=".55" stop-color="#214C83" />
+          <stop offset="1" stop-color="#396AA1" />
+        </linearGradient>
+        <linearGradient id="bgEdge" x1=".1" y1="1" x2=".8" y2="0">
+          <stop stop-color="#365D88" />
+          <stop offset=".5" stop-color="#426C9A" />
+          <stop offset="1" stop-color="#719AC2" />
+        </linearGradient>
+        <linearGradient id="bgSweep" x1="0" y1="1" x2="1" y2="0">
+          <stop stop-color="#0C2149" stop-opacity=".55" />
+          <stop offset="1" stop-color="#3C83D9" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="fur" cx=".37" cy=".24" r=".8">
+          <stop stop-color="#FFFDF9" />
+          <stop offset=".43" stop-color="#FCF9F4" />
+          <stop offset=".72" stop-color="#E9EBF1" />
+          <stop offset="1" stop-color="#C0CDE0" />
+        </radialGradient>
+        <linearGradient id="furSide" x1="0" y1="1" x2=".85" y2="0">
+          <stop stop-color="#B6CAE9" />
+          <stop offset=".6" stop-color="#E9ECF7" />
+          <stop offset="1" stop-color="#FFFCF6" />
+        </linearGradient>
+        <linearGradient id="earPink" x1="0" y1="1" x2=".8" y2="0">
+          <stop stop-color="#DBA6BD" />
+          <stop offset=".5" stop-color="#F0C1CB" />
+          <stop offset="1" stop-color="#F9DDD9" />
+        </linearGradient>
+        <radialGradient id="earFront" cx=".59" cy=".21" r=".86">
+          <stop stop-color="#FFFDF9" />
+          <stop offset=".43" stop-color="#FBF8F4" />
+          <stop offset=".76" stop-color="#E6E9F4" />
+          <stop offset="1" stop-color="#BBCDE8" />
+        </radialGradient>
+        <linearGradient id="earWell" x1=".1" y1=".2" x2=".9" y2=".8">
+          <stop stop-color="#C8AEC3" />
+          <stop offset=".26" stop-color="#E5BEC9" />
+          <stop offset=".59" stop-color="#F6D2D4" />
+          <stop offset=".8" stop-color="#F9DCD8" />
+          <stop offset="1" stop-color="#EBC7D0" />
+        </linearGradient>
+        <linearGradient id="earRim" x1="0" y1=".2" x2="1" y2=".8">
+          <stop stop-color="#D0CBDD" />
+          <stop offset=".35" stop-color="#E6DCE6" />
+          <stop offset=".68" stop-color="#FAF0EC" />
+          <stop offset="1" stop-color="#FFFAF2" />
+        </linearGradient>
+        <linearGradient id="foldShadow" x1=".2" y1="0" x2=".45" y2="1">
+          <stop stop-color="#778AAC" stop-opacity=".65" />
+          <stop offset=".48" stop-color="#A7AEC8" stop-opacity=".38" />
+          <stop offset="1" stop-color="#C8BFD2" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="earRoot" cx=".5" cy=".8" r=".62">
+          <stop stop-color="#7892BA" stop-opacity=".48" />
+          <stop offset=".48" stop-color="#A0B3D0" stop-opacity=".28" />
+          <stop offset="1" stop-color="#C1CDE2" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="furGlow" cx=".38" cy=".2" r=".86">
+          <stop stop-color="#FFFDF9" stop-opacity=".8" />
+          <stop offset=".46" stop-color="#FFFCF7" stop-opacity=".5" />
+          <stop offset="1" stop-color="#FFF9F3" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="furShade" x1="0" y1="0" x2=".35" y2="1">
+          <stop stop-color="#A9C0E3" stop-opacity="0" />
+          <stop offset=".55" stop-color="#A9C0E3" stop-opacity=".16" />
+          <stop offset="1" stop-color="#8EAED7" stop-opacity=".38" />
+        </linearGradient>
+        <radialGradient id="contact">
+          <stop stop-color="#0B244C" stop-opacity=".48" />
+          <stop offset=".45" stop-color="#0B244C" stop-opacity=".26" />
+          <stop offset="1" stop-color="#0B244C" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="coverSheen" cx=".38" cy=".06" r=".92">
+          <stop stop-color="#B3D9FF" stop-opacity=".09" />
+          <stop offset=".52" stop-color="#B3D9FF" stop-opacity=".025" />
+          <stop offset="1" stop-color="#B3D9FF" stop-opacity="0" />
+        </radialGradient>
+        <pattern id="coverWeave" width="4" height="4" patternUnits="userSpaceOnUse">
+          <path d="M0 1H4M1 0V4" fill="none" stroke="#D6E5F0" stroke-width=".35" opacity=".028" />
+          <path d="M0 3H4M3 0V4" fill="none" stroke="#1A406F" stroke-width=".3" opacity=".025" />
+        </pattern>
+        <linearGradient id="pageOcclusion" x1="0" y1="0" x2="0" y2="1">
+          <stop stop-color="#405D89" stop-opacity=".5" />
+          <stop offset="1" stop-color="#91AACA" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id="blush">
+          <stop stop-color="#EABBC0" stop-opacity=".57" />
+          <stop offset=".7" stop-color="#EFCBD0" stop-opacity=".32" />
+          <stop offset="1" stop-color="#F8D8DC" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="eye" x1=".2" y1="0" x2=".7" y2="1">
+          <stop stop-color="#172A49" />
+          <stop offset=".62" stop-color="#203954" />
+          <stop offset="1" stop-color="#355473" />
+        </linearGradient>
+        <linearGradient id="cover" x1=".85" y1="1" x2=".12" y2="0">
+          <stop stop-color="#315DA2" />
+          <stop offset=".45" stop-color="#447BB9" />
+          <stop offset="1" stop-color="#6498D3" />
+        </linearGradient>
+        <linearGradient id="coverInset" x1=".85" y1="1" x2=".12" y2="0">
+          <stop stop-color="#315996" />
+          <stop offset=".58" stop-color="#467DB8" />
+          <stop offset="1" stop-color="#6494CB" />
+        </linearGradient>
+        <linearGradient id="coverRim" x1="1" y1="1" x2=".1" y2="0">
+          <stop stop-color="#315489" />
+          <stop offset=".5" stop-color="#5B8BC0" />
+          <stop offset="1" stop-color="#B0CBE6" />
+        </linearGradient>
+        <linearGradient id="pages" x1="0" y1="0" x2=".1" y2="1">
+          <stop stop-color="#FFFCF0" />
+          <stop offset=".6" stop-color="#E3E8F0" />
+          <stop offset="1" stop-color="#BDCDE3" />
+        </linearGradient>
+        <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+          <stop stop-color="#193869" />
+          <stop offset=".15" stop-color="#2F568C" />
+          <stop offset=".5" stop-color="#284C80" />
+          <stop offset=".85" stop-color="#203E6B" />
+          <stop offset="1" stop-color="#112B55" />
+        </linearGradient>
+        <linearGradient id="metal" x1="0" y1="0" x2=".7" y2="1">
+          <stop stop-color="#DCE5EB" />
+          <stop offset=".28" stop-color="#A4B6C8" />
+          <stop offset=".48" stop-color="#D4DEE6" />
+          <stop offset=".76" stop-color="#8B9DAF" />
+          <stop offset="1" stop-color="#536D89" />
+        </linearGradient>
+        <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#F8FBFF" />
+          <stop offset=".65" stop-color="#DCEAFF" />
+          <stop offset="1" stop-color="#ADC8EE" />
+        </linearGradient>
+        <linearGradient id="tab" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#D9F3FF" />
+          <stop offset="1" stop-color="#86C3F0" />
+        </linearGradient>
+        <linearGradient id="logo" x1="0" y1="1" x2="1" y2="0">
+          <stop stop-color="#A7CEF8" />
+          <stop offset="1" stop-color="#E7F7FF" />
+        </linearGradient>
+      </defs>
+      <g id="loose_paper" inkscape:groupmode="layer" inkscape:label="04 | 侧边便笺">
+        <g transform="rotate(-28 234 620)">
+          <path d="M174 553Q174 549 179 549H288V727H178Q174 727 174 722Z" fill="#102A57" opacity=".16" transform="translate(4 7)" />
+          <path d="M174 548Q174 544 179 544H286V721H178Q174 721 174 716Z" fill="url(#paper)" stroke="#F0F7FF" stroke-width="2" />
+          <path d="M195 571H260M195 593H264M195 615H257M195 637H262M195 659H239" fill="none" stroke="#89ABE0" stroke-width="7" stroke-linecap="round" opacity=".57" />
+          <path d="M278 545V720" stroke="#AFC9EE" stroke-width="1.5" />
+        </g>
+        <g transform="rotate(22 790 742)">
+          <path d="M746 688H835V824H746Z" fill="url(#paper)" stroke="#EDF6FF" stroke-width="2" />
+          <path d="M765 711H819M765 731H819M765 751H811M765 771H801" stroke="#A7C1E9" stroke-width="6" stroke-linecap="round" />
+        </g>
+      </g>
+      <g id="tail_body" inkscape:groupmode="layer" inkscape:label="05 | 身体与绒尾">
+        <path d="M363 553C314 635 311 759 366 846C404 898 530 909 606 862C667 823 679 682 626 596Z" fill="url(#furSide)" />
+        <path d="M337 739C317 719 297 720 282 726L289 719L271 728L276 722C252 729 235 742 226 759L226 750C212 768 208 785 212 806L207 798C209 821 221 844 240 855L234 855C255 872 284 875 307 864C334 852 352 828 351 797C351 775 346 755 337 739Z" fill="url(#fur)" />
+        <path d="M229 757C239 746 259 737 278 738L268 745L279 742C257 754 258 768 244 777L253 775C239 788 237 807 234 819C223 805 220 780 229 757Z" fill="#FFFDF7" />
+        <path d="M223 806C231 831 253 842 276 840L269 845C295 845 321 831 338 808C334 838 308 865 276 867C252 868 233 851 223 831Z" fill="#B9CCEB" opacity=".4" />
+      </g>
+      <g id="hind_paw" inkscape:groupmode="layer" inkscape:label="06 | 后脚与粉色肉垫">
+        <g transform="rotate(-24 316 855)">
+          <path d="M263 850C263 814 285 794 312 798C345 802 366 832 365 866C364 899 344 919 316 916C285 913 263 883 263 850Z" fill="url(#fur)" stroke="#B9CBE4" stroke-width="2" />
+          <path d="M278 849C276 823 291 808 310 812C331 816 347 838 348 864C348 888 338 902 319 901C296 900 282 876 278 849Z" fill="#E8E8F6" />
+          <ellipse cx="314" cy="872" rx="15" ry="21" fill="url(#earPink)" />
+          <ellipse cx="294" cy="841" rx="7" ry="12" fill="#EFC4D0" transform="rotate(-9 294 841)" />
+          <ellipse cx="316" cy="832" rx="8" ry="12" fill="#F0C4CE" transform="rotate(-12 316 832)" />
+          <ellipse cx="337" cy="849" rx="6.5" ry="10" fill="#E6B7C9" transform="rotate(-15 337 849)" />
+          <path d="M277 830C282 813 295 807 309 811" fill="none" stroke="#FFFDF7" stroke-width="4" stroke-linecap="round" />
+        </g>
+      </g>
+      <g id="upright_ear" inkscape:groupmode="layer" inkscape:label="07 | 立耳与耳内绒毛">
+        <defs>
+          <clipPath id="uprightClip">
+            <path d="M487 286C465 259 480 215 500 179L491 188C510 151 541 121 572 105L564 107C601 82 648 67 683 74L674 69C703 71 726 88 730 111L735 106C742 137 724 165 703 190L710 187C684 213 644 232 621 259L627 256C607 283 593 303 565 318Z" />
+          </clipPath>
+        </defs>
+        <path d="M487 286C465 259 480 215 500 179L491 188C510 151 541 121 572 105L564 107C601 82 648 67 683 74L674 69C703 71 726 88 730 111L735 106C742 137 724 165 703 190L710 187C684 213 644 232 621 259L627 256C607 283 593 303 565 318Z" fill="url(#furSide)" />
+        <path d="M513 283C497 253 512 207 538 172C565 132 613 92 660 86C689 82 713 91 718 108C728 144 690 180 659 203C617 233 600 274 579 298Z" fill="url(#earFront)" />
+        <path d="M546 283C536 263 548 226 570 194C594 160 625 130 648 134C672 138 671 160 658 185C640 217 611 242 596 267C585 287 563 298 546 283Z" fill="url(#earRim)" />
+        <path d="M550 274C548 255 560 226 581 198C601 170 625 146 640 144C657 141 658 159 648 180C633 211 607 239 591 263C579 281 561 289 550 274Z" fill="url(#earWell)" />
+        <path d="M552 265C553 240 575 204 598 181C613 165 627 153 638 151" fill="none" stroke="#BD9FB8" stroke-width="2" stroke-linecap="round" opacity=".23" />
+        <path d="M654 158C654 178 635 203 619 221" fill="none" stroke="#FFF1E7" stroke-width="2.5" stroke-linecap="round" opacity=".57" />
+        <ellipse cx="543" cy="287" rx="69" ry="41" fill="url(#earRoot)" clip-path="url(#uprightClip)" />
+        <path d="M516 257Q525 262 528 269L534 263L533 276L541 271L539 283L547 278L545 290" fill="#F6F3F2" opacity=".77" />
+        <path d="M637 224L627 231L630 224L617 237L619 230L607 246" fill="#F9F6F5" opacity=".78" />
+        <path d="M499 218C509 190 523 173 543 154M678 88C694 90 705 95 713 104M511 242L518 224" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" opacity=".35" />
+      </g>
+      <g id="floppy_ear" inkscape:groupmode="layer" inkscape:label="08 | 垂耳与折叠体积">
+        <path d="M393 326C414 286 397 246 369 231L378 234C352 216 318 214 290 223L295 216C266 221 238 238 222 253L222 247C197 268 177 294 158 322L162 310C139 340 120 378 121 405L117 397C115 429 133 452 158 456C190 462 218 442 238 418L235 427C261 403 277 373 295 361C327 340 369 354 393 326Z" fill="url(#furSide)" />
+        <path d="M241 257C270 231 306 222 340 230C371 238 391 257 393 280C390 309 364 341 330 355C301 367 283 381 271 393C280 366 291 345 294 322C297 294 278 271 241 257Z" fill="url(#fur)" />
+        <path d="M294 291C310 306 333 315 357 313C348 333 323 349 288 366C297 343 300 315 294 291Z" fill="url(#earWell)" />
+        <path d="M293 289C306 305 329 314 359 312C357 324 339 341 319 347C306 338 299 318 293 289Z" fill="url(#foldShadow)" />
+        <path d="M289 281C303 300 326 310 353 309" fill="none" stroke="#FFFAF4" stroke-width="2.4" stroke-linecap="round" opacity=".75" />
+        <path d="M242 259C268 237 291 233 317 237C298 245 282 260 280 280L278 278C273 295 277 307 273 321L271 317C267 338 256 352 246 365L249 355C238 371 232 382 220 391L222 385C210 398 198 407 186 413C211 375 228 328 225 301C224 281 232 265 242 259Z" fill="url(#furGlow)" />
+        <path d="M135 377C129 402 133 425 151 435M171 329C183 306 199 287 216 274M146 401L148 388" fill="none" stroke="#F4F5FC" stroke-width="1.7" stroke-linecap="round" opacity=".44" />
+      </g>
+      <g id="head" inkscape:groupmode="layer" inkscape:label="09 | 毛绒头部">
+        <defs>
+          <clipPath id="headClip">
+            <path d="M301 477C285 461 286 438 292 418L285 427C289 399 300 376 318 355L307 361C324 336 346 317 370 307L360 308C387 289 415 280 442 278L434 273C465 268 499 269 524 275L521 269C552 276 575 287 596 302L594 295C619 314 638 330 651 351L650 342C670 365 679 389 682 411L688 405C695 432 688 463 674 480C633 526 355 537 301 477Z" />
+          </clipPath>
+        </defs>
+        <path d="M301 477C285 461 286 438 292 418L285 427C289 399 300 376 318 355L307 361C324 336 346 317 370 307L360 308C387 289 415 280 442 278L434 273C465 268 499 269 524 275L521 269C552 276 575 287 596 302L594 295C619 314 638 330 651 351L650 342C670 365 679 389 682 411L688 405C695 432 688 463 674 480C633 526 355 537 301 477Z" fill="url(#fur)" />
+        <g clip-path="url(#headClip)">
+          <path d="M309 437C313 382 347 320 412 297C364 337 349 384 339 422L346 415L343 435L351 430L350 449C436 477 593 460 660 415C650 457 620 487 580 505H319Z" fill="url(#furShade)" opacity=".56" />
+          <path d="M329 383C351 328 399 291 453 285L439 292C489 278 540 290 575 310L561 307C611 334 640 366 651 395C606 374 566 357 507 365C439 374 377 400 327 427L332 411L326 416L328 400L324 403Z" fill="url(#furGlow)" />
+          <ellipse cx="391" cy="438" rx="43" ry="28" fill="url(#blush)" transform="rotate(-10 391 438)" />
+          <ellipse cx="624" cy="399" rx="39" ry="27" fill="url(#blush)" transform="rotate(-10 624 399)" />
+        </g>
+        <g fill="none" stroke="#FFFEFB" stroke-width="2.4" stroke-linecap="round" opacity=".84">
+          <path d="M346 347L333 365M363 329L350 342M395 299L378 310M309 415L306 430M600 319L614 333M663 384L670 402" />
+        </g>
+      </g>
+      <g id="face" inkscape:groupmode="layer" inkscape:label="10 | 眼睛与表情">
+        <g transform="rotate(-14 437 401)">
+          <ellipse cx="437" cy="403" rx="20" ry="29" fill="#D7D5DC" opacity=".32" />
+          <ellipse cx="437" cy="400" rx="19" ry="28" fill="url(#eye)" />
+          <ellipse cx="438" cy="417" rx="11" ry="6" fill="#7993AC" opacity=".2" />
+          <ellipse cx="433" cy="385" rx="4.1" ry="5.7" fill="#FFFDF7" />
+        </g>
+        <g transform="rotate(-16 583 373)">
+          <ellipse cx="583" cy="375" rx="19" ry="28" fill="#D7D5DC" opacity=".25" />
+          <ellipse cx="583" cy="373" rx="18" ry="27" fill="url(#eye)" />
+          <ellipse cx="584" cy="389" rx="10" ry="5.5" fill="#7993AC" opacity=".17" />
+          <ellipse cx="579" cy="359" rx="3.8" ry="5.2" fill="#FFFDF7" />
+        </g>
+      </g>
+      <g id="notebook_pages" inkscape:groupmode="layer" inkscape:label="11 | 笔记本后封与书页">
+        <g transform="rotate(-10 550 661)">
+          <rect x="342" y="451" width="430" height="454" rx="25" fill="#0C2149" opacity=".25" transform="translate(6 8)" />
+          <path d="M363 450H745Q770 450 770 475V880Q770 906 745 906H362Q339 906 339 883V477Q339 450 363 450Z" fill="#224E93" stroke="#173D78" stroke-width="3" />
+          <path d="M366 443H740Q762 443 762 465V871Q762 893 740 893H365Q349 893 349 879V460Q349 443 366 443Z" fill="url(#pages)" stroke="#A9BEDC" stroke-width="1.5" />
+          <path d="M354 871H740Q755 871 759 857V875Q750 881 739 881H354Z" fill="url(#pageOcclusion)" />
+          <path d="M359 867H743M358 874H743M357 881H738" fill="none" stroke="#A2B5CD" stroke-width="1.4" opacity=".65" />
+          <path d="M360 867L360 889" stroke="#839BBC" stroke-width="1.4" />
+          <path d="M365 901H741Q762 901 766 883" fill="none" stroke="#4888D0" stroke-width="2" />
+        </g>
+      </g>
+      <g id="tabs" inkscape:groupmode="layer" inkscape:label="12 | 笔记本索引标签">
+        <g transform="rotate(-10 550 661)">
+          <path d="M749 466H795Q799 466 799 471V508Q799 513 795 513H749Z" fill="url(#tab)" stroke="#E1F5FF" stroke-width="2" />
+          <path d="M750 530H817Q821 530 821 535V575Q821 580 817 580H750Z" fill="url(#paper)" stroke="#EAF5FF" stroke-width="2" />
+          <path d="M786 469V508M809 533V576" stroke="#A2CEF2" stroke-width="2" />
+        </g>
+      </g>
+      <g id="notebook_cover" inkscape:groupmode="layer" inkscape:label="13 | 蓝色封面与缝线">
+        <g transform="rotate(-10 550 661)">
+          <rect x="334" y="423" width="432" height="457" rx="27" fill="#1E4584" />
+          <rect x="333" y="420" width="432" height="453" rx="26" fill="url(#cover)" stroke="#244E8D" stroke-width="3" />
+          <path d="M362 423H736Q762 423 762 450V844Q762 869 736 869H362" fill="none" stroke="url(#coverRim)" stroke-width="3" />
+          <path d="M377 435H733Q751 435 751 453V837Q751 854 733 854H377Z" fill="url(#coverInset)" opacity=".42" />
+          <path d="M377 435H733Q751 435 751 453V837Q751 854 733 854H377Z" fill="url(#coverSheen)" />
+          <path d="M377 435H733Q751 435 751 453V837Q751 854 733 854H377Z" fill="url(#coverWeave)" />
+          <path d="M382 436H731Q750 436 750 455V835Q750 854 731 854H382Z" fill="none" stroke="#BAD1E4" stroke-width="1.35" stroke-dasharray="5 5" opacity=".5" />
+          <path d="M373 424V868" stroke="#1E4B94" stroke-width="2" opacity=".75" />
+          <path d="M377 425V868" stroke="#8DC3F9" stroke-width="1.3" opacity=".32" />
+          <path d="M355 426Q337 432 337 453V844Q337 862 350 867" fill="none" stroke="#7CB3EB" stroke-width="2" opacity=".6" />
+          <path d="M391 443H633" stroke="#C6E5FF" stroke-width="2" stroke-linecap="round" opacity=".2" />
+        </g>
+      </g>
+      <g id="spiral" inkscape:groupmode="layer" inkscape:label="14 | 金属线圈与装订孔">
+        <g transform="rotate(-10 550 661)">
+          <ellipse cx="352" cy="461" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="460" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 459C313 444 288 464 291 484C292 496 309 501 335 498" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 458C316 444 291 464 294 484C295 493 310 498 334 496" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 455C329 449 311 453 301 465" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="508" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="507" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 506C313 491 288 511 291 531C292 543 309 548 335 545" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 505C316 491 291 511 294 531C295 540 310 545 334 543" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 502C329 496 311 500 301 512" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="555" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="554" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 553C313 538 288 558 291 578C292 590 309 595 335 592" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 552C316 538 291 558 294 578C295 587 310 592 334 590" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 549C329 543 311 547 301 559" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="649" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="648" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 647C313 632 288 652 291 672C292 684 309 689 335 686" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 646C316 632 291 652 294 672C295 681 310 686 334 684" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 643C329 637 311 641 301 653" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="696" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="695" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 694C313 679 288 699 291 719C292 731 309 736 335 733" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 693C316 679 291 699 294 719C295 728 310 733 334 731" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 690C329 684 311 688 301 700" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="743" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="742" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 741C313 726 288 746 291 766C292 778 309 783 335 780" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 740C316 726 291 746 294 766C295 775 310 780 334 778" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 737C329 731 311 735 301 747" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="790" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="789" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 788C313 773 288 793 291 813C292 825 309 830 335 827" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 787C316 773 291 793 294 813C295 822 310 827 334 825" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 784C329 778 311 782 301 794" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+          <ellipse cx="352" cy="837" rx="9" ry="11" fill="#183762" />
+          <ellipse cx="352" cy="836" rx="5" ry="7" fill="#101E3C" />
+          <path d="M350 835C313 820 288 840 291 860C292 872 309 877 335 874" fill="none" stroke="#183257" stroke-width="12" stroke-linecap="round" />
+          <path d="M350 834C316 820 291 840 294 860C295 869 310 874 334 872" fill="none" stroke="url(#metal)" stroke-width="8.5" stroke-linecap="round" />
+          <path d="M347 831C329 825 311 829 301 841" fill="none" stroke="#EFF4F5" stroke-width="1.25" stroke-linecap="round" opacity=".45" />
+        </g>
+      </g>
+      <g id="cover_symbol" inkscape:groupmode="layer" inkscape:label="15 | 封面代码符号">
+        <g transform="rotate(-10 550 661)">
+          <g fill="none" stroke="#CBDFED" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M503 641L475 668L503 695M603 641L631 668L603 695M573 619L537 716" />
+          </g>
+        </g>
+      </g>
+      <g id="elastic" inkscape:groupmode="layer" inkscape:label="16 | 弹力绑带及织纹">
+        <g transform="rotate(-10 550 661)">
+          <path d="M686 421H729V886L723 901H685Z" fill="#0D2954" opacity=".2" transform="translate(5 2)" />
+          <path d="M689 421Q687 418 693 418H719Q727 418 727 425V881L721 900H683L689 880Z" fill="url(#band)" stroke="#18335E" stroke-width="1.5" />
+          <path d="M694 424V892" stroke="#7597C3" stroke-width="1" opacity=".52" />
+          <path d="M698 424V892" stroke="#16355E" stroke-width="1" opacity=".52" />
+          <path d="M702 424V892" stroke="#7597C3" stroke-width="1" opacity=".52" />
+          <path d="M706 424V892" stroke="#16355E" stroke-width="1" opacity=".52" />
+          <path d="M710 424V892" stroke="#7597C3" stroke-width="1" opacity=".52" />
+          <path d="M714 424V892" stroke="#16355E" stroke-width="1" opacity=".52" />
+          <path d="M718 424V892" stroke="#7597C3" stroke-width="1" opacity=".52" />
+          <path d="M722 424V892" stroke="#16355E" stroke-width="1" opacity=".52" />
+          <path d="M692 423V878L687 896" fill="none" stroke="#90B2DB" stroke-width="1.5" opacity=".42" />
+          <path d="M688 880H725" stroke="#142F59" stroke-width="2" opacity=".65" />
+        </g>
+      </g>
+      <g id="front_paws" inkscape:groupmode="layer" inkscape:label="17 | 抱本双爪与接触阴影">
+        <ellipse cx="319" cy="632" rx="66" ry="57" fill="url(#contact)" transform="rotate(-25 319 632)" opacity=".72" />
+        <ellipse cx="753" cy="608" rx="67" ry="51" fill="url(#contact)" opacity=".78" />
+        <path d="M323 553C296 552 271 566 260 587L261 579C246 597 245 620 249 639L245 634C249 657 261 673 280 677C302 682 322 667 333 651L332 658C350 645 365 626 370 607L370 614C376 593 363 573 348 564L353 564C343 556 333 553 323 553Z" fill="#153A74" opacity=".12" transform="translate(3 6)" />
+        <path d="M744 527C721 528 700 542 693 559L692 552C682 570 685 593 695 607L690 604C703 626 728 638 752 636L747 640C771 641 794 625 801 605L802 613C812 591 805 564 792 549L794 557C780 537 764 527 744 527Z" fill="#153A74" opacity=".13" transform="translate(3 6)" />
+        <path d="M323 553C296 552 271 566 260 587L261 579C246 597 245 620 249 639L245 634C249 657 261 673 280 677C302 682 322 667 333 651L332 658C350 645 365 626 370 607L370 614C376 593 363 573 348 564L353 564C343 556 333 553 323 553Z" fill="url(#fur)" />
+        <path d="M267 583C281 563 310 557 330 562C356 567 369 585 366 602C355 616 336 624 318 622L322 624C304 628 289 623 278 612L280 617C266 612 264 597 267 583Z" fill="url(#furGlow)" />
+        <path d="M253 624C260 644 272 650 289 650L286 652C305 656 322 644 335 631C326 655 307 673 286 673C269 673 258 658 253 644Z" fill="url(#furShade)" opacity=".48" />
+        <path d="M744 527C721 528 700 542 693 559L692 552C682 570 685 593 695 607L690 604C703 626 728 638 752 636L747 640C771 641 794 625 801 605L802 613C812 591 805 564 792 549L794 557C780 537 764 527 744 527Z" fill="url(#fur)" />
+        <path d="M703 551C719 532 746 530 765 539C787 548 798 565 799 581C786 600 764 608 744 603L747 606C729 608 714 599 705 585L705 590C695 581 696 564 703 551Z" fill="url(#furGlow)" />
+        <path d="M701 603C715 617 736 621 752 617L749 620C771 624 788 612 796 601C791 622 773 634 754 634C733 635 714 622 701 603Z" fill="url(#furShade)" opacity=".55" />
+        <g fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" opacity=".55">
+          <path d="M274 575L264 587M256 610L256 625M301 561L290 565M704 544L696 555M783 549L791 561M799 582L799 593" />
+        </g>
+      </g>
+      <g id="fur_details" inkscape:groupmode="layer" inkscape:label="18 | 定向绒毛细节">
+        <path d="M158.54 411.27Q155.75 417.50 153.00 421.00Q155.96 413.73 157.46 410.73Z" fill="#FFFDFA" opacity="0.48" />
+        <path d="M164.40 406.20Q162.20 411.20 160.00 414.00Q162.40 408.20 163.60 405.80Z" fill="#FFFDFA" opacity="0.32" />
+        <path d="M160.37 418.16Q158.65 422.55 157.00 425.00Q158.73 419.94 159.63 417.84Z" fill="#FFFDFA" opacity="0.24" />
+        <path d="M191.57 356.31Q188.30 363.15 185.00 367.00Q188.63 358.99 190.43 355.69Z" fill="#FFFDFA" opacity="0.40" />
+        <path d="M196.40 350.20Q194.20 355.20 192.00 358.00Q194.40 352.20 195.60 349.80Z" fill="#FFFDFA" opacity="0.27" />
+        <path d="M224.54 309.27Q221.75 315.50 219.00 319.00Q221.96 311.73 223.46 308.73Z" fill="#FFFDFA" opacity="0.36" />
+        <path d="M230.37 305.16Q228.65 309.55 227.00 312.00Q228.73 306.94 229.63 304.84Z" fill="#FFFDFA" opacity="0.23" />
+        <path d="M503.57 239.17Q501.65 245.50 500.00 249.00Q501.53 241.83 502.43 238.83Z" fill="#FFFDFA" opacity="0.44" />
+        <path d="M508.44 232.11Q507.10 237.20 506.00 240.00Q506.96 234.29 507.56 231.89Z" fill="#FFFDFA" opacity="0.28" />
+        <path d="M540.48 166.27Q537.75 171.85 535.00 175.00Q538.02 168.43 539.52 165.73Z" fill="#FFFDFA" opacity="0.35" />
+        <path d="M546.37 160.16Q544.65 164.55 543.00 167.00Q544.73 161.94 545.63 159.84Z" fill="#FFFDFA" opacity="0.26" />
+        <path d="M624.38 219.32Q621.75 222.90 619.00 225.00Q622.12 220.48 623.62 218.68Z" fill="#FFFDFA" opacity="0.30" />
+        <path d="M628.34 216.21Q626.65 219.25 625.00 221.00Q626.76 217.29 627.66 215.79Z" fill="#FFFDFA" opacity="0.23" />
+        <path d="M314.48 411.14Q312.65 417.50 311.00 421.00Q312.62 413.86 313.52 410.86Z" fill="#FFFDFA" opacity="0.30" />
+        <path d="M320.37 405.14Q318.65 410.20 317.00 413.00Q318.73 407.26 319.63 404.86Z" fill="#FFFDFA" opacity="0.20" />
+        <path d="M646.42 362.74Q648.25 368.20 651.00 371.00Q647.08 365.66 645.58 363.26Z" fill="#FFFDFA" opacity="0.24" />
+        <path d="M270.36 649.92Q271.45 644.80 272.00 642.00Q271.94 647.68 271.64 650.08Z" fill="#FFFDFA" opacity="0.42" />
+        <path d="M277.41 652.88Q278.90 646.50 280.00 643.00Q279.19 650.12 278.59 653.12Z" fill="#FFFDFA" opacity="0.36" />
+        <path d="M283.62 654.87Q284.90 651.10 286.00 649.00Q284.98 653.33 284.38 655.13Z" fill="#FFFDFA" opacity="0.24" />
+        <path d="M342.49 624.78Q344.35 620.45 346.00 618.00Q344.41 623.12 343.51 625.22Z" fill="#FFFDFA" opacity="0.34" />
+        <path d="M346.63 619.85Q347.90 616.75 349.00 615.00Q347.97 618.65 347.37 620.15Z" fill="#FFFDFA" opacity="0.23" />
+        <path d="M731.44 621.21Q730.65 615.80 729.00 613.00Q731.66 618.39 732.56 620.79Z" fill="#FFFDFA" opacity="0.38" />
+        <path d="M737.52 624.14Q737.10 619.45 736.00 617.00Q737.88 621.76 738.48 623.86Z" fill="#FFFDFA" opacity="0.29" />
+        <path d="M777.41 608.87Q778.90 603.15 780.00 600.00Q779.19 606.43 778.59 609.13Z" fill="#FFFDFA" opacity="0.36" />
+        <path d="M782.62 604.87Q783.90 601.10 785.00 599.00Q783.98 603.33 783.38 605.13Z" fill="#FFFDFA" opacity="0.24" />
+        <path d="M229.37 810.14Q229.10 804.15 228.00 801.00Q230.03 807.16 230.63 809.86Z" fill="#FFFDFA" opacity="0.42" />
+        <path d="M233.55 817.06Q233.55 812.45 233.00 810.00Q234.15 814.84 234.45 816.94Z" fill="#FFFDFA" opacity="0.28" />
+        <path d="M247.54 841.80Q249.35 837.45 251.00 835.00Q249.36 840.10 248.46 842.20Z" fill="#FFFDFA" opacity="0.30" />
+        <path d="M252.63 844.85Q253.90 841.75 255.00 840.00Q253.97 843.65 253.37 845.15Z" fill="#FFFDFA" opacity="0.20" />
+      </g>
+    </svg>
+  </g>
+  <path d="M45.6 5 L55 14.4 H48.2 C46.764 14.4 45.6 13.236 45.6 11.8 Z" fill="#657F9F" opacity=".035" />
+  <path d="M46 4.3 V11.8 C46 13.015 46.985 14 48.2 14 H55.7" fill="url(#doc-fold)" stroke="#CED5DE" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round" />
+  <g id="foreground-icon">
+    <svg viewBox="3.09375 3.14062 17.8125 17.718760000000003" id="language-symbol" x="18.5787" y="15.6754" width="26.1376" height="26.0000">
+      <path fill="#CC342D" d="M18.041 3.177c2.24.382 2.879 1.919 2.843 3.527V6.67l-1.013 13.266-13.132.897h.008c-1.093-.044-3.518-.151-3.634-3.545l1.217-2.222 2.462 5.74 2.097-6.77-.045.009.018-.018 6.85 2.186L13.945 9.3l6.53-.409-5.144-4.212 2.71-1.51v.009M3.113 17.252v.017zM6.916 6.874c2.63-2.622 6.033-4.168 7.34-2.844 1.297 1.306-.072 4.523-2.702 7.135-2.666 2.613-6.015 4.248-7.322 2.933-1.306-1.324.036-4.612 2.675-7.224z" />
+    </svg>
+    <rect id="language-badge" x="19.5" y="46" width="25" height="11" rx="3.2" fill="#FBEFEE" />
+    <path id="badge-lettering" fill="#B82F28" transform="translate(24.4344 55.5500) scale(0.005625 -0.005625)" d="M589 750Q669 750 729.0 769.5Q789 789 829.0 824.0Q869 859 889.0 907.5Q909 956 909 1015Q909 1133 831.0 1195.0Q753 1257 595 1257H405V750ZM1267 0H1058Q996 0 968 48L632 533Q615 558 595.0 569.0Q575 580 535 580H405V0H171V1440H595Q737 1440 839.5 1411.0Q942 1382 1008.0 1328.5Q1074 1275 1105.5 1200.0Q1137 1125 1137 1033Q1137 958 1114.5 893.0Q1092 828 1049.5 775.0Q1007 722 945.0 683.0Q883 644 804 622Q847 596 878 549ZM2000 185Q2079 185 2133.5 203.5Q2188 222 2222.5 254.0Q2257 286 2272.5 329.5Q2288 373 2288 423Q2288 525 2218.5 583.5Q2149 642 1999 642H1710V185ZM1710 1257V807H1944Q2094 807 2168.0 865.0Q2242 923 2242 1032Q2242 1151 2172.5 1204.0Q2103 1257 1955 1257ZM1955 1440Q2093 1440 2191.0 1413.5Q2289 1387 2352.0 1338.0Q2415 1289 2444.5 1218.5Q2474 1148 2474 1060Q2474 1009 2458.5 961.5Q2443 914 2410.5 872.5Q2378 831 2329.0 798.0Q2280 765 2213 743Q2519 678 2519 418Q2519 326 2484.5 249.5Q2450 173 2384.5 117.5Q2319 62 2223.0 31.0Q2127 0 2004 0H1476V1440Z" />
+  </g>
+</svg>

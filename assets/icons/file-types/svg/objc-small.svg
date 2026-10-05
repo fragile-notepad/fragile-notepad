@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Objective-C document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <defs>
+    <linearGradient id="small-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FEFAFA" />
+      <stop offset="1" stop-color="#FDEEEE" />
+    </linearGradient>
+  </defs>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="url(#small-paper)" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FFFDFD" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.484801 5.990909) scale(0.781818)">
+    <g transform="translate(-14.344828 -11.500000) scale(0.948276)">
+      <g id="language-symbol" transform="translate(15.796926 12.558178) scale(0.509330)">
+        <svg viewBox="0 0 128 128" x="0" y="0" width="64" height="64">
+          <defs>
+            <radialGradient id="symbol-apple-body" cx=".32" cy=".27" r=".85">
+              <stop stop-color="#FF7770" />
+              <stop offset=".32" stop-color="#F94443" />
+              <stop offset=".68" stop-color="#DE2534" />
+              <stop offset="1" stop-color="#A80E24" />
+            </radialGradient>
+            <linearGradient id="symbol-apple-leaf" x1="0" y1="0" x2=".8" y2="1">
+              <stop stop-color="#A2DB58" />
+              <stop offset=".45" stop-color="#75BF38" />
+              <stop offset="1" stop-color="#39831E" />
+            </linearGradient>
+            <radialGradient id="symbol-apple-light" cx=".35" cy=".28" r=".75">
+              <stop stop-color="#FFFFFF" stop-opacity=".47" />
+              <stop offset=".48" stop-color="#FFFFFF" stop-opacity=".15" />
+              <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="symbol-apple-shine" x1="0" y1="0" x2=".7" y2="1">
+              <stop stop-color="#FFFFFF" stop-opacity=".47" />
+              <stop offset=".65" stop-color="#FFFFFF" stop-opacity=".07" />
+              <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+            </linearGradient>
+            <clipPath id="symbol-apple-clip">
+              <path d="M64 38 C54 31 41 28 29 34 C13 41 8 56 11 75 C14 96 27 118 43 121 C52 123 58 118 64 118 C70 118 77 123 87 120 C104 115 116 93 117 72 C118 54 111 40 97 34 C85 29 72 32 64 38 Z" />
+            </clipPath>
+          </defs>
+          <path d="M64 42 C60 31 59 20 62 13" fill="none" stroke="#73503A" stroke-width="5.2" stroke-linecap="round" />
+          <path d="M66 31 C72 13 87 6 106 8 C102 22 88 32 66 31 Z" fill="url(#symbol-apple-leaf)" />
+          <path d="M69 29 C79 23 87 16 98 12" fill="none" stroke="#477F25" stroke-width="1.4" stroke-linecap="round" opacity=".35" />
+          <path d="M64 38 C54 31 41 28 29 34 C13 41 8 56 11 75 C14 96 27 118 43 121 C52 123 58 118 64 118 C70 118 77 123 87 120 C104 115 116 93 117 72 C118 54 111 40 97 34 C85 29 72 32 64 38 Z" fill="url(#symbol-apple-body)" />
+          <g clip-path="url(#symbol-apple-clip)">
+            <ellipse cx="41" cy="56" rx="26" ry="28" fill="url(#symbol-apple-light)" />
+            <path d="M24 48 C30 38 41 35 52 38 C42 40 33 48 28 62 C24 62 22 57 24 48 Z" fill="url(#symbol-apple-shine)" />
+          </g>
+          <path d="M55 37 Q64 43 74 36" fill="none" stroke="#A8142B" stroke-width="2" stroke-linecap="round" opacity=".26" />
+        </svg>
+      </g>
+    </g>
+  </g>
+</svg>

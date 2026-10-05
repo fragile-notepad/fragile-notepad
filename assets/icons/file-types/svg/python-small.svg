@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Python document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <defs>
+    <linearGradient id="small-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FAFCFD" />
+      <stop offset="1" stop-color="#EEF3F8" />
+    </linearGradient>
+  </defs>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="url(#small-paper)" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FDFEFE" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.714286 6.214286) scale(0.767857)">
+    <g transform="translate(-18.544578 -15.306024) scale(1.079518)">
+      <svg viewBox="1.96875 1.96875 20.0625 20.0625" id="language-symbol" x="18.9999" y="15.9996" width="26.0000" height="26.0000">
+        <path fill="#3776AB" d="M9.86 2A2.86 2.86 0 0 0 7 4.86v1.68h4.29c.39 0 .71.57.71.96H4.86A2.86 2.86 0 0 0 2 10.36v3.781a2.86 2.86 0 0 0 2.86 2.86h1.18v-2.68a2.85 2.85 0 0 1 2.85-2.86h5.25c1.58 0 2.86-1.271 2.86-2.851V4.86A2.86 2.86 0 0 0 14.14 2zm-.72 1.61c.4 0 .72.12.72.71s-.32.891-.72.891c-.39 0-.71-.3-.71-.89s.32-.711.71-.711" />
+        <path fill="#FFD343" d="M17.959 7v2.68a2.85 2.85 0 0 1-2.85 2.859H9.86A2.85 2.85 0 0 0 7 15.389v3.75a2.86 2.86 0 0 0 2.86 2.86h4.28A2.86 2.86 0 0 0 17 19.14v-1.68h-4.291c-.39 0-.709-.57-.709-.96h7.14A2.86 2.86 0 0 0 22 13.64V9.86A2.86 2.86 0 0 0 19.14 7zM8.32 11.513l-.004.004.038-.004zm6.54 7.276c.39 0 .71.3.71.89a.71.71 0 0 1-.71.71c-.4 0-.72-.12-.72-.71s.32-.89.72-.89" />
+      </svg>
+    </g>
+  </g>
+</svg>

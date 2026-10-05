@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>C document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <defs>
+    <linearGradient id="small-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FDFDFE" />
+      <stop offset="1" stop-color="#F8F9FB" />
+    </linearGradient>
+  </defs>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="url(#small-paper)" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FEFEFE" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.490909 5.990909) scale(0.781818)">
+    <g transform="translate(-17.846154 -14.673077) scale(1.057692)">
+      <g id="language-symbol" transform="translate(19.000000 16.000000) scale(0.406250)">
+        <svg viewBox="0 0 128 128" x="0" y="0" width="64" height="64">
+          <path fill="#a9bacd" d="M125 50c-4-32-24-50-62-50C29 0 3 24 3 64c0 39 24 64 64 64 32 0 55-19 58-50H87c-2 11-8 20-20 20-21 0-24-16-24-33 0-23 8-35 22-35 13 0 20 7 22 20z" />
+        </svg>
+      </g>
+    </g>
+  </g>
+</svg>

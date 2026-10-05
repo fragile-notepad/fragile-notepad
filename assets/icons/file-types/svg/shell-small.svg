@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Shell / Bash document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <defs>
+    <linearGradient id="small-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FBFDFA" />
+      <stop offset="1" stop-color="#F0F8EC" />
+    </linearGradient>
+  </defs>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="url(#small-paper)" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FDFEFD" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.714286 6.202288) scale(0.767857)">
+    <g transform="translate(-13.629248 -11.235839) scale(0.922760)">
+      <svg viewBox="1.0 2.0 14.0 12.0" id="language-symbol" x="16.9464" y="16.5271" width="30.3333" height="26.0000">
+        <path fill="#4EAA25" d="M2 2a1 1 0 0 0-1 1v10c0 .554.446 1 1 1h12c.554 0 1-.446 1-1V3a1 1 0 0 0-1-1zm0 3h12v8H2zm1 2 2 2-2 2 1 1 3-3-3-3zm5 3.5V12h5v-1.5z" />
+      </svg>
+    </g>
+  </g>
+</svg>

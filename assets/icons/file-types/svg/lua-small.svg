@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Lua document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="#FFFFFF" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FFFFFF" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.700559 6.200559) scale(0.768715)">
+    <g transform="translate(-19.008403 -14.605042) scale(1.075630)">
+      <svg viewBox="2.0 2.0 28.0 28.0" id="language-symbol" x="19.5469" y="15.4533" width="26.0000" height="26.0000">
+        <path fill="#000080" d="M30 6a3.86 3.86 0 0 1-1.167 2.833 4.024 4.024 0 0 1-5.666 0A3.86 3.86 0 0 1 22 6a3.86 3.86 0 0 1 1.167-2.833 4.024 4.024 0 0 1 5.666 0A3.86 3.86 0 0 1 30 6m-9.208 5.208A10.6 10.6 0 0 0 13 8a10.6 10.6 0 0 0-7.792 3.208A10.6 10.6 0 0 0 2 19a10.6 10.6 0 0 0 3.208 7.792A10.6 10.6 0 0 0 13 30a10.6 10.6 0 0 0 7.792-3.208A10.6 10.6 0 0 0 24 19a10.6 10.6 0 0 0-3.208-7.792m-1.959 7.625a4.024 4.024 0 0 1-5.666 0 4.024 4.024 0 0 1 0-5.666 4.024 4.024 0 0 1 5.666 0 4.024 4.024 0 0 1 0 5.666" />
+      </svg>
+    </g>
+  </g>
+</svg>

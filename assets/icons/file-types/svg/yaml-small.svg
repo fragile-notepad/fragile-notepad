@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>YAML document</title>
+  <desc>Language symbol on a light paper background, without a separate text badge.</desc>
+  <defs>
+    <linearGradient id="small-paper" x1="0" y1="0" x2=".65" y2="1">
+      <stop stop-color="#FEF9F9" />
+      <stop offset="1" stop-color="#FBEBEC" />
+    </linearGradient>
+  </defs>
+  <path id="paper-background" d="M4.5 1.5 H23.7 C24.02 1.5 24.30 1.62 24.52 1.84 L29.16 6.48 C29.38 6.70 29.5 6.98 29.5 7.30 V28.5 C29.5 29.605 28.605 30.5 27.5 30.5 H4.5 C3.395 30.5 2.5 29.605 2.5 28.5 V3.5 C2.5 2.395 3.395 1.5 4.5 1.5 Z" fill="url(#small-paper)" stroke="#C5CEDA" stroke-width=".75" stroke-linejoin="round" />
+  <path d="M24 1.95 V5.2 C24 6.194 24.806 7 25.8 7 H29.05" fill="#FEFDFD" stroke="#C5CEDA" stroke-opacity=".68" stroke-width=".55" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="foreground-icon" transform="translate(3.700559 6.200559) scale(0.768715)">
+    <g transform="translate(-13.929019 -11.123173) scale(0.935282)">
+      <g id="language-symbol" stroke="#CB171E" stroke-width="2.9" stroke-linecap="round" fill="none">
+        <path d="M24.5 20.5 H43.5 M24.5 29 H38.5 M24.5 37.5 H45.5" />
+        <path d="M18.5 20.5 H18.6 M18.5 29 H18.6 M18.5 37.5 H18.6" />
+      </g>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Kotlin symbol</title>
+  <desc>Kotlin language symbol without a paper background or text badge.</desc>
+  <g transform="translate(-17.988736 -14.181477) scale(1.041302)">
+    <svg viewBox="2.95312 2.95312 18.093760000000003 18.093760000000003" id="language-symbol" x="20.1500" y="16.4948" width="25.0000" height="25.0000">
+      <defs>
+        <linearGradient id="symbol-a" x1="1.725" x2="22.185" y1="22.67" y2="1.982" gradientTransform="translate(1.306 1.129)scale(.89324)" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#7F52FF" />
+          <stop offset=".5" stop-color="#C968DB" />
+          <stop offset="1" stop-color="#FA7343" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#symbol-a)" d="M2.975 2.976v18.048h18.05v-.03l-4.478-4.511-4.48-4.515 4.48-4.515 4.443-4.477z" />
+    </svg>
+  </g>
+</svg>

@@ -910,9 +910,10 @@ fn draw_editor_pixels(
 }
 
 fn shared_han_row_pixels(bytes: &[u8]) -> Vec<u8> {
-    // The cue is on row zero. Inspect only the unchanged Han row, excluding
-    // the gutter and any region-specific script in the changed cue.
-    (44..84)
+    // At zoom 2, the Han row spans y=44..84 and its paragraph starts at y=48.
+    // Skip the top padding, where Noto CJK glyphs from the cue row can overhang,
+    // and exclude the gutter and any region-specific script in the changed cue.
+    (48..84)
         .flat_map(|y| {
             bytes[(y * 520 + 90) * 4..(y * 520 + 500) * 4]
                 .iter()

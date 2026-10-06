@@ -12,13 +12,14 @@ The default `hybrid-rendering` feature adds Vulkan to tiny-skia.
 | Value | Behavior |
 | --- | --- |
 | `software` | Suppress hardware requests |
-| `lazy-gpu` | Allow hardware handoff |
-| `hardware-diagnostic` | Allow diagnostic handoff |
+| `lazy-gpu` | Allow hardware handoff, preferring a low-power GPU |
+| `hardware-diagnostic` | Allow diagnostic handoff, preferring a high-performance GPU |
 
 Recognized overrides win; invalid values are ignored and shown in About debug
 information. Loading saved lazy/diagnostic settings requests a boost when the main
 window opens; without saved settings, opening About can trigger it.
 Hardware requests select Vulkan. Keep `WGPU_BACKEND` unset or set to `vulkan`.
+`WGPU_POWER_PREF=low|high|none` overrides the adapter preference for diagnostics.
 The renderer is shared across windows and remains active after About closes.
 
 States are Software → PreparingHardware → Hardware, or Failed.

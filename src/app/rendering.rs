@@ -81,14 +81,13 @@ impl App {
     }
 
     pub(super) fn request_gpu_boost(&mut self) -> Task<Message> {
-        match start_gpu_boost(
-            &mut self.rendering,
-            render_backend_policy(
-                &self.settings,
-                std::env::var(RENDER_BACKEND_ENV).ok().as_deref(),
-            ),
-        ) {
-            BoostStart::Started => configure_hardware_backend(),
+        let policy = render_backend_policy(
+            &self.settings,
+            std::env::var(RENDER_BACKEND_ENV).ok().as_deref(),
+        );
+
+        match start_gpu_boost(&mut self.rendering, policy) {
+            BoostStart::Started => configure_hardware_backend(policy),
             BoostStart::Ignored(suppression) => {
                 if matches!(
                     suppression,
@@ -315,13 +314,16 @@ fn complete_gpu_boost_state(state: &mut RenderingState, failure: Option<RenderFa
 }
 
 #[cfg(feature = "hybrid-rendering")]
-fn configure_hardware_backend() -> Task<Message> {
+fn configure_hardware_backend(policy: RenderBackendPolicy) -> Task<Message> {
     use iced::Backend;
     use iced::backend::Api;
 
     backend::prepare_warm_and_commit(backend::Settings {
         backend: Backend::Hardware(Api::Vulkan),
-        power_preference: backend::PowerPreference::HighPerformance,
+        power_preference: match policy {
+            RenderBackendPolicy::HardwareDiagnostic => backend::PowerPreference::HighPerformance,
+            _ => backend::PowerPreference::LowPower,
+        },
         antialiasing: false,
         vsync: true,
     })
@@ -329,7 +331,7 @@ fn configure_hardware_backend() -> Task<Message> {
 }
 
 #[cfg(not(feature = "hybrid-rendering"))]
-fn configure_hardware_backend() -> Task<Message> {
+fn configure_hardware_backend(_policy: RenderBackendPolicy) -> Task<Message> {
     Task::done(Message::BackendBoostConfigured(Err(
         backend::StrictHandoffError {
             phase: backend::StrictHandoffPhase::Preparing,

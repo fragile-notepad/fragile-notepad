@@ -26,6 +26,7 @@ impl App {
             files: super::files::FileOperations::default(),
             find: FindState::new(),
             settings: EditorSettings::default(),
+            system_dark: false,
             outline_parsing: outline::OutlineParsing::new(),
             syntax_parsing: syntax::SyntaxParsing::default(),
             close_prompt: ClosePrompt::new(),
@@ -75,6 +76,7 @@ impl App {
             app,
             Task::batch([
                 open.map(Message::WindowOpened),
+                iced::system::theme().map(Message::SystemColorModeChanged),
                 iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
                 Task::perform(
                     crate::services::settings_store::load_settings(),

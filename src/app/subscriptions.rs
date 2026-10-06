@@ -18,6 +18,7 @@ impl App {
 
         Subscription::batch([
             single_instance_subscription(),
+            iced::system::theme_changes().map(Message::SystemColorModeChanged),
             event::listen_with(shortcuts::event_to_message),
             window::close_requests().map(Message::WindowCloseRequested),
             window::close_events().map(Message::WindowClosed),

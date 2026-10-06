@@ -216,9 +216,11 @@ where
         let caret_visible = state.is_caret_visible() && state.text_drag.is_none();
         // Drawing only consumes completed spans. Parser work is scheduled by
         // the app on a blocking worker, including during GPU warm-up.
-        self.syntax_cache
-            .borrow_mut()
-            .configure(&self.syntax_settings);
+        let syntax_settings = highlighter::Settings {
+            theme: self.syntax_settings.theme.variant(theme.palette().is_dark),
+            token: self.syntax_settings.token.clone(),
+        };
+        self.syntax_cache.borrow_mut().configure(&syntax_settings);
         let syntax_cache = self.syntax_cache.borrow();
         let plan_started = trace_enabled.then(StdInstant::now);
         let main_caret = self
@@ -302,6 +304,7 @@ where
                 &plan,
                 editor_style,
                 self.viewport.visible_row_count(),
+                self.viewport.wrap_columns(),
                 fast_text,
                 caret_visible,
                 frame_id,

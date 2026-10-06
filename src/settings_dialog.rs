@@ -8,6 +8,8 @@ const LISTENING_PULSE_PERIOD: f32 = 1.2;
 #[derive(Debug, Clone)]
 pub struct SettingsDialogState {
     pub draft: EditorSettings,
+    pub system_dark: bool,
+    pub wrap_column_input: String,
     pub category: SettingsCategory,
     pub shortcut_group: ShortcutGroup,
     pub capturing_shortcut: Option<ShortcutCommand>,
@@ -131,6 +133,11 @@ impl SettingsDialogState {
     pub(crate) fn new(settings: &EditorSettings) -> Self {
         Self {
             draft: settings.clone(),
+            system_dark: false,
+            wrap_column_input: settings
+                .wrap_column_limit
+                .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
+                .to_string(),
             category: SettingsCategory::General,
             shortcut_group: ShortcutGroup::File,
             capturing_shortcut: None,
@@ -141,6 +148,10 @@ impl SettingsDialogState {
 
     pub(crate) fn reset_from(&mut self, settings: &EditorSettings) {
         self.draft = settings.clone();
+        self.wrap_column_input = settings
+            .wrap_column_limit
+            .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
+            .to_string();
         self.category = SettingsCategory::General;
         self.shortcut_group = ShortcutGroup::File;
         self.capturing_shortcut = None;

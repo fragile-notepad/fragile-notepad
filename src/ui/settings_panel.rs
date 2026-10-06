@@ -2,7 +2,7 @@ use iced::advanced::text::highlighter::Highlighter as _;
 use iced::highlighter;
 use iced::widget::{
     button, column, container, keyed_column, rich_text, row, rule, scrollable, space, span, text,
-    toggler,
+    text_input, toggler,
 };
 use iced::{Center, Color, Element, Fill, Font};
 
@@ -34,14 +34,15 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
     };
     let pane = match dialog.category {
         SettingsCategory::General => general_pane(&dialog.draft),
-        SettingsCategory::Appearance => appearance_pane(&dialog.draft),
-        SettingsCategory::Editor => editor_pane(&dialog.draft),
+        SettingsCategory::Appearance => appearance_pane(&dialog.draft, dialog.system_dark),
+        SettingsCategory::Editor => editor_pane(dialog),
         SettingsCategory::Shortcuts => shortcuts_pane(dialog),
     };
     let pane: Element<'_, Message> = if dialog.category == SettingsCategory::Shortcuts {
         pane
     } else {
         scrollable(pane)
+            .style(styles::scrollable)
             .smooth_scroll(true)
             .spacing(6)
             .height(Fill)
@@ -173,7 +174,7 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
     ].spacing(14).into()
 }
 
-fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
+fn appearance_pane(settings: &EditorSettings, system_dark: bool) -> Element<'_, Message> {
     let modes = [
         AppearanceMode::System,
         AppearanceMode::Light,
@@ -191,13 +192,16 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 setting_row(
                     "Syntax theme",
                     dropdown(
-                        Some(settings.syntax_theme),
+                        Some(settings.syntax_theme.family()),
                         highlighter::Theme::ALL,
                         highlighter::Theme::to_string,
                         Message::DraftThemeSelected,
                     )
                     .width(210)
                     .into()
+                ),
+                utility::description(
+                    "Light and dark variants follow the color mode automatically."
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 setting_row(
@@ -211,7 +215,7 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
                         settings.zoom < EditorSettings::MAX_ZOOM,
                     )
                 ),
-                syntax_preview(settings),
+                syntax_preview(settings, system_dark),
             ]
             .spacing(10)
             .into()
@@ -228,13 +232,15 @@ fn appearance_choice(mode: AppearanceMode, selected: bool) -> Element<'static, M
         AppearanceMode::Dark => "Dark",
     };
     let preview: Element<'static, Message> = if mode == AppearanceMode::System {
-        row![miniature(false), miniature(true)].spacing(1).into()
+        row![miniature(false), miniature(true)].spacing(3).into()
     } else {
         miniature(mode == AppearanceMode::Dark)
     };
     button(
         column![
-            preview,
+            container(preview)
+                .padding(3)
+                .style(styles::appearance_preview_frame),
             row![
                 text(label).size(13).font(utility::semibold()),
                 space::horizontal(),
@@ -254,19 +260,19 @@ fn appearance_choice(mode: AppearanceMode, selected: bool) -> Element<'static, M
 /// A small, code-native window illustration; both color modes remain visible in any theme.
 fn miniature(dark: bool) -> Element<'static, Message> {
     let surface = if dark {
-        Color::from_rgb8(27, 31, 38)
+        Color::from_rgb8(26, 27, 29)
     } else {
-        Color::from_rgb8(250, 251, 253)
+        Color::from_rgb8(250, 250, 250)
     };
     let chrome = if dark {
-        Color::from_rgb8(51, 58, 70)
+        Color::from_rgb8(53, 55, 60)
     } else {
-        Color::from_rgb8(225, 231, 240)
+        Color::from_rgb8(230, 231, 233)
     };
     let ink = if dark {
-        Color::from_rgb8(123, 167, 217)
+        Color::from_rgb8(172, 175, 181)
     } else {
-        Color::from_rgb8(101, 142, 191)
+        Color::from_rgb8(128, 131, 136)
     };
     let line = move |width| {
         container(space::horizontal())
@@ -319,16 +325,17 @@ fn miniature(dark: bool) -> Element<'static, Message> {
     .into()
 }
 
-fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
+fn syntax_preview(settings: &EditorSettings, system_dark: bool) -> Element<'_, Message> {
     let mut highlighter = highlighter::Highlighter::new(&highlighter::Settings {
         token: "rs".into(),
-        theme: settings.syntax_theme,
+        theme: settings.resolved_syntax_theme(system_dark),
     });
     let mut lines = column![].spacing(3);
     for (index, line) in [
-        "fn main() {",
-        "    let message = \"Hello, world!\";",
-        "    println!(\"{message}\");",
+        "fn header(count: u32) -> Element<Message> {",
+        "    // Types, functions and macros",
+        "    let retries = 3;",
+        "    column![text(\"Ready\").size(retries)]",
         "}",
     ]
     .into_iter()
@@ -365,11 +372,12 @@ fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
         container(utility::description("Preview")).padding([8, 12]),
         rule::horizontal(1).style(styles::utility_rule),
         scrollable(container(lines).padding(10))
+            .style(styles::scrollable)
             .direction(scrollable::Direction::Both {
                 vertical: scrollable::Scrollbar::default(),
                 horizontal: scrollable::Scrollbar::default(),
             })
-            .height(112)
+            .height(132)
             .width(Fill),
     ])
     .width(Fill)
@@ -377,7 +385,84 @@ fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
     iced::widget::themer(styles::modern_theme(settings.appearance), preview).into()
 }
 
-fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
+fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let settings = &dialog.draft;
+    let fixed_wrap = settings.wrap_column_limit.is_some();
+    let mut wrap_controls = column![setting_row(
+        "Wrap at",
+        dropdown(
+            Some(fixed_wrap),
+            &[false, true],
+            |fixed| if *fixed {
+                "Column…".into()
+            } else {
+                "Window width".into()
+            },
+            Message::DraftFixedWrapSelected,
+        )
+        .width(190)
+        .into(),
+    ),]
+    .spacing(10);
+    if fixed_wrap {
+        wrap_controls = wrap_controls
+            .push(setting_row(
+                "Column",
+                text_input(
+                    &EditorSettings::DEFAULT_WRAP_COLUMN.to_string(),
+                    &dialog.wrap_column_input,
+                )
+                .on_input(Message::DraftWrapColumnChanged)
+                .style(styles::input)
+                .width(100)
+                .into(),
+            ))
+            .push(
+                row![
+                    controls::compact_command_button("80", 12, Message::DraftWrapColumnPreset(80)),
+                    controls::compact_command_button(
+                        "100",
+                        12,
+                        Message::DraftWrapColumnPreset(100)
+                    ),
+                    controls::compact_command_button(
+                        "120",
+                        12,
+                        Message::DraftWrapColumnPreset(120)
+                    ),
+                ]
+                .spacing(6),
+            )
+            .push(
+                container(
+                    text(format!(
+                        "{}–{} columns. Narrower windows wrap at the window edge.",
+                        EditorSettings::MIN_WRAP_COLUMN,
+                        EditorSettings::MAX_WRAP_COLUMN,
+                    ))
+                    .size(12),
+                )
+                .style(styles::info_muted),
+            );
+        if dialog
+            .wrap_column_input
+            .parse::<usize>()
+            .ok()
+            .is_none_or(|value| !EditorSettings::valid_wrap_column(value))
+        {
+            wrap_controls = wrap_controls.push(
+                container(
+                    text(format!(
+                        "Enter a column from {} to {}. The last valid width is kept until then.",
+                        EditorSettings::MIN_WRAP_COLUMN,
+                        EditorSettings::MAX_WRAP_COLUMN,
+                    ))
+                    .size(12),
+                )
+                .style(styles::info_muted),
+            );
+        }
+    }
     column![
         section(
             "Typing & layout",
@@ -400,9 +485,24 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                         settings.word_wrap,
                         Message::DraftWordWrapToggled
                     ),
-                    utility::description("Wrap at the window edge without inserting line breaks."),
+                    utility::description("Wrap long lines without inserting line breaks."),
                 ]
                 .spacing(5),
+                wrap_controls,
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Wrap indicator",
+                    settings.decorations.show_wrap_indicator,
+                    Message::DraftWrapIndicatorToggled
+                ),
+                toggle_row(
+                    "Wrap guide line",
+                    settings.decorations.show_wrap_guide,
+                    Message::DraftWrapGuideToggled
+                ),
+                utility::description(
+                    "Show continuation arrows and the wrap boundary when word wrap is on."
+                ),
             ]
             .spacing(10)
             .into()
@@ -521,6 +621,7 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         keyed_column![(
             dialog.shortcut_group,
             scrollable(container(rows).style(styles::utility_card))
+                .style(styles::scrollable)
                 .spacing(6)
                 .smooth_scroll(true)
                 .height(Fill)
@@ -711,7 +812,14 @@ fn toggle_row<'a>(
     enabled: bool,
     message: impl Fn(bool) -> Message + 'a,
 ) -> Element<'a, Message> {
-    setting_row(title, toggler(enabled).size(20).on_toggle(message).into())
+    setting_row(
+        title,
+        toggler(enabled)
+            .style(styles::toggler)
+            .size(20)
+            .on_toggle(message)
+            .into(),
+    )
 }
 
 fn stepper<'a>(

@@ -111,10 +111,10 @@ pub(super) fn drain(app: &mut App) -> Task<Message> {
                 }
             }
             Work::Syntax => {
-                if let Some(task) = app
-                    .syntax_parsing
-                    .schedule(app.workspace.active_document(), app.settings.syntax_theme)
-                {
+                if let Some(task) = app.syntax_parsing.schedule(
+                    app.workspace.active_document(),
+                    app.settings.resolved_syntax_theme(app.system_dark),
+                ) {
                     tasks.push(task);
                 }
             }

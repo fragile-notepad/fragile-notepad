@@ -7,6 +7,28 @@ use fragile_notepad::editor::{
 use iced::widget::text_editor::LineEnding;
 use std::path::{Path, PathBuf};
 
+#[test]
+fn fixed_wrap_columns_follow_window_size_and_zoom_without_changing_text() {
+    let text = "x".repeat(240);
+    let mut document = Document::from_path(DocumentId::new(900), "wrap.txt", &text);
+    document.update_viewport_geometry(20, 962.0, 8.0);
+    document.set_wrap_column_limit(Some(80));
+    document.set_word_wrap(true);
+    assert_eq!(document.viewport.wrap_columns(), Some(80));
+    document.update_viewport_geometry(20, 322.0, 8.0);
+    assert_eq!(document.viewport.wrap_columns(), Some(40));
+    document.update_viewport_geometry(20, 962.0, 8.0);
+    assert_eq!(document.viewport.wrap_columns(), Some(80));
+    document.update_viewport_geometry(20, 962.0, 16.0);
+    assert_eq!(document.viewport.wrap_columns(), Some(60));
+    document.set_wrap_column_limit(None);
+    document.update_viewport_geometry(20, 962.0, 8.0);
+    assert_eq!(document.viewport.wrap_columns(), Some(120));
+    document.set_word_wrap(false);
+    assert_eq!(document.viewport.wrap_columns(), None);
+    assert_eq!(document.text(), text);
+}
+
 fn fixture_path(file_name: &str) -> PathBuf {
     Path::new("work").join(file_name)
 }

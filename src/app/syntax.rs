@@ -37,8 +37,10 @@ impl App {
         if self.lifecycle.is_exiting() {
             return None;
         }
-        self.syntax_parsing
-            .next_request(self.workspace.active_document(), self.settings.syntax_theme)
+        self.syntax_parsing.next_request(
+            self.workspace.active_document(),
+            self.settings.resolved_syntax_theme(self.system_dark),
+        )
     }
 
     pub(super) fn complete_syntax_parse(
@@ -46,8 +48,12 @@ impl App {
         id: u64,
         result: Result<SyntaxParseResult, String>,
     ) -> Task<Message> {
-        self.syntax_parsing
-            .complete(&self.workspace, self.settings.syntax_theme, id, result);
+        self.syntax_parsing.complete(
+            &self.workspace,
+            self.settings.resolved_syntax_theme(self.system_dark),
+            id,
+            result,
+        );
         self.events.publish(super::events::Event::SyntaxAvailable);
         Task::none()
     }
@@ -234,7 +240,7 @@ mod tests {
         document.scroll.first_visible_row = 75;
         let position = crate::editor::EditorPosition::new(80, 10);
         document.set_main_selection(crate::editor::EditorSelection::new(position, position));
-        document.ensure_syntax_cache(app.settings.syntax_theme);
+        document.ensure_syntax_cache(app.settings.resolved_syntax_theme(app.system_dark));
         let before = rendered_rows(&app);
         let id = app.workspace.active_document_id();
 
@@ -280,7 +286,7 @@ mod tests {
                     &document.buffer,
                     &highlighter::Settings {
                         token: "html".into(),
-                        theme: app.settings.syntax_theme,
+                        theme: app.settings.resolved_syntax_theme(app.system_dark),
                     }
                 )
             );
@@ -307,7 +313,7 @@ mod tests {
             "fn main() {\n    let café = 42;\n    // comment\n    let other = \"🦀\";\n}\n",
         );
         let document = app.workspace.active_document_mut().unwrap();
-        document.ensure_syntax_cache(app.settings.syntax_theme);
+        document.ensure_syntax_cache(app.settings.resolved_syntax_theme(app.system_dark));
         let position = crate::editor::EditorPosition::new(1, 8);
         document.set_main_selection(crate::editor::EditorSelection::new(position, position));
         let before = rendered_rows(&app);
@@ -356,7 +362,7 @@ mod tests {
                 &document.buffer,
                 &highlighter::Settings {
                     token: "rs".into(),
-                    theme: app.settings.syntax_theme
+                    theme: app.settings.resolved_syntax_theme(app.system_dark)
                 }
             )
         );
@@ -417,6 +423,40 @@ mod tests {
     }
 
     #[test]
+    fn system_color_mode_rejects_old_colors_without_changing_preset() {
+        let mut app = app();
+        app.settings.appearance = crate::core::AppearanceMode::System;
+        app.system_dark = false;
+        let family = app.settings.syntax_theme;
+        let (id, request) = app.next_syntax_request().unwrap();
+        let _ = app.update_settings(crate::message::SettingsMessage::SystemColorModeChanged(
+            iced::theme::Mode::Dark,
+        ));
+        assert_eq!(app.settings.syntax_theme, family);
+        assert!(app.settings_dialog.system_dark);
+        let _ = app.complete_syntax_parse(id, Ok(request.parse()));
+        assert_eq!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .syntax_cache
+                .borrow()
+                .cached_line_count(),
+            0
+        );
+        assert!(app.next_syntax_request().is_some());
+        assert!(
+            app.syntax_parsing
+                .in_flight
+                .as_ref()
+                .unwrap()
+                .settings
+                .theme
+                .is_dark()
+        );
+    }
+
+    #[test]
     fn closing_or_switching_tabs_does_not_continue_obsolete_work() {
         let mut app = app();
         let (id, request) = app.next_syntax_request().unwrap();
@@ -466,7 +506,7 @@ mod tests {
             &document.buffer,
             &highlighter::Settings {
                 token: "html".into(),
-                theme: app.settings.syntax_theme,
+                theme: app.settings.resolved_syntax_theme(app.system_dark),
             },
         );
         assert_eq!(*document.syntax_cache.borrow(), expected);

@@ -55,6 +55,7 @@ impl IndentationMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorSettings {
     pub word_wrap: bool,
+    pub wrap_column_limit: Option<usize>,
     pub auto_save: bool,
     pub zoom: f32,
     pub scroll_speed: f32,
@@ -77,6 +78,13 @@ impl EditorSettings {
     pub const MIN_SCROLL_SPEED: f32 = 0.25;
     pub const MAX_SCROLL_SPEED: f32 = 4.0;
     pub const SCROLL_SPEED_STEP: f32 = 0.25;
+    pub const DEFAULT_WRAP_COLUMN: usize = 100;
+    pub const MIN_WRAP_COLUMN: usize = 1;
+    pub const MAX_WRAP_COLUMN: usize = 1000;
+
+    pub fn valid_wrap_column(columns: usize) -> bool {
+        (Self::MIN_WRAP_COLUMN..=Self::MAX_WRAP_COLUMN).contains(&columns)
+    }
 
     pub fn set_zoom(&mut self, zoom: f32) {
         if zoom.is_finite() {
@@ -138,12 +146,21 @@ impl EditorSettings {
         self.appearance = appearance;
     }
 
+    pub fn resolved_syntax_theme(&self, system_dark: bool) -> highlighter::Theme {
+        let dark = match self.appearance {
+            AppearanceMode::System => system_dark,
+            AppearanceMode::Dark => true,
+            AppearanceMode::Light => false,
+        };
+        self.syntax_theme.variant(dark)
+    }
+
     pub fn set_hardware_acceleration(&mut self, hardware_acceleration: HardwareAccelerationMode) {
         self.hardware_acceleration = hardware_acceleration;
     }
 
     pub fn set_syntax_theme(&mut self, syntax_theme: highlighter::Theme) {
-        self.syntax_theme = syntax_theme;
+        self.syntax_theme = syntax_theme.family();
     }
 
     pub fn set_show_line_numbers(&mut self, show_line_numbers: bool) {
@@ -235,12 +252,15 @@ impl EditorSettings {
             .child(
                 XmlElement::new("editor")
                     .attribute("word-wrap", self.word_wrap)
+                    .attribute("wrap-column", self.wrap_column_limit.unwrap_or(0))
                     .attribute("indentation", indentation_key(self.indentation))
                     .attribute("scroll-speed", format!("{:.3}", self.scroll_speed)),
             )
             .child(XmlElement::new("appearance").attribute("zoom", format!("{:.3}", self.zoom)))
             .child(
                 XmlElement::new("decorations")
+                    .attribute("wrap-indicator", self.decorations.show_wrap_indicator)
+                    .attribute("wrap-guide", self.decorations.show_wrap_guide)
                     .attribute("line-numbers", self.decorations.show_line_numbers)
                     .attribute("spaces", self.decorations.show_spaces)
                     .attribute("tabs", self.decorations.show_tabs)
@@ -268,7 +288,7 @@ impl EditorSettings {
 
         if let Some(general) = child(root, "general") {
             if let Some(appearance) = general.attribute("appearance").and_then(parse_appearance) {
-                settings.appearance = appearance;
+                settings.set_appearance(appearance);
             }
             if let Some(theme) = general
                 .attribute("syntax-theme")
@@ -291,6 +311,10 @@ impl EditorSettings {
             if let Some(word_wrap) = editor.attribute("word-wrap").and_then(parse_bool) {
                 settings.word_wrap = word_wrap;
             }
+            settings.wrap_column_limit = editor
+                .attribute("wrap-column")
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|value| Self::valid_wrap_column(*value));
             if let Some(indentation) = editor.attribute("indentation").and_then(parse_indentation) {
                 settings.set_indentation(indentation);
             }
@@ -332,6 +356,12 @@ impl EditorSettings {
                 .and_then(parse_bool)
             {
                 settings.decorations.show_indentation_guides = show_indentation_guides;
+            }
+            if let Some(show) = decorations.attribute("wrap-indicator").and_then(parse_bool) {
+                settings.decorations.show_wrap_indicator = show;
+            }
+            if let Some(show) = decorations.attribute("wrap-guide").and_then(parse_bool) {
+                settings.decorations.show_wrap_guide = show;
             }
             if let Some(show_folding_controls) = decorations
                 .attribute("folding-controls")
@@ -381,13 +411,14 @@ impl Default for EditorSettings {
     fn default() -> Self {
         Self {
             word_wrap: true,
+            wrap_column_limit: None,
             auto_save: false,
             zoom: Self::DEFAULT_ZOOM,
             scroll_speed: Self::DEFAULT_SCROLL_SPEED,
             indentation: IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH),
             appearance: AppearanceMode::System,
             hardware_acceleration: HardwareAccelerationMode::Lazy,
-            syntax_theme: highlighter::Theme::SolarizedDark,
+            syntax_theme: highlighter::Theme::VSCodeDark,
             decorations: DecorationSettings {
                 indent_width: IndentationMode::DEFAULT_SPACE_WIDTH as usize,
                 ..DecorationSettings::default()
@@ -460,6 +491,13 @@ fn parse_indentation(value: &str) -> Option<IndentationMode> {
 }
 
 fn parse_syntax_theme(value: &str) -> Option<highlighter::Theme> {
+    // Accept names persisted before presets became automatic light/dark pairs.
+    let value = match value {
+        "VS Code inspired · Dark" | "VS Code inspired · Light" => "VS Code",
+        "JetBrains inspired · Dark" | "JetBrains inspired · Light" => "JetBrains",
+        "Solarized Dark" | "Solarized Light" => "Solarized",
+        value => value,
+    };
     highlighter::Theme::ALL
         .iter()
         .copied()

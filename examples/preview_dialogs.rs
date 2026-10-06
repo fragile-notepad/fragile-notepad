@@ -142,6 +142,8 @@ fn main() {
                 (SettingsCategory::Shortcuts, "shortcuts"),
             ] {
                 let mut dialog = SettingsDialogState {
+                    system_dark: appearance == AppearanceMode::Dark,
+                    wrap_column_input: EditorSettings::DEFAULT_WRAP_COLUMN.to_string(),
                     draft: EditorSettings {
                         appearance,
                         ..EditorSettings::default()
@@ -152,6 +154,7 @@ fn main() {
                     shortcut_conflict: None,
                     shortcut_notice_animation: Default::default(),
                 };
+                dialog.draft.set_appearance(appearance);
                 render(
                     &mut renderer,
                     settings_panel::view(&dialog),
@@ -184,6 +187,46 @@ fn main() {
                         Size::new(width, height),
                         &format!("preferences-conflict-{name}-{size_name}"),
                     );
+                }
+                if category == SettingsCategory::Editor {
+                    dialog.draft.wrap_column_limit = Some(EditorSettings::DEFAULT_WRAP_COLUMN);
+                    render(
+                        &mut renderer,
+                        settings_panel::view(&dialog),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("preferences-editor-fixed-wrap-{name}-{size_name}"),
+                    );
+                }
+                if category == SettingsCategory::Appearance {
+                    for (index, &preset) in iced::highlighter::Theme::ALL.iter().enumerate() {
+                        dialog.draft.set_syntax_theme(preset);
+                        render(
+                            &mut renderer,
+                            settings_panel::view(&dialog),
+                            &theme,
+                            Size::new(width, height),
+                            &format!("preferences-syntax-{index}-{name}-{size_name}"),
+                        );
+                        if size_name == "normal" {
+                            let mut document = Document::from_path(
+                                DocumentId::new(900),
+                                "about_dialog.rs",
+                                include_str!("../src/ui/about_dialog.rs"),
+                            );
+                            document.scroll.first_visible_row = 150;
+                            document.ensure_syntax_cache(
+                                dialog.draft.resolved_syntax_theme(dialog.system_dark),
+                            );
+                            render(
+                                &mut renderer,
+                                fragile_notepad::ui::editor::view(&document, &dialog.draft),
+                                &theme,
+                                Size::new(1200, 800),
+                                &format!("editor-syntax-{index}-{name}"),
+                            );
+                        }
+                    }
                 }
             }
         }

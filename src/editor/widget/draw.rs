@@ -23,6 +23,94 @@ use super::style::EditorStyle;
 
 const LONG_LINE_VISIBLE_MARGIN_COLUMNS: usize = 8;
 
+#[cfg(test)]
+mod indent_tests {
+    use super::*;
+    use crate::editor::{CaretRenderPlan, EditorPosition, IndentGuideRenderPlan, RowRenderPlan};
+
+    #[test]
+    fn active_layer_follows_caret_and_stops_at_separate_blocks() {
+        let rows = [vec![1, 2], vec![1, 2], vec![1], vec![1, 2]]
+            .into_iter()
+            .enumerate()
+            .map(|(line, depths)| RowRenderPlan {
+                visible_row: line,
+                line,
+                start_column: 0,
+                start_visual_column: 0,
+                y: line as f32 * 20.0,
+                text_x: 0.0,
+                text: String::new(),
+                line_number: None,
+                is_active_line: line == 1,
+                fold: None,
+                hidden_lines: None,
+                whitespace: vec![],
+                eol: None,
+                indent_guides: depths
+                    .into_iter()
+                    .map(|depth| IndentGuideRenderPlan {
+                        line,
+                        depth,
+                        x: depth as f32 * 40.0,
+                    })
+                    .collect(),
+                syntax_spans: vec![],
+            })
+            .collect();
+        let mut plan = RenderPlan {
+            rows,
+            selections: vec![],
+            carets: vec![],
+            caret: Some(CaretRenderPlan {
+                position: EditorPosition::new(1, 12),
+                visual_column: None,
+                x: 120.0,
+                y: 20.0,
+                height: 20.0,
+            }),
+        };
+        assert_eq!(active_indent_guide(&plan), Some((2, 0..2)));
+        plan.caret.as_mut().unwrap().x = 40.0;
+        assert_eq!(active_indent_guide(&plan), Some((1, 0..4)));
+        plan.caret.as_mut().unwrap().x = 0.0;
+        assert_eq!(active_indent_guide(&plan), None);
+        plan.caret = None;
+        assert_eq!(active_indent_guide(&plan), None);
+    }
+}
+
+// Highlight only the connected guide containing the primary caret, rather than
+// unrelated blocks which happen to have the same indentation depth.
+fn active_indent_guide(plan: &RenderPlan) -> Option<(usize, std::ops::Range<usize>)> {
+    let caret = plan.caret?;
+    let index = plan
+        .rows
+        .iter()
+        .position(|row| row.line == caret.position.line && !row.indent_guides.is_empty())?;
+    let depth = plan.rows[index]
+        .indent_guides
+        .iter()
+        .filter(|guide| guide.x <= caret.x)
+        .map(|guide| guide.depth)
+        .max()?;
+    let contains_depth = |index: usize| {
+        plan.rows[index]
+            .indent_guides
+            .iter()
+            .any(|guide| guide.depth == depth)
+    };
+    let mut start = index;
+    let mut end = index + 1;
+    while start > 0 && contains_depth(start - 1) {
+        start -= 1;
+    }
+    while end < plan.rows.len() && contains_depth(end) {
+        end += 1;
+    }
+    Some((depth, start..end))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_plan<Renderer>(
     renderer: &mut Renderer,
@@ -32,6 +120,7 @@ pub(super) fn draw_plan<Renderer>(
     plan: &RenderPlan,
     style: EditorStyle,
     total_visible_rows: usize,
+    wrap_columns: Option<usize>,
     fast_text: bool,
     caret_visible: bool,
     frame_id: u64,
@@ -43,6 +132,7 @@ pub(super) fn draw_plan<Renderer>(
         + advanced_image::Renderer<Handle = advanced_image::Handle>,
 {
     let metrics = layout.metrics;
+    let active_guide = active_indent_guide(plan);
     let gutter_width = metrics.gutter_width(decorations);
     let text_clip_bounds = text_area_bounds(bounds, layout, decorations);
     let scroll_text_clip_bounds =
@@ -58,6 +148,28 @@ pub(super) fn draw_plan<Renderer>(
         width: gutter_width + metrics.padding_left,
         height: bounds.height,
     };
+
+    if decorations.settings.show_wrap_guide
+        && let Some(columns) = wrap_columns
+    {
+        let x = bounds.x
+            + scrolled_text_origin_x(layout, decorations)
+            + columns as f32 * metrics.character_width;
+        renderer.with_layer(scroll_text_clip_bounds, |renderer| {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x,
+                        y: bounds.y,
+                        width: 1.0,
+                        height: bounds.height,
+                    },
+                    ..renderer::Quad::default()
+                },
+                Background::Color(style.line_numbers.scale_alpha(0.20)),
+            );
+        });
+    }
 
     renderer.fill_quad(
         renderer::Quad {
@@ -131,6 +243,23 @@ pub(super) fn draw_plan<Renderer>(
 
             if let Some(line_number) = row.line_number {
                 draw_line_number(renderer, line_number, bounds, row_y, metrics, style);
+            } else if row.start_column > 0 && decorations.settings.show_wrap_indicator {
+                let width = metrics.character_width * 2.0;
+                let x = if decorations.settings.show_line_numbers {
+                    bounds.x + line_number_left_x(metrics, width)
+                } else {
+                    bounds.x + gutter_bounds.width - width
+                };
+                draw_text(
+                    renderer,
+                    "↪".to_owned(),
+                    Point::new(x, row_y + text_baseline_offset(metrics)),
+                    Size::new(width, metrics.line_height),
+                    style.line_numbers.scale_alpha(0.55),
+                    text::Alignment::Left,
+                    metrics,
+                    gutter_bounds,
+                );
             }
         }
     });
@@ -202,17 +331,25 @@ pub(super) fn draw_plan<Renderer>(
 
             for guide in &row.indent_guides {
                 let x = bounds.x + guide.x;
+                let mut color =
+                    style.indent_guides[guide.depth.saturating_sub(1) % style.indent_guides.len()];
+                if active_guide
+                    .as_ref()
+                    .is_some_and(|(depth, rows)| guide.depth == *depth && rows.contains(&row_index))
+                {
+                    color.a = 0.72;
+                }
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: Rectangle {
                             x,
-                            y: row_y + 2.0,
+                            y: row_y,
                             width: 1.0,
-                            height: metrics.line_height - 4.0,
+                            height: metrics.line_height,
                         },
                         ..renderer::Quad::default()
                     },
-                    Background::Color(style.indent_guides),
+                    Background::Color(color),
                 );
             }
 

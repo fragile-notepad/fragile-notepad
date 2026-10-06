@@ -121,7 +121,11 @@ pub(crate) enum ShutdownDelivery {
 message_catalog! {
     Settings(SettingsMessage) {
         DraftThemeSelected(arg0: highlighter::Theme) => Reject,
+        SystemColorModeChanged(arg0: iced::theme::Mode) => Reject,
         DraftWordWrapToggled(arg0: bool) => Reject,
+        DraftFixedWrapSelected(arg0: bool) => Reject,
+        DraftWrapColumnChanged(arg0: String) => Reject,
+        DraftWrapColumnPreset(arg0: usize) => Reject,
         DraftAutoSaveToggled(arg0: bool) => Reject,
         DraftAppearanceSelected(arg0: AppearanceMode) => Reject,
         DraftHardwareAccelerationSelected(arg0: HardwareAccelerationMode) => Reject,
@@ -131,6 +135,8 @@ message_catalog! {
         DraftVisibleTabsToggled(arg0: bool) => Reject,
         DraftEolMarkersToggled(arg0: bool) => Reject,
         DraftIndentationGuidesToggled(arg0: bool) => Reject,
+        DraftWrapIndicatorToggled(arg0: bool) => Reject,
+        DraftWrapGuideToggled(arg0: bool) => Reject,
         DraftFoldingControlsToggled(arg0: bool) => Reject,
         SettingsCategorySelected(arg0: SettingsCategory) => Reject,
         ShortcutGroupSelected(arg0: crate::core::ShortcutGroup) => Reject,

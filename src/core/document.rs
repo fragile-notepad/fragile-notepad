@@ -106,6 +106,7 @@ pub struct Document {
     pending_session_top: Option<EditorPosition>,
     session_folds_pending: bool,
     word_wrap: bool,
+    wrap_column_limit: Option<usize>,
     caret_row_affinities: Vec<(EditorPosition, usize)>,
     pub is_dirty: bool,
     pub is_pinned: bool,
@@ -240,6 +241,7 @@ impl Document {
             pending_session_top: None,
             session_folds_pending: false,
             word_wrap: false,
+            wrap_column_limit: None,
             caret_row_affinities: Vec::new(),
             is_dirty: false,
             is_pinned: false,
@@ -726,6 +728,27 @@ impl Document {
         }
     }
 
+    pub fn set_wrap_column_limit(&mut self, columns: Option<usize>) {
+        let columns = columns.map(|value| {
+            value.clamp(
+                crate::core::EditorSettings::MIN_WRAP_COLUMN,
+                crate::core::EditorSettings::MAX_WRAP_COLUMN,
+            )
+        });
+        if self.wrap_column_limit == columns {
+            return;
+        }
+        let caret_was_visible = self.caret_is_in_view();
+        self.wrap_column_limit = columns;
+        if self.word_wrap {
+            self.preferred_vertical_column = None;
+            self.rebuild_viewport();
+            if caret_was_visible {
+                self.ensure_caret_visible();
+            }
+        }
+    }
+
     fn caret_is_in_view(&self) -> bool {
         if !self.caret_visible_row().is_some_and(|row| {
             row >= self.scroll.first_visible_row
@@ -782,9 +805,12 @@ impl Document {
         } else {
             0.0
         };
-        ((self.viewport_text_width - marker_width - 2.0).max(1.0) / character_width)
+        let window_columns = ((self.viewport_text_width - marker_width - 2.0).max(1.0)
+            / character_width)
             .floor()
-            .max(1.0) as usize
+            .max(1.0) as usize;
+        self.wrap_column_limit
+            .map_or(window_columns, |limit| limit.min(window_columns))
     }
 
     fn wrap_fold_indicator_columns(&self) -> usize {

@@ -273,6 +273,7 @@ fn wrapped_fragments_render_distinct_geometry_with_software_renderer() {
             plan,
             EditorStyle::from_theme(&Theme::Light),
             viewport.visible_row_count(),
+            viewport.wrap_columns(),
             false,
             false,
             1,

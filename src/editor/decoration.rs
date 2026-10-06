@@ -7,6 +7,8 @@ pub struct DecorationSettings {
     pub show_tabs: bool,
     pub show_end_of_line_markers: bool,
     pub show_indentation_guides: bool,
+    pub show_wrap_indicator: bool,
+    pub show_wrap_guide: bool,
     pub show_folding_controls: bool,
     pub indent_width: usize,
 }
@@ -19,6 +21,8 @@ impl Default for DecorationSettings {
             show_tabs: false,
             show_end_of_line_markers: false,
             show_indentation_guides: true,
+            show_wrap_indicator: true,
+            show_wrap_guide: true,
             show_folding_controls: true,
             indent_width: 4,
         }

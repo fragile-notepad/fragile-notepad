@@ -10,7 +10,7 @@ pub struct EditorStyle {
     pub fold_control_background: Color,
     pub active_line: Color,
     pub selection: Color,
-    pub indent_guides: Color,
+    pub indent_guides: [Color; 4],
     pub whitespace_markers: Color,
     pub hidden_line_indicators: Color,
     pub caret: Color,
@@ -24,27 +24,37 @@ impl EditorStyle {
         let (surface, gutter, text, muted, faint, active_line, selection, guide, fold_background) =
             if is_dark {
                 (
-                    Color::from_rgb8(22, 25, 30),
-                    Color::from_rgb8(28, 32, 38),
-                    Color::from_rgb8(235, 238, 242),
-                    Color::from_rgb8(177, 184, 194),
-                    Color::from_rgb8(130, 140, 154),
-                    Color::from_rgba(96.0 / 255.0, 174.0 / 255.0, 1.0, 0.08),
-                    Color::from_rgba(96.0 / 255.0, 174.0 / 255.0, 1.0, 0.30),
-                    Color::from_rgba(177.0 / 255.0, 184.0 / 255.0, 194.0 / 255.0, 0.18),
-                    Color::from_rgb8(38, 43, 51),
+                    Color::from_rgb8(26, 27, 29),
+                    Color::from_rgb8(33, 34, 37),
+                    Color::from_rgb8(232, 233, 235),
+                    Color::from_rgb8(172, 175, 181),
+                    Color::from_rgb8(131, 135, 142),
+                    Color::from_rgb8(33, 34, 37),
+                    Color::from_rgba(64.0 / 255.0, 156.0 / 255.0, 1.0, 0.28),
+                    [
+                        Color::from_rgba(64.0 / 255.0, 156.0 / 255.0, 1.0, 0.18),
+                        Color::from_rgba(61.0 / 255.0, 190.0 / 255.0, 167.0 / 255.0, 0.18),
+                        Color::from_rgba(225.0 / 255.0, 174.0 / 255.0, 75.0 / 255.0, 0.18),
+                        Color::from_rgba(177.0 / 255.0, 131.0 / 255.0, 232.0 / 255.0, 0.18),
+                    ],
+                    Color::from_rgb8(37, 38, 41),
                 )
             } else {
                 (
                     Color::from_rgb8(255, 255, 255),
-                    Color::from_rgb8(243, 245, 248),
-                    Color::from_rgb8(28, 31, 36),
-                    Color::from_rgb8(88, 96, 107),
-                    Color::from_rgb8(128, 137, 150),
-                    Color::from_rgba(0.0, 103.0 / 255.0, 192.0 / 255.0, 0.06),
-                    Color::from_rgba(0.0, 103.0 / 255.0, 192.0 / 255.0, 0.26),
-                    Color::from_rgba(88.0 / 255.0, 96.0 / 255.0, 107.0 / 255.0, 0.20),
-                    Color::from_rgb8(248, 249, 251),
+                    Color::from_rgb8(245, 245, 245),
+                    Color::from_rgb8(32, 33, 35),
+                    Color::from_rgb8(96, 98, 102),
+                    Color::from_rgb8(128, 131, 136),
+                    Color::from_rgb8(247, 247, 248),
+                    Color::from_rgba(0.0, 112.0 / 255.0, 204.0 / 255.0, 0.24),
+                    [
+                        Color::from_rgba(0.0, 112.0 / 255.0, 204.0 / 255.0, 0.16),
+                        Color::from_rgba(0.0, 135.0 / 255.0, 116.0 / 255.0, 0.16),
+                        Color::from_rgba(176.0 / 255.0, 117.0 / 255.0, 20.0 / 255.0, 0.16),
+                        Color::from_rgba(136.0 / 255.0, 77.0 / 255.0, 190.0 / 255.0, 0.16),
+                    ],
+                    Color::from_rgb8(250, 250, 250),
                 )
             };
 

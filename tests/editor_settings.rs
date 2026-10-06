@@ -5,6 +5,149 @@ use fragile_notepad::core::{
 use std::path::PathBuf;
 
 #[test]
+fn modern_syntax_presets_persist_and_highlight_distinct_token_roles() {
+    use iced::advanced::text::highlighter::Highlighter as _;
+    use iced::highlighter;
+    for &theme in highlighter::Theme::VARIANTS {
+        let mut settings = EditorSettings::default();
+        settings.syntax_theme = theme;
+        assert_eq!(
+            EditorSettings::from_xml_str(&settings.to_xml_string()).syntax_theme,
+            theme.family()
+        );
+        let mut parser = highlighter::Highlighter::new(&highlighter::Settings {
+            theme,
+            token: "rs".into(),
+        });
+        let mut token_color = |line: &str, token: &str| {
+            let column = line.find(token).unwrap();
+            parser
+                .highlight_line(line)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .find(|(range, _)| range.contains(&column))
+                .and_then(|(_, highlight)| highlight.color())
+                .expect("colored token")
+        };
+        let keyword = token_color("let count = 42;", "let");
+        let number = token_color("let count = 42;", "42");
+        let string = token_color("let label = \"ready\";", "ready");
+        let comment = token_color("// explanation", "explanation");
+        assert_ne!(keyword, number);
+        assert_ne!(number, string);
+        assert_ne!(comment, keyword);
+        assert_eq!(comment.a, 1.0);
+        let type_color = token_color("let item: Option<u32> = None;", "Option");
+        let macro_color = token_color("column![ text(\"Ready\") ];", "column");
+        assert_ne!(type_color, keyword);
+        assert_ne!(macro_color, type_color);
+        assert_ne!(macro_color, string);
+    }
+}
+
+#[test]
+fn modern_syntax_presets_follow_explicit_appearance_changes() {
+    use iced::highlighter::Theme;
+    let mut settings = EditorSettings::default();
+    settings.set_appearance(AppearanceMode::Light);
+    assert_eq!(settings.resolved_syntax_theme(false), Theme::VSCodeLight);
+    settings.set_appearance(AppearanceMode::Dark);
+    assert_eq!(settings.syntax_theme, Theme::VSCodeDark);
+    settings.syntax_theme = Theme::JetBrainsDark;
+    settings.set_appearance(AppearanceMode::Light);
+    assert_eq!(settings.resolved_syntax_theme(false), Theme::JetBrainsLight);
+    settings.syntax_theme = Theme::SolarizedDark;
+    settings.set_appearance(AppearanceMode::Light);
+    assert_eq!(settings.resolved_syntax_theme(false), Theme::SolarizedLight);
+}
+
+#[test]
+fn every_preset_follows_system_mode_and_keeps_one_selection_name() {
+    use iced::highlighter::Theme;
+    assert_eq!(Theme::ALL.len(), 7);
+    for &family in Theme::ALL {
+        let mut settings = EditorSettings::default();
+        settings.set_syntax_theme(family);
+        for appearance in [
+            AppearanceMode::Light,
+            AppearanceMode::Dark,
+            AppearanceMode::System,
+        ] {
+            settings.set_appearance(appearance);
+            for system_dark in [false, true] {
+                let expected_dark = match appearance {
+                    AppearanceMode::Light => false,
+                    AppearanceMode::Dark => true,
+                    AppearanceMode::System => system_dark,
+                };
+                let resolved = settings.resolved_syntax_theme(system_dark);
+                assert_eq!(resolved.is_dark(), expected_dark);
+                assert_eq!(resolved.family(), family);
+                assert_eq!(settings.syntax_theme, family);
+                assert_eq!(resolved.to_string(), family.to_string());
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_syntax_names_migrate_to_families() {
+    use iced::highlighter::Theme;
+    for (name, family) in [
+        ("VS Code inspired · Light", Theme::VSCodeDark),
+        ("VS Code inspired · Dark", Theme::VSCodeDark),
+        ("JetBrains inspired · Light", Theme::JetBrainsDark),
+        ("JetBrains inspired · Dark", Theme::JetBrainsDark),
+        ("Solarized Dark", Theme::SolarizedDark),
+        ("Inspired GitHub", Theme::InspiredGitHub),
+    ] {
+        let xml = format!(
+            "<fragile-notepad-settings><general syntax-theme=\"{name}\" /></fragile-notepad-settings>"
+        );
+        assert_eq!(EditorSettings::from_xml_str(&xml).syntax_theme, family);
+    }
+}
+
+#[test]
+fn wrap_column_setting_round_trips_and_ignores_invalid_values() {
+    for limit in [None, Some(80), Some(100), Some(120), Some(1000)] {
+        let mut settings = EditorSettings::default();
+        settings.wrap_column_limit = limit;
+        assert_eq!(
+            EditorSettings::from_xml_str(&settings.to_xml_string()).wrap_column_limit,
+            limit
+        );
+    }
+    for value in ["0", "-1", "1001", "abc"] {
+        let xml = format!(
+            "<fragile-notepad-settings><editor wrap-column=\"{value}\" /></fragile-notepad-settings>"
+        );
+        assert_eq!(EditorSettings::from_xml_str(&xml).wrap_column_limit, None);
+    }
+}
+
+#[test]
+fn wrap_visual_settings_are_independent_and_backward_compatible() {
+    let legacy = EditorSettings::from_xml_str(
+        "<fragile-notepad-settings version=\"1\"><decorations /></fragile-notepad-settings>",
+    );
+    assert!(legacy.decorations.show_wrap_indicator);
+    assert!(legacy.decorations.show_wrap_guide);
+    for (indicator, guide) in [(false, true), (true, false), (false, false)] {
+        let mut settings = legacy.clone();
+        settings.decorations.show_wrap_indicator = indicator;
+        settings.decorations.show_wrap_guide = guide;
+        let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+        assert_eq!(restored.decorations.show_wrap_indicator, indicator);
+        assert_eq!(restored.decorations.show_wrap_guide, guide);
+        assert_eq!(
+            restored.decoration_settings(),
+            settings.decoration_settings()
+        );
+    }
+}
+
+#[test]
 fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
     let settings = EditorSettings::from_xml_str(
         "\

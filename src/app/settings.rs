@@ -118,8 +118,50 @@ impl App {
                 self.settings_dialog.draft.set_syntax_theme(theme);
                 Task::none()
             }
+            SettingsMessage::SystemColorModeChanged(mode) => {
+                let dark = mode == iced::theme::Mode::Dark;
+                if self.system_dark != dark {
+                    self.system_dark = dark;
+                    self.settings_dialog.system_dark = dark;
+                    self.pending_work.request(super::events::Work::Syntax);
+                }
+                Task::none()
+            }
             SettingsMessage::DraftWordWrapToggled(word_wrap) => {
                 self.settings_dialog.draft.set_word_wrap(word_wrap);
+                Task::none()
+            }
+            SettingsMessage::DraftFixedWrapSelected(fixed) => {
+                self.settings_dialog.draft.wrap_column_limit = if fixed {
+                    Some(
+                        self.settings_dialog
+                            .wrap_column_input
+                            .parse::<usize>()
+                            .ok()
+                            .filter(|value| EditorSettings::valid_wrap_column(*value))
+                            .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN),
+                    )
+                } else {
+                    None
+                };
+                Task::none()
+            }
+            SettingsMessage::DraftWrapColumnChanged(value) => {
+                if value.len() <= EditorSettings::MAX_WRAP_COLUMN.to_string().len()
+                    && value.chars().all(|ch| ch.is_ascii_digit())
+                {
+                    if let Ok(columns) = value.parse::<usize>()
+                        && EditorSettings::valid_wrap_column(columns)
+                    {
+                        self.settings_dialog.draft.wrap_column_limit = Some(columns);
+                    }
+                    self.settings_dialog.wrap_column_input = value;
+                }
+                Task::none()
+            }
+            SettingsMessage::DraftWrapColumnPreset(columns) => {
+                self.settings_dialog.wrap_column_input = columns.to_string();
+                self.settings_dialog.draft.wrap_column_limit = Some(columns);
                 Task::none()
             }
             SettingsMessage::DraftAutoSaveToggled(auto_save) => {
@@ -168,6 +210,14 @@ impl App {
                 self.settings_dialog
                     .draft
                     .set_show_folding_controls(show_folding_controls);
+                Task::none()
+            }
+            SettingsMessage::DraftWrapIndicatorToggled(show) => {
+                self.settings_dialog.draft.decorations.show_wrap_indicator = show;
+                Task::none()
+            }
+            SettingsMessage::DraftWrapGuideToggled(show) => {
+                self.settings_dialog.draft.decorations.show_wrap_guide = show;
                 Task::none()
             }
             SettingsMessage::SettingsCategorySelected(category) => {
@@ -512,6 +562,7 @@ pub(super) fn merge_initial_settings(
     macro_rules! keep_edits { ($($field:ident),*) => { $(if current.$field != defaults.$field { loaded.$field = current.$field.clone(); })* }; }
     keep_edits!(
         word_wrap,
+        wrap_column_limit,
         auto_save,
         zoom,
         scroll_speed,
@@ -543,6 +594,8 @@ pub(super) fn merge_initial_settings(
     decoration_edit!(show_end_of_line_markers, 32);
     decoration_edit!(show_indentation_guides, 64);
     decoration_edit!(show_folding_controls, 128);
+    decoration_edit!(show_wrap_indicator, 0);
+    decoration_edit!(show_wrap_guide, 0);
     if edits == u32::MAX {
         let history = loaded.open_history;
         loaded = current.clone();
@@ -563,6 +616,7 @@ pub(super) fn apply_to_workspace(
     use crate::core::workspace::changes::WorkspaceEvent;
     let apply = |document: &mut crate::core::Document| {
         document.set_decoration_settings(settings.decoration_settings());
+        document.set_wrap_column_limit(settings.wrap_column_limit);
         document.set_word_wrap(settings.word_wrap);
     };
     match event {

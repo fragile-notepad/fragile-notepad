@@ -14,8 +14,17 @@ use two_face::re_exports::syntect;
 
 static SYNTAXES: LazyLock<parsing::SyntaxSet> = LazyLock::new(two_face::syntax::extra_no_newlines);
 
-static THEMES: LazyLock<highlighting::ThemeSet> =
-    LazyLock::new(highlighting::ThemeSet::load_defaults);
+mod modern;
+
+static THEMES: LazyLock<highlighting::ThemeSet> = LazyLock::new(|| {
+    let mut themes = highlighting::ThemeSet::load_defaults();
+    for &theme in Theme::VARIANTS {
+        let _ = themes
+            .themes
+            .insert(theme.key().into(), modern::theme(theme));
+    }
+    themes
+});
 
 static SYNTAX_LIST: LazyLock<Vec<Syntax>> = LazyLock::new(|| {
     let mut syntaxes = SYNTAXES
@@ -296,16 +305,27 @@ impl Highlight {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
+    VSCodeDark,
+    VSCodeLight,
+    JetBrainsDark,
+    JetBrainsLight,
     SolarizedDark,
+    SolarizedLight,
     Base16Mocha,
+    MochaLight,
     Base16Ocean,
+    OceanLight,
     Base16Eighties,
+    EightiesLight,
     InspiredGitHub,
+    GitHubDark,
 }
 
 impl Theme {
-    /// A static slice containing all the available themes.
+    /// One representative per preset family, for selection lists.
     pub const ALL: &'static [Self] = &[
+        Self::VSCodeDark,
+        Self::JetBrainsDark,
         Self::SolarizedDark,
         Self::Base16Mocha,
         Self::Base16Ocean,
@@ -313,35 +333,97 @@ impl Theme {
         Self::InspiredGitHub,
     ];
 
+    /// Every concrete light and dark variant.
+    pub const VARIANTS: &'static [Self] = &[
+        Self::VSCodeDark,
+        Self::VSCodeLight,
+        Self::JetBrainsDark,
+        Self::JetBrainsLight,
+        Self::SolarizedDark,
+        Self::SolarizedLight,
+        Self::Base16Mocha,
+        Self::MochaLight,
+        Self::Base16Ocean,
+        Self::OceanLight,
+        Self::Base16Eighties,
+        Self::EightiesLight,
+        Self::InspiredGitHub,
+        Self::GitHubDark,
+    ];
+
+    /// Returns the stable family representative used in persisted settings.
+    pub fn family(self) -> Self {
+        match self {
+            Self::VSCodeLight => Self::VSCodeDark,
+            Self::JetBrainsLight => Self::JetBrainsDark,
+            Self::SolarizedLight => Self::SolarizedDark,
+            Self::MochaLight => Self::Base16Mocha,
+            Self::OceanLight => Self::Base16Ocean,
+            Self::EightiesLight => Self::Base16Eighties,
+            Self::GitHubDark => Self::InspiredGitHub,
+            theme => theme,
+        }
+    }
+
+    /// Resolves this preset to the variant for the editor's color mode.
+    pub fn variant(self, dark: bool) -> Self {
+        match (self.family(), dark) {
+            (Self::VSCodeDark, false) => Self::VSCodeLight,
+            (Self::JetBrainsDark, false) => Self::JetBrainsLight,
+            (Self::SolarizedDark, false) => Self::SolarizedLight,
+            (Self::Base16Mocha, false) => Self::MochaLight,
+            (Self::Base16Ocean, false) => Self::OceanLight,
+            (Self::Base16Eighties, false) => Self::EightiesLight,
+            (Self::InspiredGitHub, true) => Self::GitHubDark,
+            (theme, _) => theme,
+        }
+    }
+
     /// Returns `true` if the [`Theme`] is dark, and false otherwise.
     pub fn is_dark(self) -> bool {
         match self {
-            Self::SolarizedDark | Self::Base16Mocha | Self::Base16Ocean | Self::Base16Eighties => {
-                true
-            }
-            Self::InspiredGitHub => false,
+            Self::VSCodeDark
+            | Self::JetBrainsDark
+            | Self::SolarizedDark
+            | Self::Base16Mocha
+            | Self::Base16Ocean
+            | Self::Base16Eighties
+            | Self::GitHubDark => true,
+            _ => false,
         }
     }
 
     fn key(self) -> &'static str {
         match self {
+            Theme::VSCodeDark => "fragile-vscode-dark",
+            Theme::VSCodeLight => "fragile-vscode-light",
+            Theme::JetBrainsDark => "fragile-jetbrains-dark",
+            Theme::JetBrainsLight => "fragile-jetbrains-light",
             Theme::SolarizedDark => "Solarized (dark)",
+            Theme::SolarizedLight => "fragile-solarized-light",
             Theme::Base16Mocha => "base16-mocha.dark",
+            Theme::MochaLight => "fragile-mocha-light",
             Theme::Base16Ocean => "base16-ocean.dark",
+            Theme::OceanLight => "fragile-ocean-light",
             Theme::Base16Eighties => "base16-eighties.dark",
+            Theme::EightiesLight => "fragile-eighties-light",
             Theme::InspiredGitHub => "InspiredGitHub",
+            Theme::GitHubDark => "fragile-github-dark",
         }
     }
 }
 
 impl std::fmt::Display for Theme {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Theme::SolarizedDark => write!(f, "Solarized Dark"),
+        match self.family() {
+            Theme::VSCodeDark => write!(f, "VS Code"),
+            Theme::JetBrainsDark => write!(f, "JetBrains"),
+            Theme::SolarizedDark => write!(f, "Solarized"),
             Theme::Base16Mocha => write!(f, "Mocha"),
             Theme::Base16Ocean => write!(f, "Ocean"),
             Theme::Base16Eighties => write!(f, "Eighties"),
             Theme::InspiredGitHub => write!(f, "Inspired GitHub"),
+            _ => unreachable!("family representative"),
         }
     }
 }

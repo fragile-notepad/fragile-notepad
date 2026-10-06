@@ -279,6 +279,7 @@ fn wrapped_fragments_render_distinct_geometry_with_software_renderer() {
             1,
             &mut RichParagraphCache::default(),
             &mut LineGeometryCache::default(),
+            None,
         );
         renderer.screenshot(Size::new(220, 140), 1.0, Color::WHITE)
     };
@@ -635,6 +636,7 @@ fn measured_selection_bounds_use_unicode_glyph_advances() {
         byte_to_grapheme: byte_to_grapheme_table(text),
         fallback_character_width: metrics.character_width,
         start_visual_column: 0,
+        expanded_byte_offsets: None,
     };
 
     let (x, width) =

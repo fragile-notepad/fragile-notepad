@@ -2,6 +2,7 @@
 
 pub mod action;
 pub mod buffer;
+pub mod cjk;
 pub mod decoration;
 pub mod delimiter;
 pub mod fold;

@@ -51,6 +51,51 @@ and scrollbars. It preserves logical text, tab stops, and Unicode graphemes.
 Caret affinity chooses a side of soft breaks. Resizing, zoom, and decoration
 changes reflow; edits with unchanged line counts reuse unaffected measurements.
 
+CJK routing uses cues from each logical line: kana, Hangul, and Chinese variant
+forms identify regional fonts; neutral Han defaults to Simplified Chinese.
+Mixed passages and paired Chinese variants retain their local regional forms.
+Latin stays regular monospace. Cached logical runs survive wrapping and clipping,
+and drawing, caret, selection, and IME geometry use the same fonts. Context
+sampling is bounded to 1 MiB and 16,384 lines; visible text beyond the sample
+still detects local kana/Hangul. Lines over 4 KiB use bounded column-based geometry.
+
+Complete Noto/Source Han regional collections use Regular for consistent strokes.
+Other families use generated optical weight profiles. Calibration compares ink
+density and stroke estimates across several sizes; uncertain matches keep Regular.
+The renderer verifies the chosen face and caches its coverage by font database
+version. Unsupported symbols, marks, or variation selectors keep the whole
+grapheme in that family's Regular face. Korean Hanja and historical Hangul
+clusters retain Regular with its full shaping support.
+
+Fresh Cargo builds and CI prepare profiles using `scripts/prepare_font_profiles.py`
+and the Windows/Linux/macOS catalog in `scripts/font_families.py`. Missing regional
+coverage or a usable reference triggers a pinned, checksum-verified
+[Noto Sans CJK](https://github.com/notofonts/noto-cjk) download. Regional fallbacks
+are embedded; reference-only downloads stay in the cache. Preparation reuses
+matching inputs and writes generated profiles outside Git. Font notices accompany
+the binary and distribution packages.
+
+Build preparation requires Python 3 and installs missing calibration dependencies
+in an isolated cache environment. `FRAGILE_FONT_PYTHON` selects Python,
+`FRAGILE_FONT_CACHE` moves the cache, and `FRAGILE_FONT_OFFLINE=1` requires cached
+dependencies and fonts. The application uses compiled profiles at runtime.
+
+```sh
+cargo run --locked --example preview_cjk
+cargo run --locked --example preview_cjk -- --weights
+cargo run --locked --example preview_cjk -- --hangul-weights
+python -m unittest discover -s scripts -p 'test_*font_profiles.py'
+```
+
+Previews verify actual glyph/font IDs and write screenshots under `target/cjk-*`.
+Add `--vulkan` for Vulkan. Weight previews compare optical balance, Hangul/Hanja,
+and coverage-safe fallback at 16, 24, and 32 pixels. Fixtures live in
+`tests/fixtures/cjk/`; CI also runs the generator, preparation, and catalog tests.
+For independent calibration suggestions and measurement reports, install
+`scripts/requirements-font-profiles.txt` and run
+`python scripts/generate_font_profiles.py --help` to select fonts, references,
+and ignored output paths.
+
 ## Files and sessions
 
 ```sh

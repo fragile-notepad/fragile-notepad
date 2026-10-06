@@ -4,15 +4,16 @@ use iced::widget::text_editor::LineEnding;
 use crate::core::encoding::{
     DecodedText, TextEncoding, encode_text, encode_utf8_chunks_for_save, strip_text_bom,
 };
+use crate::editor::cjk::{CjkContext, CjkContextCache};
 use crate::editor::{
     DecorationModel, DecorationSettings, EditorBuffer, EditorHistory, EditorPosition,
     EditorSelection, FoldModel, FoldProvider, IndentBraceFoldProvider, IndentGuide, ScrollOffset,
     SelectionSet, SyntaxLineCache, ViewportModel,
 };
-
 use std::cell::RefCell;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const DEFAULT_SYNTAX_TOKEN: &str = "txt";
@@ -112,6 +113,7 @@ pub struct Document {
     pub is_pinned: bool,
     pub syntax_token: String,
     pub syntax_cache: RefCell<SyntaxLineCache>,
+    cjk_context: RefCell<CjkContextCache>,
     pub line_ending: Option<LineEnding>,
     pub encoding: TextEncoding,
     pub load_state: DocumentLoadState,
@@ -247,6 +249,7 @@ impl Document {
             is_pinned: false,
             syntax_token,
             syntax_cache: RefCell::new(SyntaxLineCache::default()),
+            cjk_context: RefCell::new(CjkContextCache::default()),
             line_ending,
             encoding: TextEncoding::Utf8,
             load_state: DocumentLoadState::Complete,
@@ -482,6 +485,13 @@ impl Document {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Reuses language evidence across redraws, wrapping, and renderer handoffs.
+    pub fn cjk_context(&self) -> Arc<CjkContext> {
+        self.cjk_context
+            .borrow_mut()
+            .get_or_update(&self.buffer, self.id.get(), self.revision)
     }
 
     pub fn text_for_save(&self) -> String {

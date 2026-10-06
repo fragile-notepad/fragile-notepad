@@ -17,6 +17,8 @@ function Invoke-CiCommand {
 }
 
 Invoke-CiCommand cargo fmt --package fragile-notepad --check
+Invoke-CiCommand python -m unittest discover -s scripts -p test_*font_profiles.py
+Invoke-CiCommand python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared --target-os windows --cache-dir target/font-profiles
 & .\scripts\generate_icon_assets.ps1
 Invoke-CiCommand python scripts/test_icon_assets.py
 # cargo test also compiles the application and examples.

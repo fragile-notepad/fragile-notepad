@@ -10,12 +10,14 @@ use iced::{Background, Element, Event, Font, Length, Rectangle, Size, Theme, hig
 #[cfg(test)]
 use iced::{Color, Pixels, Point, alignment};
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::time::Instant as StdInstant;
 
 use crate::core::ShortcutMap;
 use crate::editor::action::EditorAction;
 
 use super::buffer::EditorBuffer;
+use super::cjk::CjkContext;
 use super::decoration::DecorationModel;
 use super::fold::FoldRange;
 #[cfg(test)]
@@ -51,7 +53,10 @@ pub use actions::key_action;
 #[cfg(test)]
 use cache::{RichParagraphCache, SyntaxSpanKey};
 use draw::{draw_plan, draw_vertical_scrollbar};
-pub use font::{EDITOR_FONT, EDITOR_FONT_ROUTE, EDITOR_TEXT_SHAPING, EditorFontRoute};
+pub use font::{
+    EDITOR_FONT, EDITOR_FONT_ROUTE, EDITOR_TEXT_SHAPING, EditorFontRoute, EditorFontRun,
+    editor_font_runs, editor_font_runs_from_cjk_runs, regional_cjk_font,
+};
 #[cfg(test)]
 use interaction::scroll_delta_lines;
 use interaction::{InteractionContext, UpdateOutcome, handle_event};
@@ -83,6 +88,7 @@ pub struct AdvancedEditor<'a, Message> {
     caret_rows: &'a [(EditorPosition, usize)],
     scroll_speed: f32,
     viewport_key: u64,
+    cjk_context: Option<Arc<CjkContext>>,
     shortcuts: &'a ShortcutMap,
     width: Length,
     height: Length,
@@ -113,6 +119,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
             caret_rows: &[],
             scroll_speed: 1.5,
             viewport_key: 0,
+            cjk_context: None,
             shortcuts: &DEFAULT_SHORTCUTS,
             width: Length::Fill,
             height: Length::Fill,
@@ -127,6 +134,11 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
 
     pub fn viewport_key(mut self, key: u64) -> Self {
         self.viewport_key = key;
+        self
+    }
+
+    pub fn cjk_context(mut self, context: Arc<CjkContext>) -> Self {
+        self.cjk_context = Some(context);
         self
     }
 
@@ -310,6 +322,7 @@ where
                 frame_id,
                 &mut rich_paragraphs,
                 &mut line_geometries,
+                self.cjk_context.as_deref(),
             );
             draw_vertical_scrollbar(
                 renderer,
@@ -321,7 +334,7 @@ where
             if let Some(drag) = &state.text_drag
                 && let Some((target, row)) = drag.target
             {
-                let point = line_cache::measured_position_point(
+                let point = line_cache::measured_position_point_with_context(
                     self.buffer,
                     self.viewport,
                     self.decorations,
@@ -329,6 +342,7 @@ where
                     target,
                     row,
                     renderer,
+                    self.cjk_context.as_deref(),
                 );
                 renderer.with_layer(
                     crate::editor::layout::text_area_bounds(
@@ -440,6 +454,7 @@ where
                     caret_row: self.caret_row,
                     scroll_speed: self.scroll_speed,
                     viewport_key: self.viewport_key,
+                    cjk_context: self.cjk_context.as_deref(),
                     shortcuts: self.shortcuts,
                     on_action: &*self.on_action,
                 },
@@ -567,11 +582,18 @@ impl<Message> AdvancedEditor<'_, Message> {
             .max_by_key(|span| span.last_hidden_line)?;
         let line_text = self.buffer.line(line)?;
         let fragment = &line_text[segment.start_column..segment.end_column];
-        let line_geometry = LineGeometry::new_with_visual_offset(
+        let line_geometry = LineGeometry::new_with_font_runs(
             fragment,
             self.metrics,
             renderer,
             segment.start_visual_column,
+            self.decorations.settings.indent_width,
+            &font::editor_font_runs_for_fragment(
+                fragment,
+                self.cjk_context.as_deref(),
+                line,
+                segment.start_column,
+            ),
         );
         let text_end_x = measured_caret_x(
             &line_geometry,

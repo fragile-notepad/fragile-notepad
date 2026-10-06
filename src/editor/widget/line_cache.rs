@@ -1,8 +1,10 @@
 use iced::advanced::text;
+use iced::advanced::text::Paragraph as _;
 use iced::{Font, Pixels, Point, Size, alignment};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::editor::buffer::EditorBuffer;
+use crate::editor::cjk::{CjkContext, CjkLanguage};
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{
     EditorLayout, EditorMetrics, HitTarget, byte_column_for_with_offset, hit_visible_row, row_y,
@@ -12,7 +14,11 @@ use crate::editor::position::EditorPosition;
 use crate::editor::render::{RowRenderPlan, SelectionRenderPlan};
 use crate::editor::viewport::ViewportModel;
 
-use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
+#[cfg(test)]
+use super::font::editor_font_runs;
+use super::font::{
+    EDITOR_FONT, EDITOR_TEXT_SHAPING, EditorFontRun, editor_font_runs_for_fragment, remap_font_runs,
+};
 
 const LINE_GEOMETRY_CACHE_MINIMUM: usize = 256;
 const MAX_MEASURED_LINE_BYTES: usize = 4 * 1024;
@@ -41,6 +47,10 @@ struct LineGeometryEntry<Paragraph> {
     text: String,
     metrics: EditorMetrics,
     scale_factor: Option<f32>,
+    language: Option<CjkLanguage>,
+    tab_width: usize,
+    font_version: iced::advanced::graphics::text::Version,
+    font_runs: Vec<EditorFontRun>,
     geometry: LineGeometry<Paragraph>,
 }
 
@@ -86,11 +96,18 @@ where
         text: &str,
         metrics: EditorMetrics,
         renderer: &Renderer,
+        language: Option<CjkLanguage>,
+        tab_width: usize,
+        font_runs: &[EditorFontRun],
     ) -> usize
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
     {
         let scale_factor = renderer.scale_factor();
+        let font_version = iced::advanced::graphics::text::font_system()
+            .read()
+            .expect("Read font system")
+            .version();
         let slot = self.slot_for_row(visible_row);
         let is_hit = self.entries[slot].as_ref().is_some_and(|entry| {
             entry.visible_row == visible_row
@@ -98,6 +115,10 @@ where
                 && entry.text == text
                 && entry.metrics == metrics
                 && entry.scale_factor == scale_factor
+                && entry.language == language
+                && entry.tab_width == tab_width
+                && entry.font_version == font_version
+                && entry.font_runs == font_runs
         });
 
         if !is_hit {
@@ -112,16 +133,18 @@ where
                 text: text.to_owned(),
                 metrics,
                 scale_factor,
-                geometry: if start_visual_column == 0 {
-                    LineGeometry::new(text, metrics, renderer)
-                } else {
-                    LineGeometry::new_with_visual_offset(
-                        text,
-                        metrics,
-                        renderer,
-                        start_visual_column,
-                    )
-                },
+                language,
+                tab_width,
+                font_version,
+                font_runs: font_runs.to_vec(),
+                geometry: LineGeometry::new_with_font_runs(
+                    text,
+                    metrics,
+                    renderer,
+                    start_visual_column,
+                    tab_width,
+                    font_runs,
+                ),
             });
         }
 
@@ -129,13 +152,37 @@ where
     }
 }
 
+#[cfg(test)]
 pub(super) fn measured_text_hit_target<Renderer>(
+    position: Point,
+    layout: EditorLayout,
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    renderer: &Renderer,
+) -> HitTarget
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    measured_text_hit_target_with_context(
+        position,
+        layout,
+        buffer,
+        viewport,
+        decorations,
+        renderer,
+        None,
+    )
+}
+
+pub(super) fn measured_text_hit_target_with_context<Renderer>(
     position: Point,
     mut layout: EditorLayout,
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
     decorations: &DecorationModel,
     renderer: &Renderer,
+    context: Option<&CjkContext>,
 ) -> HitTarget
 where
     Renderer: text::Renderer<Font = Font>,
@@ -155,11 +202,13 @@ where
     let text_x = scrolled_text_origin_x(layout, decorations);
     let x = (position.x - text_x).max(0.0);
     let column = segment.start_column
-        + LineGeometry::new_with_visual_offset(
+        + LineGeometry::new_with_font_runs(
             fragment,
             layout.metrics,
             renderer,
             segment.start_visual_column,
+            decorations.settings.indent_width,
+            &editor_font_runs_for_fragment(fragment, context, line, segment.start_column),
         )
         .byte_column_for_x(x, decorations.settings.indent_width);
 
@@ -168,7 +217,32 @@ where
 
 /// Measures a document position within its visual row. The optional row keeps
 /// an upstream caret at the end of a wrapped fragment on that fragment.
+#[cfg(test)]
 pub(crate) fn measured_position_point<Renderer>(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    layout: EditorLayout,
+    position: EditorPosition,
+    caret_row: Option<usize>,
+    renderer: &Renderer,
+) -> Point
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    measured_position_point_with_context(
+        buffer,
+        viewport,
+        decorations,
+        layout,
+        position,
+        caret_row,
+        renderer,
+        None,
+    )
+}
+
+pub(crate) fn measured_position_point_with_context<Renderer>(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
     decorations: &DecorationModel,
@@ -176,6 +250,7 @@ pub(crate) fn measured_position_point<Renderer>(
     position: EditorPosition,
     caret_row: Option<usize>,
     renderer: &Renderer,
+    context: Option<&CjkContext>,
 ) -> Point
 where
     Renderer: text::Renderer<Font = Font>,
@@ -205,11 +280,14 @@ where
             )
         })
         .unwrap_or((0, line.len(), 0));
-    let geometry = LineGeometry::new_with_visual_offset(
-        &line[start.min(line.len())..end.min(line.len())],
+    let fragment = &line[start.min(line.len())..end.min(line.len())];
+    let geometry = LineGeometry::new_with_font_runs(
+        fragment,
         layout.metrics,
         renderer,
         visual_offset,
+        decorations.settings.indent_width,
+        &editor_font_runs_for_fragment(fragment, context, position.line, start),
     );
 
     Point::new(
@@ -299,6 +377,8 @@ where
         metrics: EditorMetrics,
         cache: &'a mut LineGeometryCache<Paragraph>,
         renderer: &Renderer,
+        context: Option<&CjkContext>,
+        tab_width: usize,
     ) -> Self
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
@@ -315,6 +395,14 @@ where
                         &row.text,
                         metrics,
                         renderer,
+                        context.and_then(|context| context.language_for_line(row.line)),
+                        tab_width,
+                        &editor_font_runs_for_fragment(
+                            &row.text,
+                            context,
+                            row.line,
+                            row.start_column,
+                        ),
                     ),
                 )
             })
@@ -355,6 +443,7 @@ pub(super) enum LineGeometry<Paragraph> {
         byte_to_grapheme: Vec<(usize, usize)>,
         fallback_character_width: f32,
         start_visual_column: usize,
+        expanded_byte_offsets: Option<Vec<(usize, usize)>>,
     },
 }
 
@@ -362,18 +451,62 @@ impl<Paragraph> LineGeometry<Paragraph>
 where
     Paragraph: text::Paragraph<Font = Font>,
 {
-    pub(super) fn new<Renderer>(text: &str, metrics: EditorMetrics, renderer: &Renderer) -> Self
-    where
-        Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
-    {
-        Self::new_with_visual_offset(text, metrics, renderer, 0)
-    }
-
+    #[cfg(test)]
     pub(super) fn new_with_visual_offset<Renderer>(
         text: &str,
         metrics: EditorMetrics,
         renderer: &Renderer,
         start_visual_column: usize,
+    ) -> Self
+    where
+        Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
+    {
+        Self::new_with_language(text, metrics, renderer, start_visual_column, None)
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_with_language<Renderer>(
+        text: &str,
+        metrics: EditorMetrics,
+        renderer: &Renderer,
+        start_visual_column: usize,
+        language: Option<CjkLanguage>,
+    ) -> Self
+    where
+        Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
+    {
+        Self::new_with_language_and_tabs(text, metrics, renderer, start_visual_column, language, 4)
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_with_language_and_tabs<Renderer>(
+        text: &str,
+        metrics: EditorMetrics,
+        renderer: &Renderer,
+        start_visual_column: usize,
+        language: Option<CjkLanguage>,
+        tab_width: usize,
+    ) -> Self
+    where
+        Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
+    {
+        Self::new_with_font_runs(
+            text,
+            metrics,
+            renderer,
+            start_visual_column,
+            tab_width,
+            &editor_font_runs(text, language),
+        )
+    }
+
+    pub(super) fn new_with_font_runs<Renderer>(
+        text: &str,
+        metrics: EditorMetrics,
+        renderer: &Renderer,
+        start_visual_column: usize,
+        tab_width: usize,
+        font_runs: &[EditorFontRun],
     ) -> Self
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
@@ -386,7 +519,7 @@ where
             };
         }
 
-        if text.contains('\t') || requires_fallback_geometry(text) {
+        if requires_fallback_geometry(text) {
             return Self::Tabular {
                 text: text.to_owned(),
                 character_width: metrics.character_width,
@@ -394,17 +527,47 @@ where
             };
         }
 
+        let expanded = super::rich_text::expand_tabs_for_rendering_with_offset(
+            text,
+            tab_width,
+            start_visual_column,
+        );
+        let shaped_text = expanded
+            .as_ref()
+            .map_or(text, |expanded| expanded.text.as_str());
+        let expanded_fonts;
+        let fonts = if let Some(expanded) = &expanded {
+            expanded_fonts = remap_font_runs(font_runs, &expanded.byte_offsets);
+            expanded_fonts.as_slice()
+        } else {
+            font_runs
+        };
+        let byte_to_grapheme = if let Some(expanded) = &expanded {
+            let shaped_table = byte_to_grapheme_table(shaped_text);
+            byte_to_grapheme_table(text)
+                .into_iter()
+                .map(|(byte, _)| {
+                    (
+                        byte,
+                        grapheme_index_for_byte(&shaped_table, expanded.byte_offsets[byte]),
+                    )
+                })
+                .collect()
+        } else {
+            byte_to_grapheme_table(text)
+        };
         Self::Measured {
             text: text.to_owned(),
-            paragraph: Renderer::Paragraph::with_text(measure_text(
-                text,
-                EDITOR_FONT,
-                metrics,
-                renderer,
-            )),
-            byte_to_grapheme: byte_to_grapheme_table(text),
+            paragraph: measured_paragraph(shaped_text, metrics, renderer, fonts),
+            byte_to_grapheme,
             fallback_character_width: metrics.character_width,
             start_visual_column,
+            expanded_byte_offsets: expanded.map(|expanded| {
+                text.char_indices()
+                    .map(|(byte, _)| (byte, expanded.byte_offsets[byte]))
+                    .chain(std::iter::once((text.len(), expanded.text.len())))
+                    .collect()
+            }),
         }
     }
 
@@ -449,17 +612,8 @@ where
                 byte_to_grapheme,
                 fallback_character_width,
                 start_visual_column,
+                ..
             } => {
-                if text.contains('\t') {
-                    return fallback_x_for_byte_column(
-                        text,
-                        byte_column,
-                        *fallback_character_width,
-                        tab_width,
-                        *start_visual_column,
-                    );
-                }
-
                 let byte_column = clamp_byte_boundary(text, byte_column);
                 let grapheme_index = grapheme_index_for_byte(byte_to_grapheme, byte_column);
 
@@ -504,34 +658,52 @@ where
                 paragraph,
                 fallback_character_width,
                 start_visual_column,
+                expanded_byte_offsets,
                 ..
-            } => {
-                if text.contains('\t') {
-                    return fallback_byte_column_for_x(
+            } => paragraph
+                .hit_test(Point::new(x.max(0.0), 0.5))
+                .map(text::Hit::cursor)
+                .map(|offset| {
+                    let offset = expanded_byte_offsets.as_ref().map_or(offset, |mapping| {
+                        let index = mapping
+                            .partition_point(|(_, expanded)| *expanded <= offset)
+                            .saturating_sub(1);
+                        mapping[index].0
+                    });
+                    clamp_byte_boundary(text, offset)
+                })
+                .unwrap_or_else(|| {
+                    fallback_byte_column_for_x(
                         text,
                         x,
                         *fallback_character_width,
                         tab_width,
                         *start_visual_column,
-                    );
-                }
-
-                paragraph
-                    .hit_test(Point::new(x.max(0.0), 0.5))
-                    .map(text::Hit::cursor)
-                    .map(|offset| clamp_byte_boundary(text, offset))
-                    .unwrap_or_else(|| {
-                        fallback_byte_column_for_x(
-                            text,
-                            x,
-                            *fallback_character_width,
-                            tab_width,
-                            *start_visual_column,
-                        )
-                    })
-            }
+                    )
+                }),
         }
     }
+}
+
+fn measured_paragraph<Renderer>(
+    text: &str,
+    metrics: EditorMetrics,
+    renderer: &Renderer,
+    runs: &[EditorFontRun],
+) -> Renderer::Paragraph
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    if runs.iter().all(|run| run.font == EDITOR_FONT) {
+        return Renderer::Paragraph::with_text(measure_text(text, EDITOR_FONT, metrics, renderer));
+    }
+    let spans: Vec<text::Span<'_, (), Font>> = runs
+        .iter()
+        .map(|run| text::Span::new(&text[run.byte_range.clone()]).font(run.font))
+        .collect();
+    Renderer::Paragraph::with_spans(
+        measure_text(text, EDITOR_FONT, metrics, renderer).with_content(spans.as_slice()),
+    )
 }
 
 fn can_use_fast_geometry(text: &str) -> bool {
@@ -539,7 +711,7 @@ fn can_use_fast_geometry(text: &str) -> bool {
 }
 
 fn requires_fallback_geometry(text: &str) -> bool {
-    text.len() > MAX_MEASURED_LINE_BYTES || text.chars().any(char::is_control)
+    text.len() > MAX_MEASURED_LINE_BYTES || text.chars().any(|ch| ch != '\t' && ch.is_control())
 }
 
 fn fallback_x_for_byte_column(
@@ -654,8 +826,8 @@ mod tests {
         let metrics = EditorMetrics::default();
         let mut cache = LineGeometryCache::<()>::default();
         cache.ensure_capacity(2);
-        let first = cache.ensure(0, 0, "first", metrics, &());
-        let second = cache.ensure(1, 5, "\tend", metrics, &());
+        let first = cache.ensure(0, 0, "first", metrics, &(), None, 4, &[]);
+        let second = cache.ensure(1, 5, "\tend", metrics, &(), None, 4, &[]);
         assert_ne!(first, second);
         assert_eq!(cache.geometry(first).unwrap().x_for_byte_column(5, 4), 40.0);
         assert_eq!(
@@ -663,7 +835,7 @@ mod tests {
             24.0
         );
 
-        cache.ensure(1, 6, "\tend", metrics, &());
+        cache.ensure(1, 6, "\tend", metrics, &(), None, 4, &[]);
         assert_eq!(
             cache.geometry(second).unwrap().x_for_byte_column(1, 4),
             16.0
@@ -766,6 +938,10 @@ mod tests {
                         text: format!("line {line}"),
                         metrics: EditorMetrics::default(),
                         scale_factor: None,
+                        language: None,
+                        tab_width: 4,
+                        font_version: iced::advanced::graphics::text::Version::default(),
+                        font_runs: Vec::new(),
                         geometry: LineGeometry::Fast {
                             text: format!("line {line}"),
                             character_width: EditorMetrics::default().character_width,

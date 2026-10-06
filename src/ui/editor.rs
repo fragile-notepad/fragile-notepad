@@ -31,6 +31,7 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
     )
     .id(EDITOR_ID)
     .viewport_key(document_id.get())
+    .cjk_context(document.cjk_context())
     .height(Fill)
     .metrics(metrics)
     .scroll(document.scroll)

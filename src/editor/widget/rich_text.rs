@@ -10,12 +10,15 @@ use crate::editor::layout::{
 use crate::editor::render::RowRenderPlan;
 
 use super::cache::{RichParagraphCache, SyntaxSpanKey};
-use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
+use super::font::{
+    EDITOR_FONT, EDITOR_TEXT_SHAPING, EditorFontRun, clipped_font_runs, remap_font_runs,
+};
 use super::style::EditorStyle;
 
 const MAX_SYNTAX_SPANS_PER_ROW: usize = 256;
 const LONG_LINE_VISIBLE_MARGIN_COLUMNS: usize = 8;
 const LONG_STYLE_RUN_SUBDIVISION_COLUMNS: usize = 100;
+const MAX_UNCLIPPED_UNICODE_BYTES: usize = 4 * 1024;
 
 pub(super) fn can_batch_fast_text(text: &str) -> bool {
     text.bytes().all(|byte| byte.is_ascii() && byte != b'\t')
@@ -33,6 +36,7 @@ pub(super) fn draw_row_text<Renderer>(
     clip_bounds: Rectangle,
     frame_id: u64,
     rich_paragraphs: &mut RichParagraphCache<Renderer::Paragraph>,
+    font_runs: &[EditorFontRun],
     draw_plain_text: impl FnOnce(
         &mut Renderer,
         String,
@@ -56,6 +60,23 @@ pub(super) fn draw_row_text<Renderer>(
             clip_bounds,
             style.syntax_fallback_text,
             draw_plain_text,
+        );
+        return;
+    }
+
+    if !row.text.is_ascii() {
+        draw_adaptive_row_text(
+            renderer,
+            row,
+            text_origin_x,
+            baseline_y,
+            metrics,
+            decorations,
+            style,
+            clip_bounds,
+            frame_id,
+            rich_paragraphs,
+            font_runs,
         );
         return;
     }
@@ -170,6 +191,197 @@ pub(super) fn draw_row_text<Renderer>(
         rich_paragraphs,
         draw_plain_text,
     );
+}
+
+/// Shape font and color runs together so fallback glyph advances are identical
+/// to those used for caret/selection geometry. Ordinary Unicode lines retain
+/// their real origin; column-based cropping is reserved for very long lines.
+#[allow(clippy::too_many_arguments)]
+fn draw_adaptive_row_text<Renderer>(
+    renderer: &mut Renderer,
+    row: &RowRenderPlan,
+    text_origin_x: f32,
+    baseline_y: f32,
+    metrics: EditorMetrics,
+    decorations: &DecorationModel,
+    style: EditorStyle,
+    clip_bounds: Rectangle,
+    frame_id: u64,
+    cache: &mut RichParagraphCache<Renderer::Paragraph>,
+    font_runs: &[EditorFontRun],
+) where
+    Renderer: text::Renderer<Font = Font>,
+{
+    let source_is_long = row.text.len() > MAX_UNCLIPPED_UNICODE_BYTES;
+    let clipped;
+    let clipped_fonts;
+    let mut fonts = font_runs;
+    let mut text_origin_x = text_origin_x;
+    // A minified/tabbed Unicode line can be megabytes long. Restrict the
+    // source before allocating an expanded string and its syntax byte map.
+    let row = if source_is_long
+        && let Some((range, offset)) = visible_tab_source_range(
+            &row.text,
+            decorations.settings.indent_width,
+            row.start_visual_column,
+            text_origin_x,
+            metrics,
+            clip_bounds,
+        ) {
+        clipped_fonts = clipped_font_runs(fonts, range.clone());
+        fonts = clipped_fonts.as_slice();
+        let syntax_spans = row
+            .syntax_spans
+            .iter()
+            .filter_map(|span| {
+                let start = span.range.start.max(range.start);
+                let end = span.range.end.min(range.end);
+                (start < end && row.text.is_char_boundary(start) && row.text.is_char_boundary(end))
+                    .then_some(crate::editor::render::SyntaxRenderSpan {
+                        range: start - range.start..end - range.start,
+                        color: span.color,
+                    })
+            })
+            .collect();
+        clipped = RowRenderPlan {
+            text: row.text[range].to_owned(),
+            syntax_spans,
+            start_visual_column: row.start_visual_column + offset,
+            ..row.clone()
+        };
+        text_origin_x += offset as f32 * metrics.character_width;
+        &clipped
+    } else {
+        row
+    };
+    let expanded;
+    let expanded_fonts;
+    let row = if let Some(tabs) = expand_tabs_for_rendering_with_offset(
+        &row.text,
+        decorations.settings.indent_width,
+        row.start_visual_column,
+    ) {
+        expanded_fonts = remap_font_runs(fonts, &tabs.byte_offsets);
+        fonts = expanded_fonts.as_slice();
+        expanded = RowRenderPlan {
+            text: tabs.text,
+            syntax_spans: remap_syntax_spans(&row.syntax_spans, &tabs.byte_offsets),
+            ..row.clone()
+        };
+        &expanded
+    } else {
+        row
+    };
+    let range = if source_is_long {
+        if syntax_spans_are_valid(row) {
+            visible_styled_text_range(row, text_origin_x, metrics, clip_bounds)
+        } else {
+            visible_text_range(&row.text, text_origin_x, metrics, clip_bounds)
+        }
+    } else {
+        0..row.text.len()
+    };
+    let content = &row.text[range.clone()];
+    let fonts = clipped_font_runs(fonts, range.clone());
+    let colors = adaptive_span_keys(row, range.clone(), &fonts, style.syntax_fallback_text);
+    let bounds = Size::new(f32::INFINITY, metrics.line_height);
+    let size = Pixels((metrics.line_height / 1.25).max(8.0));
+    let scale = renderer.scale_factor();
+    let paragraph = cache.get_or_insert_with_fonts(
+        row.visible_row,
+        content,
+        &colors,
+        &fonts,
+        range.start,
+        bounds,
+        size,
+        metrics.line_height,
+        scale,
+        frame_id,
+        || {
+            let spans: Vec<text::Span<'_, (), Font>> = colors
+                .iter()
+                .map(|color| {
+                    let font = fonts
+                        .iter()
+                        .find(|font| font.byte_range.contains(&color.start))
+                        .map_or(EDITOR_FONT, |font| font.font);
+                    text::Span::new(&content[color.start..color.end])
+                        .font(font)
+                        .color_maybe(color.color)
+                })
+                .collect();
+            Renderer::Paragraph::with_spans(text::Text {
+                content: spans.as_slice(),
+                bounds,
+                size,
+                line_height: text::LineHeight::Absolute(Pixels(metrics.line_height)),
+                font: EDITOR_FONT,
+                align_x: text::Alignment::Left,
+                align_y: alignment::Vertical::Top,
+                shaping: EDITOR_TEXT_SHAPING,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::None,
+                hint_factor: scale,
+            })
+        },
+    );
+    let offset = visual_column_for(&row.text, range.start, 1) as f32 * metrics.character_width;
+    renderer.fill_paragraph(
+        paragraph,
+        Point::new(text_origin_x + offset, baseline_y),
+        style.syntax_fallback_text,
+        clip_bounds,
+    );
+}
+
+/// Partition at both color and font boundaries. Font ranges are already
+/// relative to this slice; syntax ranges still use the row's original offsets.
+fn adaptive_span_keys(
+    row: &RowRenderPlan,
+    range: Range<usize>,
+    fonts: &[EditorFontRun],
+    fallback_color: Color,
+) -> Vec<SyntaxSpanKey> {
+    let content = &row.text[range.clone()];
+    let mut boundaries = vec![0, content.len()];
+    for run in fonts {
+        boundaries.extend([run.byte_range.start, run.byte_range.end]);
+    }
+    let valid_syntax =
+        row.syntax_spans.len() <= MAX_SYNTAX_SPANS_PER_ROW && syntax_spans_are_valid(row);
+    if valid_syntax {
+        for span in &row.syntax_spans {
+            if span.range.end > range.start && span.range.start < range.end {
+                boundaries.extend([
+                    span.range.start.max(range.start) - range.start,
+                    span.range.end.min(range.end) - range.start,
+                ]);
+            }
+        }
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    boundaries
+        .windows(2)
+        .map(|pair| {
+            let byte = range.start + pair[0];
+            let color = valid_syntax
+                .then(|| {
+                    row.syntax_spans
+                        .iter()
+                        .find(|span| span.range.contains(&byte))
+                        .and_then(|span| span.color)
+                })
+                .flatten()
+                .unwrap_or(fallback_color);
+            SyntaxSpanKey {
+                start: pair[0],
+                end: pair[1],
+                color: Some(color),
+            }
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -476,11 +688,17 @@ fn style_boundary_start(row: &RowRenderPlan, start: usize) -> usize {
         .max()
         .unwrap_or(start);
 
-    if start.saturating_sub(boundary) > LONG_STYLE_RUN_SUBDIVISION_COLUMNS {
+    let mut start = if start.saturating_sub(boundary) > LONG_STYLE_RUN_SUBDIVISION_COLUMNS {
         start - (start - boundary) % LONG_STYLE_RUN_SUBDIVISION_COLUMNS
     } else {
         boundary
+    };
+    // Subdivision is measured in bytes; its rounded boundary may fall inside
+    // a multi-byte CJK character. Back up at most three bytes before slicing.
+    while !row.text.is_char_boundary(start) {
+        start -= 1;
     }
+    start
 }
 
 pub(super) fn first_visible_syntax_span(row: &RowRenderPlan, visible_start: usize) -> usize {
@@ -489,21 +707,19 @@ pub(super) fn first_visible_syntax_span(row: &RowRenderPlan, visible_start: usiz
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ExpandedTabs {
-    text: String,
-    byte_offsets: Vec<usize>,
+pub(super) struct ExpandedTabs {
+    pub(super) text: String,
+    pub(super) byte_offsets: Vec<usize>,
 }
 
-// Plain text needs no syntax byte map. Expand only the visible fragment, using
-// the logical column at its start so wrapped rows preserve their tab stops.
-fn visible_expanded_tabs(
+fn visible_tab_source_range(
     text: &str,
     tab_width: usize,
     start_visual_column: usize,
     text_origin_x: f32,
     metrics: EditorMetrics,
     clip_bounds: Rectangle,
-) -> Option<(String, usize)> {
+) -> Option<(Range<usize>, usize)> {
     if !text.contains('\t') || metrics.character_width <= 0.0 {
         return None;
     }
@@ -528,13 +744,39 @@ fn visible_expanded_tabs(
         start_visual_column,
     )
     .max(start);
-    // The right edge can land inside a tab. Include that character so its
-    // expanded spaces remain available to the final pixel clipping step.
     let end = end + text[end..].chars().next().map_or(0, char::len_utf8);
-    let mut column = visual_column_for_with_offset(text, start, tab_width, start_visual_column);
-    let offset = column - start_visual_column;
-    let mut expanded = String::with_capacity(end - start);
-    for ch in text[start..end].chars() {
+    let offset = visual_column_for_with_offset(text, start, tab_width, start_visual_column)
+        - start_visual_column;
+    Some((start..end, offset))
+}
+
+// Plain text needs no syntax byte map. Expand only the visible fragment, using
+// the logical column at its start so wrapped rows preserve their tab stops.
+fn visible_expanded_tabs(
+    text: &str,
+    tab_width: usize,
+    start_visual_column: usize,
+    text_origin_x: f32,
+    metrics: EditorMetrics,
+    clip_bounds: Rectangle,
+) -> Option<(String, usize)> {
+    let (range, offset) = visible_tab_source_range(
+        text,
+        tab_width,
+        start_visual_column,
+        text_origin_x,
+        metrics,
+        clip_bounds,
+    )?;
+    let first = ((clip_bounds.x - text_origin_x) / metrics.character_width)
+        .floor()
+        .max(0.0) as usize;
+    let last = ((clip_bounds.x + clip_bounds.width - text_origin_x) / metrics.character_width)
+        .ceil()
+        .max(0.0) as usize;
+    let mut column = start_visual_column + offset;
+    let mut expanded = String::with_capacity(range.len());
+    for ch in text[range].chars() {
         let width = visual_width_with_tab_width(ch, column, tab_width);
         if ch == '\t' {
             expanded.extend(std::iter::repeat_n(' ', width));
@@ -570,7 +812,7 @@ fn expand_tabs_for_rendering(text: &str, tab_width: usize) -> Option<ExpandedTab
     expand_tabs_for_rendering_with_offset(text, tab_width, 0)
 }
 
-fn expand_tabs_for_rendering_with_offset(
+pub(super) fn expand_tabs_for_rendering_with_offset(
     text: &str,
     tab_width: usize,
     start_visual_column: usize,
@@ -635,12 +877,18 @@ mod tests {
     #[test]
     fn clipped_tab_expansion_matches_full_line_at_scroll_and_wrap_boundaries() {
         let long = "a\tb\tend\t".repeat(300);
+        let long_cjk = "中\t骨直令\t".repeat(1000);
         for character_width in [7.2, 8.35, 9.25, 13.6] {
             let metrics = EditorMetrics {
                 character_width,
                 ..EditorMetrics::default()
             };
-            for source in ["a\tb\tend", "\t中e\u{301}\t🐇 cafe\t", long.as_str()] {
+            for source in [
+                "a\tb\tend",
+                "\t中e\u{301}\t🐇 cafe\t",
+                long.as_str(),
+                long_cjk.as_str(),
+            ] {
                 for tab_width in [1, 4, 8] {
                     for start_column in [0, 3, 9] {
                         let full =
@@ -1022,6 +1270,52 @@ mod tests {
             ),
             2..23
         );
+    }
+
+    #[test]
+    fn long_cjk_style_subdivision_preserves_utf8_when_scrolled() {
+        let content = "漢".repeat(2_000);
+        let length = content.len();
+        let row = RowRenderPlan {
+            visible_row: 0,
+            line: 0,
+            start_column: 0,
+            start_visual_column: 0,
+            y: 0.0,
+            text_x: 0.0,
+            text: content,
+            line_number: None,
+            is_active_line: false,
+            fold: None,
+            hidden_lines: None,
+            whitespace: Vec::new(),
+            eol: None,
+            indent_guides: Vec::new(),
+            syntax_spans: vec![SyntaxRenderSpan {
+                range: 0..length,
+                color: Some(Color::from_rgb(1.0, 0.0, 0.0)),
+            }],
+        };
+        assert!(row.text.len() > 4096);
+        assert_eq!(style_boundary_start(&row, 1005), 999);
+        let metrics = EditorMetrics {
+            character_width: 10.0,
+            ..EditorMetrics::default()
+        };
+        let range = visible_styled_text_range(
+            &row,
+            0.0,
+            metrics,
+            Rectangle {
+                x: 6780.0,
+                y: 0.0,
+                width: 60.0,
+                height: 20.0,
+            },
+        );
+        assert_eq!(range.start, 999);
+        assert!(row.text.is_char_boundary(range.end));
+        assert!(!row.text[range].is_empty());
     }
 
     #[test]

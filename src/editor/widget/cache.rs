@@ -1,5 +1,7 @@
 use iced::{Color, Pixels, Size};
 
+use super::font::EditorFontRun;
+
 const RICH_PARAGRAPH_CACHE_LIMIT: usize = 2048;
 
 #[derive(Debug)]
@@ -24,11 +26,13 @@ struct RichParagraphEntry<Paragraph> {
     line: usize,
     text: String,
     syntax_spans: Vec<SyntaxSpanKey>,
+    font_runs: Vec<EditorFontRun>,
     visible_start: usize,
     bounds: Size,
     size: Pixels,
     line_height: f32,
     scale_factor: Option<f32>,
+    font_version: iced::advanced::graphics::text::Version,
     last_used_frame: u64,
     paragraph: Paragraph,
 }
@@ -54,6 +58,39 @@ impl<Paragraph> RichParagraphCache<Paragraph> {
         frame_id: u64,
         build: impl FnOnce() -> Paragraph,
     ) -> &Paragraph {
+        self.get_or_insert_with_fonts(
+            line,
+            text,
+            syntax_spans,
+            &[],
+            visible_start,
+            bounds,
+            size,
+            line_height,
+            scale_factor,
+            frame_id,
+            build,
+        )
+    }
+
+    pub(super) fn get_or_insert_with_fonts(
+        &mut self,
+        line: usize,
+        text: &str,
+        syntax_spans: &[SyntaxSpanKey],
+        font_runs: &[EditorFontRun],
+        visible_start: usize,
+        bounds: Size,
+        size: Pixels,
+        line_height: f32,
+        scale_factor: Option<f32>,
+        frame_id: u64,
+        build: impl FnOnce() -> Paragraph,
+    ) -> &Paragraph {
+        let font_version = iced::advanced::graphics::text::font_system()
+            .read()
+            .expect("Read font system")
+            .version();
         if self.entries.is_empty() {
             self.entries
                 .resize_with(RICH_PARAGRAPH_CACHE_LIMIT, || None);
@@ -69,11 +106,13 @@ impl<Paragraph> RichParagraphCache<Paragraph> {
             entry.line == line
                 && entry.text == text
                 && entry.syntax_spans.as_slice() == syntax_spans
+                && entry.font_runs.as_slice() == font_runs
                 && entry.visible_start == visible_start
                 && entry.bounds == bounds
                 && entry.size == size
                 && entry.line_height == line_height
                 && entry.scale_factor == scale_factor
+                && entry.font_version == font_version
         });
 
         if is_hit {
@@ -88,11 +127,13 @@ impl<Paragraph> RichParagraphCache<Paragraph> {
             line,
             text: text.to_owned(),
             syntax_spans: syntax_spans.to_vec(),
+            font_runs: font_runs.to_vec(),
             visible_start,
             bounds,
             size,
             line_height,
             scale_factor,
+            font_version,
             last_used_frame: frame_id,
             paragraph: build(),
         });

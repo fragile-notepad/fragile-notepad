@@ -12,6 +12,7 @@ use iced::{
 use crate::core::{
     Document, DocumentId, EditorSettings, ShortcutDisplayPart, ShortcutModifierIcon,
 };
+use crate::editor::widget::line_cache::measured_position_point_with_context;
 use crate::editor::{AdvancedEditorState, EditorMetrics};
 use crate::message::Message;
 use crate::ui::icons::hero::{self, HeroIcon};
@@ -217,7 +218,7 @@ impl Widget<Message, Theme, Renderer> for EditorContextMenu<'_> {
                 bounds.height,
             );
             let caret = self.document.main_selection().cursor;
-            let caret_point = crate::editor::widget::line_cache::measured_position_point(
+            let caret_point = measured_position_point_with_context(
                 &self.document.buffer,
                 &self.document.viewport,
                 &self.document.decorations,
@@ -225,6 +226,7 @@ impl Widget<Message, Theme, Renderer> for EditorContextMenu<'_> {
                 caret,
                 self.document.caret_visible_row(),
                 renderer,
+                Some(&self.document.cjk_context()),
             );
             let anchor = Point::new(
                 caret_point.x.clamp(

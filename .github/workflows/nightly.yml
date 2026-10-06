@@ -96,8 +96,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Python asset tooling
-        run: python -m pip install -r scripts/requirements-assets.txt
+      - name: Install Python asset and font tooling
+        run: python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
+
+      - name: Test font preparation
+        run: python -m unittest discover -s scripts -p 'test_*font_profiles.py'
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -106,7 +109,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**') }}
+          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'scripts/*font_profiles*', 'scripts/font_families.py', 'scripts/requirements-font-profiles.txt') }}
           restore-keys: |
             ${{ runner.os }}-release-
             ${{ runner.os }}-cargo-
@@ -129,6 +132,7 @@ jobs:
             mesa-vulkan-drivers \
             vulkan-tools \
             pkg-config \
+            fontconfig \
             xvfb \
             xauth
 
@@ -159,6 +163,22 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: bash scripts/generate_icon_assets.sh
+
+      - name: Prepare regional font profiles
+        if: runner.os == 'Windows'
+        run: python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared --target-os windows --cache-dir target/font-profiles
+
+      - name: Prepare regional font profiles
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            font_target_os=macos
+          else
+            font_target_os=linux
+          fi
+          python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared \
+            --target-os "$font_target_os" --cache-dir target/font-profiles
 
       - name: Validate release gates
         if: runner.os == 'Windows'
@@ -195,6 +215,12 @@ jobs:
           Copy-Item target\release\fragile-notepad.exe dist\package\
           Copy-Item LICENSE dist\package\
           Copy-Item assets\icons\NOTICE.txt dist\package\ICON-NOTICES.txt
+          if ((Test-Path target\release\FONT-NOTICES.txt) -and ((Get-Item target\release\FONT-NOTICES.txt).Length -gt 0)) {
+            Copy-Item target\release\FONT-NOTICES.txt dist\package\
+            if (Test-Path target\font-profiles\prepared\licenses) {
+              Copy-Item target\font-profiles\prepared\licenses dist\package\font-licenses -Recurse
+            }
+          }
           Compress-Archive -Path dist\package\* -DestinationPath dist\${{ matrix.archive }} -Force
 
       - name: Package Unix artifact
@@ -205,7 +231,13 @@ jobs:
           cp target/release/fragile-notepad dist/package/
           cp LICENSE dist/package/
           cp assets/icons/NOTICE.txt dist/package/ICON-NOTICES.txt
-          tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad LICENSE ICON-NOTICES.txt
+          if [[ -s target/release/FONT-NOTICES.txt ]]; then
+            cp target/release/FONT-NOTICES.txt dist/package/
+            if [[ -d target/font-profiles/prepared/licenses ]]; then
+              cp -R target/font-profiles/prepared/licenses dist/package/font-licenses
+            fi
+          fi
+          tar -C dist/package -czf "dist/${{ matrix.archive }}" .
 
       - name: Package macOS Vulkan runtime
         if: runner.os == 'macOS'

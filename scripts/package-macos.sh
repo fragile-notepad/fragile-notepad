@@ -20,6 +20,15 @@ ln -s libvulkan.1.dylib "$package/lib/libvulkan.dylib"
 cp -L "$molten/lib/libMoltenVK.dylib" "$package/lib/"
 cp "$repo_root/LICENSE" "$package/"
 cp "$repo_root/assets/icons/NOTICE.txt" "$package/ICON-NOTICES.txt"
+# Cargo writes the notice for this exact artifact, including the complete OFL.
+# A fresh local build may not have the explicit CI preparation directory.
+font_notices="$repo_root/target/release/FONT-NOTICES.txt"
+if [[ -s "$font_notices" ]]; then
+    cp "$font_notices" "$package/"
+    if [[ -d "$repo_root/target/font-profiles/prepared/licenses" ]]; then
+        cp -R "$repo_root/target/font-profiles/prepared/licenses" "$package/font-licenses"
+    fi
+fi
 
 python3 - "$molten/etc/vulkan/icd.d/MoltenVK_icd.json" "$package" <<'PY'
 import json

@@ -4,7 +4,9 @@ use iced::time::{Duration, Instant};
 use iced::{Event, Font, Pixels, Point, Rectangle, window};
 
 use crate::core::ShortcutMap;
+use crate::editor::action::EditorAction;
 use crate::editor::buffer::EditorBuffer;
+use crate::editor::cjk::CjkContext;
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{EditorLayout, HitTarget, hit_test, hit_visible_row};
 use crate::editor::position::{EditorPosition, EditorSelection, SelectionRange, SelectionSet};
@@ -12,12 +14,13 @@ use crate::editor::render::text_size;
 use crate::editor::viewport::ViewportModel;
 
 use super::actions::key_action;
+use super::font::editor_font_runs_for_fragment;
 use super::line_cache::{
-    LineGeometry, measured_position_point, measured_text_hit_target, measured_virtual_caret_x,
+    LineGeometry, measured_position_point_with_context, measured_text_hit_target_with_context,
+    measured_virtual_caret_x,
 };
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
 use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS, TextDrag};
-use crate::editor::action::EditorAction;
 
 const FAST_SCROLL_SETTLE_MS: u64 = 120;
 const DRAG_SCROLL_INTERVAL_MS: u64 = 50;
@@ -33,6 +36,7 @@ pub(super) struct InteractionContext<'a, Message> {
     pub(super) caret_row: Option<usize>,
     pub(super) scroll_speed: f32,
     pub(super) viewport_key: u64,
+    pub(super) cjk_context: Option<&'a CjkContext>,
     pub(super) shortcuts: &'a ShortcutMap,
     pub(super) on_action: &'a dyn Fn(EditorAction) -> Message,
 }
@@ -183,13 +187,14 @@ where
                 context.decorations,
             );
             let hit = match hit {
-                HitTarget::Text(_) => measured_text_hit_target(
+                HitTarget::Text(_) => measured_text_hit_target_with_context(
                     position,
                     editor_layout,
                     context.buffer,
                     context.viewport,
                     context.decorations,
                     renderer,
+                    context.cjk_context,
                 ),
                 other => other,
             };
@@ -300,13 +305,14 @@ where
 
                 let text_position =
                     Point::new(position.x, position.y.max(context.metrics.padding_top));
-                let hit = measured_text_hit_target(
+                let hit = measured_text_hit_target_with_context(
                     text_position,
                     editor_layout,
                     context.buffer,
                     context.viewport,
                     context.decorations,
                     renderer,
+                    context.cjk_context,
                 );
                 let target = match hit {
                     HitTarget::Text(target) => target,
@@ -660,13 +666,14 @@ where
     );
 
     let row = hit_visible_row(position.y, layout, context.viewport).map(|(row, _)| row);
-    let target = match measured_text_hit_target(
+    let target = match measured_text_hit_target_with_context(
         position,
         layout,
         context.buffer,
         context.viewport,
         context.decorations,
         renderer,
+        context.cjk_context,
     ) {
         HitTarget::Text(position) => position,
         _ => last_line_end_position(context.buffer),
@@ -710,11 +717,19 @@ where
         else {
             return false;
         };
-        let geometry = LineGeometry::new_with_visual_offset(
-            &text[segment.start_column..segment.end_column],
+        let fragment = &text[segment.start_column..segment.end_column];
+        let geometry = LineGeometry::new_with_font_runs(
+            fragment,
             layout.metrics,
             renderer,
             segment.start_visual_column,
+            context.decorations.settings.indent_width,
+            &editor_font_runs_for_fragment(
+                fragment,
+                context.cjk_context,
+                position.line,
+                segment.start_column,
+            ),
         );
         let start_x = measured_virtual_caret_x(
             &geometry,
@@ -795,7 +810,7 @@ where
     let cursor = context
         .buffer
         .clamp_position(context.selections.main().cursor);
-    let point = measured_position_point(
+    let point = measured_position_point_with_context(
         context.buffer,
         context.viewport,
         context.decorations,
@@ -803,6 +818,7 @@ where
         cursor,
         context.caret_row,
         renderer,
+        context.cjk_context,
     );
 
     InputMethod::Enabled {
@@ -912,6 +928,7 @@ mod tests {
                     caret_row: self.caret_row,
                     scroll_speed: 1.5,
                     viewport_key: 0,
+                    cjk_context: None,
                     shortcuts: &self.shortcuts,
                     on_action: &std::convert::identity,
                 },

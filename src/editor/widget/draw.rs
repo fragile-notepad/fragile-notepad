@@ -1,6 +1,7 @@
 use iced::advanced::{image as advanced_image, renderer, text};
 use iced::{Background, Color, Font, Pixels, Point, Rectangle, Size, alignment};
 
+use crate::editor::cjk::CjkContext;
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{
     EditorLayout, EditorMetrics, scrolled_text_origin_x, text_area_bounds,
@@ -11,7 +12,7 @@ use crate::editor::render::{
 use crate::ui::icons::hero::{self, HeroIcon};
 
 use super::cache::RichParagraphCache;
-use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
+use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING, editor_font_runs_for_fragment};
 use super::line_cache::{
     LineGeometryCache, RowGeometries, measured_caret_x, measured_selection_x_and_width,
     measured_virtual_caret_x,
@@ -126,6 +127,7 @@ pub(super) fn draw_plan<Renderer>(
     frame_id: u64,
     rich_paragraphs: &mut RichParagraphCache<Renderer::Paragraph>,
     line_geometries: &mut LineGeometryCache<Renderer::Paragraph>,
+    cjk_context: Option<&CjkContext>,
 ) where
     Renderer: iced::advanced::Renderer
         + text::Renderer<Font = Font>
@@ -198,7 +200,14 @@ pub(super) fn draw_plan<Renderer>(
         }
     }
 
-    let row_geometries = RowGeometries::new(&plan.rows, layout.metrics, line_geometries, renderer);
+    let row_geometries = RowGeometries::new(
+        &plan.rows,
+        layout.metrics,
+        line_geometries,
+        renderer,
+        cjk_context,
+        decorations.settings.indent_width,
+    );
 
     renderer.with_layer(text_clip_bounds, |renderer| {
         for selection in &plan.selections {
@@ -308,6 +317,12 @@ pub(super) fn draw_plan<Renderer>(
                     scroll_text_clip_bounds,
                     frame_id,
                     rich_paragraphs,
+                    &editor_font_runs_for_fragment(
+                        &row.text,
+                        cjk_context,
+                        row.line,
+                        row.start_column,
+                    ),
                     |renderer, content, position, bounds, color, align_x, metrics, clip_bounds| {
                         draw_text(
                             renderer,

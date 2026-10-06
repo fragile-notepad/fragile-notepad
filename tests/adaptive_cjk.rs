@@ -1017,7 +1017,6 @@ fn wrapped_mixed_language_han_retains_each_logical_run_font() {
     document.decorations.settings.show_wrap_indicator = false;
     document.viewport = ViewportModel::new_wrapped(&document.buffer, &document.folds, 4, 4);
     let mut renderer = software_renderer();
-    let actual = draw_editor_pixels(&document, &settings, &mut Tree::empty(), &mut renderer);
     let korean_cue = source.find("한글").unwrap();
     let mut checked = [false; 2];
 
@@ -1039,6 +1038,10 @@ fn wrapped_mixed_language_han_retains_each_logical_run_font() {
         } else {
             (CjkLanguage::Korean, 1)
         };
+        // Render the target row first so a preceding Noto glyph's descender
+        // cannot enter the pixel comparison through the row's top padding.
+        document.scroll.first_visible_row = row;
+        let actual = draw_editor_pixels(&document, &settings, &mut Tree::empty(), &mut renderer);
         let metrics = editor_metrics(&document, &settings);
         let origin = metrics.text_origin_x(&document.decorations) as usize;
         let paragraph = routed_paragraph(fragment, language, settings.zoom);
@@ -1057,14 +1060,14 @@ fn wrapped_mixed_language_han_retains_each_logical_run_font() {
             &paragraph,
             Point::new(
                 origin as f32,
-                metrics.padding_top + metrics.line_height + text_baseline_offset(metrics),
+                metrics.padding_top + text_baseline_offset(metrics),
             ),
             style.syntax_fallback_text,
             bounds,
         );
         let expected = renderer.screenshot(Size::new(520, 360), 1.0, style.active_line);
-        let crop = |bytes: &[u8], row: usize| -> Vec<u8> {
-            ((4 + row * 40)..(4 + (row + 1) * 40))
+        let crop = |bytes: &[u8]| -> Vec<u8> {
+            ((metrics.padding_top as usize)..((metrics.padding_top + metrics.line_height) as usize))
                 .flat_map(|y| {
                     bytes[(y * 520 + origin) * 4..(y * 520 + origin + width) * 4]
                         .iter()
@@ -1073,7 +1076,7 @@ fn wrapped_mixed_language_han_retains_each_logical_run_font() {
                 .collect()
         };
         assert!(
-            crop(&actual, row) == crop(&expected, 1),
+            crop(&actual) == crop(&expected),
             "Wrapped Han-only fragment {fragment:?} on row {row} must retain {language:?} from its logical run"
         );
         checked[index] = true;

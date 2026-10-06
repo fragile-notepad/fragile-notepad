@@ -53,9 +53,11 @@ pub fn view(
             .center_y(28)
             .style(styles::find_status),
         checkbox(find.case_sensitive)
+            .style(styles::checkbox)
             .label("Case")
             .on_toggle(Message::FindCaseSensitiveToggled),
         checkbox(find.whole_word)
+            .style(styles::checkbox)
             .label("Word")
             .on_toggle(Message::FindWholeWordToggled),
         controls::command_button("Prev", SECONDARY_TEXT_SIZE, Message::FindPrevious),

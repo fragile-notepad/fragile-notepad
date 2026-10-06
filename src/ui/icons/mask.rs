@@ -32,7 +32,7 @@ where
 }
 
 pub fn theme_text_color(theme: &Theme) -> Color {
-    theme.palette().background.base.text
+    crate::ui::styles::shortcut_text_color(theme)
 }
 
 fn colorized_icon_bytes(bytes: &[u8], color: [u8; 4]) -> Vec<u8> {

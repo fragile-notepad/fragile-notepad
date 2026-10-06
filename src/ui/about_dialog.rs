@@ -279,7 +279,7 @@ fn about_content(progress: f32) -> Element<'static, Message> {
             row![
                 container(space()).width(3).height(Fill)
                     .style(move |theme: &iced::Theme| fade_container(container::Style {
-                        background: Some(theme.palette().primary.base.color.scale_alpha(0.4).into()),
+                        background: Some(styles::accent_color(theme).scale_alpha(0.4).into()),
                         border: iced::Border::default().rounded(2),
                         ..container::Style::default()
                     }, progress)),
@@ -301,7 +301,7 @@ fn about_content(progress: f32) -> Element<'static, Message> {
         .width(Fill)
         .style(move |theme| fade_container(styles::info_card(theme), progress)),
     ].spacing(22).padding([2, 0]).width(Fill)).smooth_scroll(true)
-        .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
+        .style(move |theme, status| fade_scrollable(styles::scrollable(theme, status), progress))
         .height(Fill)
         .width(Fill)
         .into()
@@ -334,7 +334,7 @@ fn muted(
 fn divider(progress: f32) -> Element<'static, Message> {
     rule::horizontal(1)
         .style(move |theme| {
-            let mut style = rule::default(theme);
+            let mut style = styles::utility_rule(theme);
             style.color = style.color.scale_alpha(progress * 0.5);
             style
         })
@@ -397,7 +397,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
     .width(Fill);
     scrollable(sections)
         .smooth_scroll(true)
-        .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
+        .style(move |theme, status| fade_scrollable(styles::scrollable(theme, status), progress))
         .height(Fill)
         .width(Fill)
         .into()
@@ -480,7 +480,7 @@ fn licenses_content(progress: f32) -> Element<'static, Message> {
         .width(Fill),
     )
     .smooth_scroll(true)
-    .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
+    .style(move |theme, status| fade_scrollable(styles::scrollable(theme, status), progress))
     .height(Fill)
     .width(Fill)
     .into()

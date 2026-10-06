@@ -143,6 +143,7 @@ pub fn view<'a>(
                 .width(Fill)
                 .style(styles::function_list_header),
             scrollable(body)
+                .style(styles::scrollable)
                 .id(SCROLL_ID)
                 .smooth_scroll(true)
                 .height(Fill),

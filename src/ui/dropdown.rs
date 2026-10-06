@@ -328,10 +328,15 @@ impl<T: Clone + PartialEq> Widget<Message, Theme, Renderer> for Dropdown<'_, T> 
                 )
             });
         let mut content = motion::dropdown(
-            container(scrollable(rows).smooth_scroll(true).height(Length::Shrink))
-                .padding(MENU_PADDING)
-                .width(Fill)
-                .style(styles::dropdown_menu),
+            container(
+                scrollable(rows)
+                    .style(styles::scrollable)
+                    .smooth_scroll(true)
+                    .height(Length::Shrink),
+            )
+            .padding(MENU_PADDING)
+            .width(Fill)
+            .style(styles::dropdown_menu),
         );
         state.menu.diff(content.as_widget_mut());
         Some(overlay::Element::new(Box::new(Menu {

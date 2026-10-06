@@ -51,9 +51,15 @@ fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
             ]
             .spacing(16)
             .align_y(Center),
-            container(scrollable(rows).smooth_scroll(true).spacing(8).height(Fill))
-                .max_height(250)
-                .width(Fill),
+            container(
+                scrollable(rows)
+                    .style(styles::scrollable)
+                    .smooth_scroll(true)
+                    .spacing(8)
+                    .height(Fill)
+            )
+            .max_height(250)
+            .width(Fill),
             row![
                 space::horizontal(),
                 button(text("Done").size(13))

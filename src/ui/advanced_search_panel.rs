@@ -17,9 +17,9 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
     container(
         column![
             container(navigation(dialog.active_tab)).padding([4, 16]),
-            rule::horizontal(1),
+            rule::horizontal(1).style(styles::utility_rule),
             container(body).padding(16).width(Fill).height(Fill),
-            rule::horizontal(1),
+            rule::horizontal(1).style(styles::utility_rule),
             row![
                 container(text(status_label(dialog)).size(12))
                     .style(styles::info_muted)
@@ -154,11 +154,13 @@ fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
     };
     let mut flags = row![
         checkbox(dialog.case_sensitive)
+            .style(styles::checkbox)
             .label("Match case")
             .text_size(12)
             .size(16)
             .on_toggle(Message::AdvancedSearchCaseSensitiveToggled),
         checkbox(dialog.whole_word)
+            .style(styles::checkbox)
             .label("Whole words")
             .text_size(12)
             .size(16)
@@ -169,6 +171,7 @@ fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
     if !open_scope(dialog.active_tab) {
         flags = flags.push(
             checkbox(dialog.wrap_around)
+                .style(styles::checkbox)
                 .label("Wrap around")
                 .text_size(12)
                 .size(16)
@@ -262,6 +265,7 @@ fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
             rows = rows.push(result_row(result));
         }
         scrollable(rows)
+            .style(styles::scrollable)
             .spacing(8)
             .smooth_scroll(true)
             .height(Fill)

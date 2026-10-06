@@ -2,6 +2,139 @@ use iced::widget::{button, container, text, text_input};
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
 pub const RADIUS: f32 = 6.0;
+pub fn accent_color(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).accent
+}
+
+pub fn checkbox(
+    theme: &Theme,
+    status: iced::widget::checkbox::Status,
+) -> iced::widget::checkbox::Style {
+    use iced::widget::checkbox::Status;
+    let p = VisualPalette::from_theme(theme);
+    let (checked, hovered, disabled) = match status {
+        Status::Active { is_checked } => (is_checked, false, false),
+        Status::Hovered { is_checked } => (is_checked, true, false),
+        Status::Disabled { is_checked } => (is_checked, false, true),
+    };
+    let alpha = if disabled { 0.5 } else { 1.0 };
+    iced::widget::checkbox::Style {
+        background: (if checked {
+            p.accent
+        } else if hovered {
+            p.surface_low
+        } else {
+            p.surface
+        })
+        .scale_alpha(alpha)
+        .into(),
+        icon_color: p.accent_text,
+        border: border(
+            1.0,
+            (if checked || hovered {
+                p.accent
+            } else {
+                p.border
+            })
+            .scale_alpha(alpha),
+            2.0,
+        ),
+        text_color: Some(if disabled { p.faint_text } else { p.text }),
+    }
+}
+
+pub fn toggler(
+    theme: &Theme,
+    status: iced::widget::toggler::Status,
+) -> iced::widget::toggler::Style {
+    use iced::widget::toggler::Status;
+    let p = VisualPalette::from_theme(theme);
+    let (toggled, hovered, disabled) = match status {
+        Status::Active { is_toggled } => (is_toggled, false, false),
+        Status::Hovered { is_toggled } => (is_toggled, true, false),
+        Status::Disabled { is_toggled } => (is_toggled, false, true),
+    };
+    iced::widget::toggler::Style {
+        background: (if toggled {
+            if hovered {
+                p.accent.mix(p.text, 0.12)
+            } else {
+                p.accent
+            }
+        } else if hovered {
+            p.muted_text
+        } else {
+            p.border
+        })
+        .scale_alpha(if disabled { 0.5 } else { 1.0 })
+        .into(),
+        foreground: (if disabled {
+            p.faint_text
+        } else {
+            p.switch_thumb
+        })
+        .into(),
+        foreground_border_width: 0.0,
+        foreground_border_color: Color::TRANSPARENT,
+        background_border_width: 0.0,
+        background_border_color: Color::TRANSPARENT,
+        text_color: Some(if disabled { p.faint_text } else { p.text }),
+        border_radius: None,
+        padding_ratio: 0.1,
+    }
+}
+
+pub fn scrollable(
+    theme: &Theme,
+    status: iced::widget::scrollable::Status,
+) -> iced::widget::scrollable::Style {
+    use iced::widget::scrollable::{AutoScroll, Rail, Scroller, Status, Style};
+    let p = VisualPalette::from_theme(theme);
+    let (horizontal, vertical) = match status {
+        Status::Active { .. } => (false, false),
+        Status::Hovered {
+            is_horizontal_scrollbar_hovered,
+            is_vertical_scrollbar_hovered,
+            ..
+        } => (
+            is_horizontal_scrollbar_hovered,
+            is_vertical_scrollbar_hovered,
+        ),
+        Status::Dragged {
+            is_horizontal_scrollbar_dragged,
+            is_vertical_scrollbar_dragged,
+            ..
+        } => (
+            is_horizontal_scrollbar_dragged,
+            is_vertical_scrollbar_dragged,
+        ),
+    };
+    let rail = |active| Rail {
+        background: None,
+        border: border(0.0, Color::TRANSPARENT, 2.0),
+        scroller: Scroller {
+            background: (if active {
+                p.muted_text
+            } else {
+                p.faint_text.scale_alpha(0.65)
+            })
+            .into(),
+            border: border(0.0, Color::TRANSPARENT, 2.0),
+        },
+    };
+    Style {
+        container: container::Style::default(),
+        vertical_rail: rail(vertical),
+        horizontal_rail: rail(horizontal),
+        gap: None,
+        auto_scroll: AutoScroll {
+            background: p.overlay.scale_alpha(0.9).into(),
+            border: border(1.0, p.border, f32::MAX),
+            shadow: elevation(p, 0.0, 2.0),
+            icon: p.text,
+        },
+    }
+}
 const CONTROL_RADIUS: f32 = 5.0;
 const TAB_RADIUS: f32 = 4.0;
 
@@ -83,6 +216,8 @@ struct VisualPalette {
     surface_low: Color,
     surface_high: Color,
     overlay: Color,
+    selected: Color,
+    switch_thumb: Color,
     text: Color,
     muted_text: Color,
     faint_text: Color,
@@ -111,54 +246,58 @@ impl VisualPalette {
 
     fn light() -> Self {
         Self {
-            app: Color::from_rgb8(246, 247, 249),
-            chrome: Color::from_rgb8(238, 241, 245),
-            chrome_high: Color::from_rgb8(248, 249, 251),
+            app: Color::from_rgb8(247, 247, 247),
+            chrome: Color::from_rgb8(240, 240, 240),
+            chrome_high: Color::from_rgb8(250, 250, 250),
             surface: Color::from_rgb8(255, 255, 255),
-            surface_low: Color::from_rgb8(243, 245, 248),
-            surface_high: Color::from_rgb8(255, 255, 255),
+            surface_low: Color::from_rgb8(245, 245, 245),
+            surface_high: Color::from_rgb8(237, 238, 240),
             overlay: Color::from_rgb8(255, 255, 255),
-            text: Color::from_rgb8(28, 31, 36),
-            muted_text: Color::from_rgb8(88, 96, 107),
-            faint_text: Color::from_rgb8(128, 137, 150),
-            border: Color::from_rgb8(196, 204, 216),
-            border_soft: Color::from_rgb8(222, 227, 235),
-            accent: Color::from_rgb8(0, 103, 192),
-            accent_soft: Color::from_rgb8(224, 239, 255),
+            selected: Color::from_rgb8(230, 231, 233),
+            switch_thumb: Color::WHITE,
+            text: Color::from_rgb8(32, 33, 35),
+            muted_text: Color::from_rgb8(96, 98, 102),
+            faint_text: Color::from_rgb8(128, 131, 136),
+            border: Color::from_rgb8(195, 197, 201),
+            border_soft: Color::from_rgb8(225, 226, 228),
+            accent: Color::from_rgb8(0, 112, 204),
+            accent_soft: Color::from_rgb8(232, 242, 255),
             accent_text: Color::WHITE,
             success: Color::from_rgb8(27, 128, 79),
             success_soft: Color::from_rgb8(221, 244, 232),
             danger: Color::from_rgb8(190, 45, 65),
             danger_soft: Color::from_rgb8(255, 229, 233),
-            shadow: Color::from_rgba(30.0 / 255.0, 41.0 / 255.0, 59.0 / 255.0, 0.16),
-            selection: Color::from_rgba(0.0, 103.0 / 255.0, 192.0 / 255.0, 0.26),
+            shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.12),
+            selection: Color::from_rgba(0.0, 112.0 / 255.0, 204.0 / 255.0, 0.24),
             is_dark: false,
         }
     }
 
     fn dark() -> Self {
         Self {
-            app: Color::from_rgb8(25, 28, 33),
-            chrome: Color::from_rgb8(31, 35, 41),
-            chrome_high: Color::from_rgb8(39, 44, 52),
-            surface: Color::from_rgb8(22, 25, 30),
-            surface_low: Color::from_rgb8(28, 32, 38),
-            surface_high: Color::from_rgb8(43, 49, 58),
-            overlay: Color::from_rgb8(38, 43, 51),
-            text: Color::from_rgb8(235, 238, 242),
-            muted_text: Color::from_rgb8(177, 184, 194),
-            faint_text: Color::from_rgb8(130, 140, 154),
-            border: Color::from_rgb8(76, 86, 101),
-            border_soft: Color::from_rgb8(52, 59, 70),
-            accent: Color::from_rgb8(96, 174, 255),
-            accent_soft: Color::from_rgb8(34, 62, 94),
-            accent_text: Color::from_rgb8(7, 19, 33),
+            app: Color::from_rgb8(29, 30, 32),
+            chrome: Color::from_rgb8(35, 36, 39),
+            chrome_high: Color::from_rgb8(39, 40, 43),
+            surface: Color::from_rgb8(26, 27, 29),
+            surface_low: Color::from_rgb8(33, 34, 37),
+            surface_high: Color::from_rgb8(47, 48, 52),
+            overlay: Color::from_rgb8(37, 38, 41),
+            selected: Color::from_rgb8(57, 59, 64),
+            switch_thumb: Color::from_rgb8(250, 250, 250),
+            text: Color::from_rgb8(232, 233, 235),
+            muted_text: Color::from_rgb8(172, 175, 181),
+            faint_text: Color::from_rgb8(131, 135, 142),
+            border: Color::from_rgb8(79, 82, 88),
+            border_soft: Color::from_rgb8(53, 55, 60),
+            accent: Color::from_rgb8(64, 156, 255),
+            accent_soft: Color::from_rgb8(32, 51, 74),
+            accent_text: Color::from_rgb8(20, 30, 43),
             success: Color::from_rgb8(93, 214, 145),
             success_soft: Color::from_rgb8(31, 71, 51),
             danger: Color::from_rgb8(255, 121, 137),
             danger_soft: Color::from_rgb8(86, 39, 48),
             shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.34),
-            selection: Color::from_rgba(96.0 / 255.0, 174.0 / 255.0, 1.0, 0.30),
+            selection: Color::from_rgba(64.0 / 255.0, 156.0 / 255.0, 1.0, 0.28),
             is_dark: true,
         }
     }
@@ -171,9 +310,9 @@ pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Option<Theme> {
         crate::core::AppearanceMode::Dark => Some(Theme::custom(
             "Fragile Modern Dark",
             iced::theme::palette::Seed {
-                background: Color::from_rgb8(25, 28, 33),
-                text: Color::from_rgb8(235, 238, 242),
-                primary: Color::from_rgb8(96, 174, 255),
+                background: Color::from_rgb8(29, 30, 32),
+                text: Color::from_rgb8(232, 233, 235),
+                primary: Color::from_rgb8(64, 156, 255),
                 success: Color::from_rgb8(93, 214, 145),
                 warning: Color::from_rgb8(245, 190, 91),
                 danger: Color::from_rgb8(255, 121, 137),
@@ -182,9 +321,9 @@ pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Option<Theme> {
         crate::core::AppearanceMode::Light => Some(Theme::custom(
             "Fragile Modern Light",
             iced::theme::palette::Seed {
-                background: Color::from_rgb8(246, 247, 249),
-                text: Color::from_rgb8(28, 31, 36),
-                primary: Color::from_rgb8(0, 103, 192),
+                background: Color::from_rgb8(247, 247, 247),
+                text: Color::from_rgb8(32, 33, 35),
+                primary: Color::from_rgb8(0, 112, 204),
                 success: Color::from_rgb8(27, 128, 79),
                 warning: Color::from_rgb8(181, 118, 20),
                 danger: Color::from_rgb8(190, 45, 65),
@@ -422,7 +561,16 @@ pub fn utility_card(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(palette.surface.into()),
         text_color: Some(palette.text),
-        border: border(1.0, palette.border_soft, 10.0),
+        border: border(1.0, palette.border_soft.scale_alpha(0.65), 8.0),
+        ..Default::default()
+    }
+}
+
+pub fn appearance_preview_frame(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.surface_low.into()),
+        border: border(1.0, palette.faint_text.scale_alpha(0.65), 7.0),
         ..Default::default()
     }
 }
@@ -440,7 +588,9 @@ pub fn utility_notice(theme: &Theme) -> container::Style {
 pub fn utility_rule(theme: &Theme) -> iced::widget::rule::Style {
     iced::widget::rule::Style {
         color: VisualPalette::from_theme(theme).border_soft,
-        ..iced::widget::rule::default(theme)
+        radius: 0.0.into(),
+        fill_mode: iced::widget::rule::FillMode::Full,
+        snap: true,
     }
 }
 
@@ -451,7 +601,7 @@ pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> b
         button::Style {
             background: Some(
                 if highlighted {
-                    palette.accent_soft
+                    palette.selected
                 } else if matches!(status, button::Status::Hovered) {
                     palette.surface_high
                 } else {
@@ -462,8 +612,8 @@ pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> b
             text_color: palette.text,
             border: border(
                 1.0,
-                if highlighted {
-                    palette.accent
+                if selected {
+                    palette.accent.scale_alpha(0.65)
                 } else {
                     palette.border_soft
                 },
@@ -567,7 +717,7 @@ pub fn function_list_kind_label(
             OutlineNodeKind::Impl => ((76, 79, 166), (160, 166, 245)),
             OutlineNodeKind::Tag => ((156, 54, 103), (237, 145, 183)),
             OutlineNodeKind::Section => ((110, 80, 126), (199, 172, 217)),
-            OutlineNodeKind::Unknown => ((88, 96, 107), (177, 184, 194)),
+            OutlineNodeKind::Unknown => ((96, 98, 102), (172, 175, 181)),
         };
         let (r, g, b) = if palette.is_dark { dark } else { light };
         let foreground = Color::from_rgb8(r, g, b);
@@ -587,30 +737,22 @@ pub fn function_list_entry(active: bool) -> impl Fn(&Theme, button::Status) -> b
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);
         let background = match status {
-            button::Status::Pressed => Some(palette.accent_soft.into()),
+            button::Status::Pressed => Some(palette.selected.into()),
             button::Status::Hovered => Some(
                 if active {
-                    palette.accent_soft.mix(palette.accent, 0.08)
+                    palette.surface_high
                 } else {
                     palette.surface_low
                 }
                 .into(),
             ),
-            _ if active => Some(palette.accent_soft.into()),
+            _ if active => Some(palette.selected.into()),
             _ => None,
         };
         button::Style {
             background,
-            text_color: palette.text,
-            border: border(
-                1.0,
-                if active {
-                    palette.accent.scale_alpha(0.3)
-                } else {
-                    Color::TRANSPARENT
-                },
-                CONTROL_RADIUS,
-            ),
+            text_color: if active { palette.accent } else { palette.text },
+            border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
             ..Default::default()
         }
     }
@@ -841,10 +983,8 @@ pub fn menu_dropdown_band(theme: &Theme) -> container::Style {
 pub fn menu_dropdown_item(theme: &Theme, status: button::Status) -> button::Style {
     let palette = VisualPalette::from_theme(theme);
     let background = match status {
-        button::Status::Hovered => Some(Background::Color(palette.accent_soft)),
-        button::Status::Pressed => Some(Background::Color(
-            palette.accent_soft.mix(palette.accent, 0.16),
-        )),
+        button::Status::Hovered => Some(Background::Color(palette.selected)),
+        button::Status::Pressed => Some(Background::Color(palette.selected)),
         _ => None,
     };
 
@@ -880,7 +1020,7 @@ pub fn menu_submenu_item(is_active: bool) -> impl Fn(&Theme) -> container::Style
 
         container::Style {
             background: if is_active {
-                Some(Background::Color(palette.accent_soft))
+                Some(Background::Color(palette.selected))
             } else {
                 None
             },
@@ -940,7 +1080,7 @@ pub fn dropdown_option(
         let background = if is_highlighted
             || matches!(status, button::Status::Hovered | button::Status::Pressed)
         {
-            palette.accent_soft
+            palette.selected
         } else if is_selected {
             palette.surface_low
         } else {
@@ -977,7 +1117,7 @@ pub fn tool_button(theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Active => palette.surface_low,
         button::Status::Hovered => palette.surface_high,
-        button::Status::Pressed => palette.accent_soft,
+        button::Status::Pressed => palette.selected,
         button::Status::Disabled => palette.surface_low.scale_alpha(0.55),
     };
 
@@ -994,7 +1134,7 @@ pub fn icon_button(theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Active => Color::TRANSPARENT,
         button::Status::Hovered => palette.surface_high,
-        button::Status::Pressed => palette.accent_soft,
+        button::Status::Pressed => palette.selected,
         button::Status::Disabled => Color::TRANSPARENT,
     };
 
@@ -1026,7 +1166,7 @@ pub fn settings_category_button(
         let background = match (is_active, status) {
             (true, _) => palette.surface,
             (_, button::Status::Hovered) => palette.surface_high,
-            (_, button::Status::Pressed) => palette.accent_soft,
+            (_, button::Status::Pressed) => palette.selected,
             _ => Color::TRANSPARENT,
         };
 
@@ -1066,9 +1206,9 @@ pub fn dialog_tab_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> 
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);
         let background = match (is_active, status) {
-            (true, _) => palette.accent_soft,
+            (true, _) => palette.selected,
             (false, button::Status::Hovered) => palette.surface_high,
-            (false, button::Status::Pressed) => palette.accent_soft,
+            (false, button::Status::Pressed) => palette.selected,
             _ => Color::TRANSPARENT,
         };
 
@@ -1082,7 +1222,7 @@ pub fn dialog_tab_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> 
             border: border(
                 1.0,
                 if is_active {
-                    palette.accent.scale_alpha(0.44)
+                    palette.border_soft
                 } else {
                     Color::TRANSPARENT
                 },
@@ -1102,7 +1242,7 @@ pub fn settings_navigation_button(
         let background = match (is_active, status) {
             (true, _) => palette.accent_soft,
             (false, button::Status::Hovered) => palette.surface_high,
-            (false, button::Status::Pressed) => palette.accent_soft,
+            (false, button::Status::Pressed) => palette.selected,
             _ => Color::TRANSPARENT,
         };
 
@@ -1113,15 +1253,7 @@ pub fn settings_navigation_button(
             } else {
                 palette.muted_text
             },
-            border: border(
-                1.0,
-                if is_active {
-                    palette.accent.scale_alpha(0.35)
-                } else {
-                    Color::TRANSPARENT
-                },
-                CONTROL_RADIUS,
-            ),
+            border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
             ..button::Style::default()
         }
     }
@@ -1132,7 +1264,7 @@ pub fn command_button(theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Active => palette.surface_low,
         button::Status::Hovered => palette.surface_high,
-        button::Status::Pressed => palette.accent_soft,
+        button::Status::Pressed => palette.selected,
         button::Status::Disabled => palette.surface_low.scale_alpha(0.55),
     };
 
@@ -1226,7 +1358,7 @@ pub fn tab_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> button:
         } else {
             match status {
                 button::Status::Hovered => palette.surface_high,
-                button::Status::Pressed => palette.accent_soft,
+                button::Status::Pressed => palette.selected,
                 _ => palette.chrome,
             }
         };
@@ -1281,7 +1413,7 @@ pub fn tab_pin_button(
         let palette = VisualPalette::from_theme(theme);
         let background = match (is_active, status) {
             (_, button::Status::Hovered) => palette.surface_high,
-            (_, button::Status::Pressed) => palette.accent_soft,
+            (_, button::Status::Pressed) => palette.selected,
             (true, _) => palette.surface,
             (false, _) => palette.chrome,
         };

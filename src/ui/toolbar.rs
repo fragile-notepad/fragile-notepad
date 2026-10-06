@@ -188,6 +188,7 @@ pub fn tool_bar<'a>(document: Option<&Document>) -> Element<'a, Message> {
 
     container(
         scrollable(buttons)
+            .style(styles::scrollable)
             .smooth_scroll(true)
             .horizontal()
             .width(Fill),

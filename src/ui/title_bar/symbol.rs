@@ -73,7 +73,7 @@ where
         };
         if mac {
             let color = if !self.focused && !hover {
-                theme.palette().background.base.text.scale_alpha(0.22)
+                crate::ui::styles::shortcut_text_color(theme).scale_alpha(0.22)
             } else {
                 match self.action {
                     Action::Close => Color::from_rgb8(255, 95, 87),

@@ -1,2 +1,2 @@
-Pillow>=11.3,<13
+Pillow>=12.3,<13
 resvg-py==0.2.6

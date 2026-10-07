@@ -196,7 +196,7 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
         id,
         EditorAction::ViewportChanged {
             visible_rows: 4,
-            text_width: 82,
+            text_width: 90,
             character_width_milli: 8000,
             font_size_milli: 14_545,
             hint_factor_milli: None,

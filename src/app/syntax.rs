@@ -125,6 +125,7 @@ impl SyntaxParsing {
         let priority_lines: Vec<_> = (first_row..end_row.saturating_add(32))
             .chain(first_row.saturating_sub(32)..first_row)
             .filter_map(|row| document.viewport.visible_row_to_document_line(row))
+            .flat_map(|line| document.viewport.source_lines(line))
             .filter(|line| seen.insert(*line))
             .collect();
         let request =

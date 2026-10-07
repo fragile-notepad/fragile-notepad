@@ -225,7 +225,7 @@ fn wrapped_analysis_preserves_retained_folds_and_reveals_removed_folds() {
 
     document.analysis_pending = true;
     let (_, mut retained) = document.analysis_request().unwrap();
-    retained.folds = vec![range];
+    retained.folds = FoldModel::new(vec![range]);
     assert!(document.apply_analysis(retained));
     assert!(document.folds.is_collapsed(range));
     assert_eq!(document.viewport.visible_row_count(), collapsed_rows);

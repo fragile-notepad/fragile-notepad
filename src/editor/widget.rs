@@ -20,6 +20,7 @@ use super::buffer::EditorBuffer;
 use super::cjk::CjkContext;
 use super::decoration::DecorationModel;
 use super::fold::FoldRange;
+use super::fold_projection::ProjectionFragment;
 #[cfg(test)]
 use super::layout::scrolled_text_origin_x;
 use super::layout::{
@@ -33,7 +34,8 @@ use super::render::{
 };
 use super::render::{
     SyntaxLineCache, build_render_plan_for_selection_set_with_cache_and_caret_rows,
-    collapsed_fold_indicator_bounds,
+    collapsed_delimiter_indicator_bounds, collapsed_fold_indicator_bounds,
+    fold_delimiter_for_fragment,
 };
 use super::viewport::ViewportModel;
 
@@ -595,10 +597,64 @@ impl<Message> AdvancedEditor<'_, Message> {
 
         let (visible_row, line) = hit_visible_row(position.y, editor_layout, self.viewport)?;
         let segment = self.viewport.row_segment(visible_row, self.buffer)?;
+        if let Some(projection) = self.viewport.projection(line) {
+            let fragment = &projection.text[segment.start_column..segment.end_column];
+            let geometry = LineGeometry::new_with_font_runs(
+                fragment,
+                self.metrics,
+                renderer,
+                segment.start_visual_column,
+                self.decorations.settings.indent_width,
+                &font::editor_font_runs_for_display_fragment(
+                    fragment,
+                    self.cjk_context.as_deref(),
+                    line,
+                    segment.start_column,
+                    self.viewport,
+                ),
+            );
+            for projected in &projection.fragments {
+                if let ProjectionFragment::Placeholder {
+                    display_range,
+                    range,
+                    ..
+                } = projected
+                {
+                    let start = display_range.start.max(segment.start_column);
+                    let end = display_range.end.min(segment.end_column);
+                    if start >= end {
+                        continue;
+                    }
+                    let left = measured_caret_x(
+                        &geometry,
+                        start - segment.start_column,
+                        editor_layout,
+                        self.decorations,
+                    );
+                    let right = measured_caret_x(
+                        &geometry,
+                        end - segment.start_column,
+                        editor_layout,
+                        self.decorations,
+                    );
+                    let indicator = Rectangle {
+                        x: left,
+                        y: row_y(visible_row, editor_layout) + self.metrics.line_height * 0.05,
+                        width: (right - left).max(0.0),
+                        height: self.metrics.line_height * 0.9,
+                    };
+                    if indicator.contains(position) {
+                        return Some(*range);
+                    }
+                }
+            }
+            return None;
+        }
         if !segment.is_last {
             return None;
         }
-        self.decorations.line_decorations.get(line)?.fold_range?;
+        let decoration = self.decorations.line_decorations.get(line)?;
+        decoration.fold_range?;
         // Brace and indentation folds can share a header. Match the longest
         // collapsed span, which is the range the viewport currently hides.
         let hidden = self
@@ -609,6 +665,14 @@ impl<Message> AdvancedEditor<'_, Message> {
             .max_by_key(|span| span.last_hidden_line)?;
         let line_text = self.buffer.line(line)?;
         let fragment = &line_text[segment.start_column..segment.end_column];
+        let delimiter = decoration
+            .fold_delimiter
+            .filter(|_| {
+                decoration.fold_range == Some(FoldRange::new(line, hidden.last_hidden_line))
+            })
+            .and_then(|delimiter| {
+                fold_delimiter_for_fragment(delimiter, segment.start_column, fragment)
+            });
         let line_geometry = LineGeometry::new_with_font_runs(
             fragment,
             self.metrics,
@@ -622,18 +686,26 @@ impl<Message> AdvancedEditor<'_, Message> {
                 segment.start_column,
             ),
         );
-        let text_end_x = measured_caret_x(
+        let anchor_x = measured_caret_x(
             &line_geometry,
-            fragment.len(),
+            delimiter.map_or(fragment.len(), |delimiter| delimiter.opening_column),
             editor_layout,
             self.decorations,
         );
-        let indicator = collapsed_fold_indicator_bounds(
-            self.metrics,
-            row_y(visible_row, editor_layout),
-            text_end_x,
-            self.decorations.settings.show_end_of_line_markers,
-        );
+        let indicator = if delimiter.is_some() {
+            collapsed_delimiter_indicator_bounds(
+                self.metrics,
+                row_y(visible_row, editor_layout),
+                anchor_x,
+            )
+        } else {
+            collapsed_fold_indicator_bounds(
+                self.metrics,
+                row_y(visible_row, editor_layout),
+                anchor_x,
+                self.decorations.settings.show_end_of_line_markers,
+            )
+        };
 
         indicator
             .contains(position)

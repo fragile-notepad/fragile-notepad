@@ -10,11 +10,11 @@ use crate::editor::cjk::CjkContext;
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{EditorLayout, HitTarget, hit_test, hit_visible_row};
 use crate::editor::position::{EditorPosition, EditorSelection, SelectionRange, SelectionSet};
-use crate::editor::render::text_size;
+use crate::editor::render::{project_folded_selection, text_size};
 use crate::editor::viewport::ViewportModel;
 
 use super::actions::key_action;
-use super::font::editor_font_runs_for_fragment;
+use super::font::{editor_font_runs_for_display_fragment, editor_font_runs_for_fragment};
 use super::line_cache::{
     LineGeometry, measured_position_point_with_context, measured_text_hit_target_with_context,
     measured_virtual_caret_x,
@@ -184,8 +184,17 @@ where
             let clicked_row =
                 hit_visible_row(position.y, editor_layout, context.viewport).map(|(row, _)| row);
             let clicked_row_start = clicked_row
-                .and_then(|row| context.viewport.row_segment(row, context.buffer))
-                .map_or(0, |segment| segment.start_column);
+                .and_then(|row| {
+                    let line = context.viewport.visible_row_to_document_line(row)?;
+                    let segment = context.viewport.row_segment(row, context.buffer)?;
+                    Some(
+                        context
+                            .viewport
+                            .source_position(EditorPosition::new(line, segment.start_column))
+                            .column,
+                    )
+                })
+                .unwrap_or(0);
             let hit = hit_test(
                 position.x,
                 position.y,
@@ -719,6 +728,65 @@ where
         let Some(row) = row.first() else {
             return false;
         };
+        let Some((visible_row, owner)) = hit_visible_row(pointer.y, layout, context.viewport)
+        else {
+            return false;
+        };
+        if let Some(projection) = context.viewport.projection(owner) {
+            let Some(segment) = context.viewport.row_segment(visible_row, context.buffer) else {
+                return false;
+            };
+            let fragment = &projection.text[segment.start_column..segment.end_column];
+            let geometry = LineGeometry::new_with_font_runs(
+                fragment,
+                layout.metrics,
+                renderer,
+                segment.start_visual_column,
+                context.decorations.settings.indent_width,
+                &editor_font_runs_for_display_fragment(
+                    fragment,
+                    context.cjk_context,
+                    owner,
+                    segment.start_column,
+                    context.viewport,
+                ),
+            );
+            let source_selection = SelectionRange {
+                anchor: EditorPosition::new(position.line, 0),
+                cursor: EditorPosition::new(position.line, 0),
+                ..*selection
+            };
+            return project_folded_selection(
+                source_selection,
+                owner,
+                context.buffer,
+                projection,
+                context.decorations.settings.indent_width,
+            )
+            .iter()
+            .any(|selected| {
+                let start = selected.start.column.max(segment.start_column);
+                let end = selected.end.column.min(segment.end_column);
+                if start >= end {
+                    return false;
+                }
+                let start_x = measured_virtual_caret_x(
+                    &geometry,
+                    start - segment.start_column,
+                    None,
+                    layout,
+                    context.decorations,
+                );
+                let end_x = measured_virtual_caret_x(
+                    &geometry,
+                    end - segment.start_column,
+                    None,
+                    layout,
+                    context.decorations,
+                );
+                pointer.x >= start_x.min(end_x) && pointer.x < start_x.max(end_x)
+            });
+        }
         let text = context.buffer.line(position.line).unwrap_or_default();
         let Some(segment) = hit_visible_row(pointer.y, layout, context.viewport)
             .and_then(|(visible_row, _)| context.viewport.row_segment(visible_row, context.buffer))

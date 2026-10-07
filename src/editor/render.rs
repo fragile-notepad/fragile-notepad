@@ -1,5 +1,7 @@
 use super::buffer::EditorBuffer;
 use super::decoration::{DecorationModel, HiddenLineSpan, IndentGuide, LineDecoration};
+use super::fold::{FoldDelimiter, FoldRange};
+use super::fold_projection::{FoldProjection, ProjectionFragment};
 use super::layout::{
     EditorLayout, EditorMetrics, GUTTER_RIGHT_MARGIN, byte_column_for, row_y,
     scrolled_text_origin_x, visual_column_for, visual_column_for_with_offset,
@@ -43,25 +45,87 @@ pub struct RowRenderPlan {
     pub eol: Option<EolRenderPlan>,
     pub indent_guides: Vec<IndentGuideRenderPlan>,
     pub syntax_spans: Vec<SyntaxRenderSpan>,
+    pub projection: Vec<ProjectionFragment>,
 }
 
 impl RowRenderPlan {
+    pub(crate) fn display_column_for_source(&self, position: EditorPosition) -> Option<usize> {
+        if self.projection.is_empty() {
+            return (position.line == self.line)
+                .then_some(position.column.saturating_sub(self.start_column));
+        }
+        for fragment in &self.projection {
+            match fragment {
+                ProjectionFragment::Source {
+                    display_range,
+                    source_start,
+                } if position.line == source_start.line
+                    && position.column >= source_start.column
+                    && position.column <= source_start.column + display_range.len() =>
+                {
+                    return Some(display_range.start + position.column - source_start.column);
+                }
+                ProjectionFragment::Placeholder {
+                    display_range,
+                    range,
+                    delimiter,
+                } => {
+                    if position == EditorPosition::new(range.start_line, delimiter.opening_column) {
+                        return Some(display_range.start);
+                    }
+                    if position == EditorPosition::new(range.end_line, delimiter.closing_column)
+                        || (position.line == range.start_line
+                            && position.column > delimiter.opening_column)
+                    {
+                        return Some(display_range.end);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(ProjectionFragment::Source {
+            display_range,
+            source_start,
+        }) = self.projection.last()
+            && position.line == source_start.line
+            && position.column > source_start.column + display_range.len()
+        {
+            return Some(
+                display_range.end + position.column - source_start.column - display_range.len(),
+            );
+        }
+        None
+    }
+
+    pub fn collapsed_delimiter(&self) -> Option<FoldDelimiter> {
+        self.hidden_lines.and_then(|hidden| hidden.delimiter)
+    }
+
+    pub fn collapsed_indicator_column(&self) -> usize {
+        self.collapsed_delimiter()
+            .map_or(self.text.len(), |delimiter| delimiter.opening_column)
+    }
+
     /// Returns the inline indicator only when this row hides a collapsed block.
-    /// `measured_text_end_x` is the editor-local endpoint of the row's text.
+    /// Measure `collapsed_indicator_column` in the row's full source geometry.
     pub fn collapsed_indicator_bounds(
         &self,
         metrics: EditorMetrics,
-        measured_text_end_x: f32,
+        measured_anchor_x: f32,
     ) -> Option<Rectangle> {
         self.hidden_lines
             .filter(|hidden| hidden.hidden_line_count > 0)
-            .map(|_| {
-                collapsed_fold_indicator_bounds(
-                    metrics,
-                    self.y,
-                    measured_text_end_x,
-                    self.eol.is_some(),
-                )
+            .map(|hidden| {
+                if hidden.delimiter.is_some() {
+                    collapsed_delimiter_indicator_bounds(metrics, self.y, measured_anchor_x)
+                } else {
+                    collapsed_fold_indicator_bounds(
+                        metrics,
+                        self.y,
+                        measured_anchor_x,
+                        self.eol.is_some(),
+                    )
+                }
             })
     }
 }
@@ -83,6 +147,25 @@ pub struct HiddenLineRenderPlan {
     pub first_hidden_line: usize,
     pub last_hidden_line: usize,
     pub hidden_line_count: usize,
+    pub delimiter: Option<FoldDelimiter>,
+}
+
+pub(crate) fn fold_delimiter_for_fragment(
+    mut delimiter: FoldDelimiter,
+    start_column: usize,
+    text: &str,
+) -> Option<FoldDelimiter> {
+    let column = delimiter.opening_column.checked_sub(start_column)?;
+    if !text
+        .get(column..)?
+        .strip_prefix(delimiter.opening)?
+        .trim()
+        .is_empty()
+    {
+        return None;
+    }
+    delimiter.opening_column = column;
+    Some(delimiter)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,14 +224,15 @@ pub struct CaretRenderPlan {
 /// quads for selections, active-line backgrounds, indentation guides, carets,
 /// scrollbars, or decorative visible-space dots.
 ///
-/// When `fast_text` is enabled and every visible row is tab-free ASCII text
-/// without syntax spans, the widget can batch all visible rows into a single
-/// clipped multiline text item. Highlighted rows are kept separate so syntax
-/// colors remain visible during active scrolling.
+/// Fast scrolling can batch tab-free ASCII rows without syntax spans or paired
+/// fold placeholders into one clipped text item. Highlighted and projected
+/// rows remain separate to preserve their colors and source geometry.
 pub fn planned_text_draws(plan: &RenderPlan, fast_text: bool) -> usize {
     if fast_text
         && plan.rows.iter().all(|row| {
-            row.syntax_spans.is_empty()
+            row.projection.is_empty()
+                && row.collapsed_delimiter().is_none()
+                && row.syntax_spans.is_empty()
                 && row
                     .text
                     .bytes()
@@ -241,10 +325,32 @@ pub fn collapsed_fold_indicator_bounds(
     }
 }
 
+/// Bounds for a matched delimiter and its hidden contents, at the opener.
+pub fn collapsed_delimiter_indicator_bounds(
+    metrics: EditorMetrics,
+    row_y: f32,
+    measured_opener_x: f32,
+) -> Rectangle {
+    let height = metrics.line_height * 0.9;
+    Rectangle {
+        x: measured_opener_x,
+        y: row_y + (metrics.line_height - height) / 2.0,
+        width: collapsed_delimiter_indicator_width(metrics.character_width),
+        height,
+    }
+}
+
 /// Horizontal space needed after a header, excluding any EOL marker.
 pub fn collapsed_fold_indicator_reservation(character_width: f32) -> f32 {
     let (gap, width) = collapsed_fold_indicator_dimensions(character_width);
-    gap + width
+    (gap + width).max(
+        collapsed_delimiter_indicator_width(character_width) - character_width
+            + character_width * 0.25,
+    )
+}
+
+fn collapsed_delimiter_indicator_width(character_width: f32) -> f32 {
+    (character_width * 5.4).max(24.0)
 }
 
 fn collapsed_fold_indicator_dimensions(character_width: f32) -> (f32, f32) {
@@ -413,12 +519,14 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
         layout.scroll.horizontal_px = 0.0;
     }
     let main_selection = selections.main();
+    let active_display_line = viewport
+        .display_position(main_selection.cursor)
+        .map(|position| position.line);
     let caret_row = |position| {
         caret_rows
             .iter()
             .find_map(|(caret, row)| (*caret == position).then_some(*row))
     };
-    let active_line = main_selection.cursor.line;
     let mut rows = Vec::new();
     let mut selection_plans = Vec::new();
     let mut carets = Vec::new();
@@ -441,12 +549,50 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
         };
         if cached_line != Some(line) {
             cached_line = Some(line);
-            line_text = buffer.line(line).unwrap_or_default();
-            line_spans = syntax_cache
-                .spans_for_text(line, &line_text)
-                .unwrap_or_default();
+            line_text = viewport.display_text(line, buffer).into_owned();
+            line_spans = viewport.projection(line).map_or_else(
+                || {
+                    syntax_cache
+                        .spans_for_text(line, &line_text)
+                        .unwrap_or_default()
+                },
+                |projection| projected_syntax_spans(projection, buffer, syntax_cache),
+            );
             projected.clear();
             for selection in selections.ranges() {
+                if let Some(projection) = viewport.projection(line) {
+                    projected.extend(project_folded_selection(
+                        *selection,
+                        line,
+                        buffer,
+                        projection,
+                        decorations.settings.indent_width,
+                    ));
+                    for source_line in viewport.source_lines(line) {
+                        let source_text = buffer.line(source_line).unwrap_or_default();
+                        if (selection.is_caret() || selection.is_rectangular())
+                            && let Some(source_selection) = project_selection_line(
+                                *selection,
+                                source_line,
+                                buffer,
+                                &source_text,
+                                decorations.settings.indent_width,
+                            )
+                            && let Some(caret) = caret_plan_from_projected(
+                                buffer,
+                                viewport,
+                                decorations,
+                                source_selection,
+                                &source_text,
+                                layout,
+                                caret_row(source_selection.end),
+                            )
+                        {
+                            carets.push(caret);
+                        }
+                    }
+                    continue;
+                }
                 if let Some(projection) = project_selection_line(
                     *selection,
                     line,
@@ -482,11 +628,19 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
             });
         let hidden_lines = lookups
             .hidden_line_span(line)
-            .filter(|_| segment.is_last)
+            .filter(|_| segment.is_last && viewport.projection(line).is_none())
             .map(|span| HiddenLineRenderPlan {
                 first_hidden_line: span.first_hidden_line,
                 last_hidden_line: span.last_hidden_line,
                 hidden_line_count: span.hidden_line_count(),
+                delimiter: line_decoration
+                    .filter(|decoration| {
+                        decoration.fold_range == Some(FoldRange::new(line, span.last_hidden_line))
+                    })
+                    .and_then(|decoration| decoration.fold_delimiter)
+                    .and_then(|delimiter| {
+                        fold_delimiter_for_fragment(delimiter, segment.start_column, text)
+                    }),
             });
         let first_span = line_spans.partition_point(|span| span.range.end <= segment.start_column);
         let syntax_spans = line_spans[first_span..]
@@ -525,7 +679,7 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
             line_number: line_decoration
                 .filter(|_| !segment.is_continuation())
                 .and_then(|decoration| decoration.line_number),
-            is_active_line: line == active_line,
+            is_active_line: active_display_line == Some(line),
             fold,
             hidden_lines,
             whitespace: whitespace_plan(
@@ -545,6 +699,14 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
                 indent_guide_plan(line, lookups.indent_guides(line), decorations, layout)
             },
             syntax_spans,
+            projection: viewport
+                .projection(line)
+                .map_or_else(Vec::new, |projection| {
+                    clipped_projection_fragments(
+                        projection,
+                        segment.start_column..segment.end_column,
+                    )
+                }),
         });
     }
 
@@ -571,6 +733,156 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
         carets,
         caret,
     }
+}
+
+pub(crate) fn clipped_projection_fragments(
+    projection: &FoldProjection,
+    clip: Range<usize>,
+) -> Vec<ProjectionFragment> {
+    projection
+        .fragments
+        .iter()
+        .filter_map(|fragment| {
+            let range = match fragment {
+                ProjectionFragment::Source { display_range, .. }
+                | ProjectionFragment::Placeholder { display_range, .. } => display_range,
+            };
+            let start = range.start.max(clip.start);
+            let end = range.end.min(clip.end);
+            if start >= end {
+                return None;
+            }
+            let display_range = start - clip.start..end - clip.start;
+            Some(match fragment {
+                ProjectionFragment::Source { source_start, .. } => ProjectionFragment::Source {
+                    display_range,
+                    source_start: EditorPosition::new(
+                        source_start.line,
+                        source_start.column + start - range.start,
+                    ),
+                },
+                ProjectionFragment::Placeholder {
+                    range, delimiter, ..
+                } => ProjectionFragment::Placeholder {
+                    display_range,
+                    range: *range,
+                    delimiter: *delimiter,
+                },
+            })
+        })
+        .collect()
+}
+
+fn projected_syntax_spans(
+    projection: &FoldProjection,
+    buffer: &EditorBuffer,
+    syntax_cache: &SyntaxLineCache,
+) -> Vec<SyntaxRenderSpan> {
+    let mut spans = Vec::new();
+    for fragment in &projection.fragments {
+        if let ProjectionFragment::Source {
+            display_range,
+            source_start,
+        } = fragment
+        {
+            let source = buffer.line(source_start.line).unwrap_or_default();
+            for span in syntax_cache
+                .spans_for_text(source_start.line, &source)
+                .unwrap_or_default()
+            {
+                let start = span.range.start.max(source_start.column);
+                let end = span
+                    .range
+                    .end
+                    .min(source_start.column + display_range.len());
+                if start < end {
+                    spans.push(SyntaxRenderSpan {
+                        range: display_range.start + start - source_start.column
+                            ..display_range.start + end - source_start.column,
+                        color: span.color,
+                    });
+                }
+            }
+        }
+    }
+    spans
+}
+
+pub(crate) fn project_folded_selection(
+    selection: SelectionRange,
+    owner: usize,
+    buffer: &EditorBuffer,
+    projection: &FoldProjection,
+    tab_width: usize,
+) -> Vec<ProjectedSelectionLine> {
+    let range = buffer.clamp_range(selection.range());
+    let mut selected = Vec::new();
+    for fragment in &projection.fragments {
+        let columns = match fragment {
+            ProjectionFragment::Source {
+                display_range,
+                source_start,
+            } => {
+                let source = buffer.line(source_start.line).unwrap_or_default();
+                let Some(line) = project_selection_line(
+                    selection,
+                    source_start.line,
+                    buffer,
+                    &source,
+                    tab_width,
+                ) else {
+                    continue;
+                };
+                let start = line.start.column.max(source_start.column);
+                let end = line
+                    .end
+                    .column
+                    .min(source_start.column + display_range.len());
+                if start >= end {
+                    continue;
+                }
+                display_range.start + start - source_start.column
+                    ..display_range.start + end - source_start.column
+            }
+            ProjectionFragment::Placeholder {
+                display_range,
+                range: fold,
+                delimiter,
+            } => {
+                let start = EditorPosition::new(fold.start_line, delimiter.opening_column);
+                let end = EditorPosition::new(fold.end_line, delimiter.closing_column);
+                if range.start >= end || range.end <= start {
+                    continue;
+                }
+                if selection.is_rectangular() {
+                    let source = buffer.line(fold.start_line).unwrap_or_default();
+                    let Some(line) = project_selection_line(
+                        selection,
+                        fold.start_line,
+                        buffer,
+                        &source,
+                        tab_width,
+                    ) else {
+                        continue;
+                    };
+                    if line.end.column <= delimiter.opening_column {
+                        continue;
+                    }
+                }
+                display_range.clone()
+            }
+        };
+        selected.push(ProjectedSelectionLine {
+            line: owner,
+            start: EditorPosition::new(owner, columns.start),
+            end: EditorPosition::new(owner, columns.end),
+            start_visual_column: visual_column_for(&projection.text, columns.start, tab_width),
+            end_visual_column: visual_column_for(&projection.text, columns.end, tab_width),
+            start_virtual_column: None,
+            end_virtual_column: None,
+        });
+    }
+    selected
 }
 
 fn project_selection_line(
@@ -765,11 +1077,13 @@ fn caret_plan_for_position(
     layout: EditorLayout,
     caret_row: Option<usize>,
 ) -> Option<CaretRenderPlan> {
+    let display_position = viewport.display_position(position)?;
+    let display_text = viewport.display_text(display_position.line, buffer);
     let visible_row = caret_row
         .filter(|row| {
-            viewport.visible_row_to_document_line(*row) == Some(position.line)
+            viewport.visible_row_to_document_line(*row) == Some(display_position.line)
                 && viewport.row_segment(*row, buffer).is_some_and(|segment| {
-                    (segment.start_column..=segment.end_column).contains(&position.column)
+                    (segment.start_column..=segment.end_column).contains(&display_position.column)
                 })
         })
         .or_else(|| viewport.position_to_visible_row(position))?;
@@ -783,14 +1097,19 @@ fn caret_plan_for_position(
         return None;
     }
     let segment = viewport.row_segment(visible_row, buffer)?;
-    let visual_column = virtual_column.filter(|column| {
-        *column
-            > visual_column_for(
-                line_text,
-                position.column,
-                decorations.settings.indent_width,
-            )
-    });
+    let source_visual = visual_column_for(
+        line_text,
+        position.column,
+        decorations.settings.indent_width,
+    );
+    let display_visual = visual_column_for(
+        &display_text,
+        display_position.column,
+        decorations.settings.indent_width,
+    );
+    let visual_column = virtual_column
+        .filter(|column| *column > source_visual)
+        .map(|column| display_visual + column - source_visual);
 
     Some(CaretRenderPlan {
         position,
@@ -799,8 +1118,8 @@ fn caret_plan_for_position(
             visual_column
                 .unwrap_or_else(|| {
                     visual_column_for(
-                        line_text,
-                        position.column,
+                        &display_text,
+                        display_position.column,
                         decorations.settings.indent_width,
                     )
                 })
@@ -830,7 +1149,8 @@ impl<'a> RenderDecorationLookups<'a> {
         self.decorations
             .hidden_line_spans
             .iter()
-            .find(|span| span.header_line == line)
+            .filter(|span| span.header_line == line)
+            .max_by_key(|span| span.last_hidden_line)
     }
 
     fn indent_guides(&self, line: usize) -> impl Iterator<Item = &'a IndentGuide> {

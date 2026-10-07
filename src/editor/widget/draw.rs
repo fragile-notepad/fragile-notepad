@@ -3,6 +3,7 @@ use iced::{Background, Color, Font, Pixels, Point, Rectangle, Size, alignment};
 
 use crate::editor::cjk::CjkContext;
 use crate::editor::decoration::DecorationModel;
+use crate::editor::fold_projection::ProjectionFragment;
 use crate::editor::layout::{
     EditorLayout, EditorMetrics, scrolled_text_origin_x, text_area_bounds,
 };
@@ -12,7 +13,7 @@ use crate::editor::render::{
 use crate::ui::icons::hero::{self, HeroIcon};
 
 use super::cache::RichParagraphCache;
-use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING, editor_font_runs_for_fragment};
+use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING, editor_font_runs_for_row};
 use super::line_cache::{
     LineGeometryCache, RowGeometries, measured_caret_x, measured_selection_x_and_width,
     measured_virtual_caret_x,
@@ -56,6 +57,7 @@ mod indent_tests {
                         x: depth as f32 * 40.0,
                     })
                     .collect(),
+                projection: Vec::new(),
                 syntax_spans: vec![],
             })
             .collect();
@@ -85,10 +87,11 @@ mod indent_tests {
 // unrelated blocks which happen to have the same indentation depth.
 fn active_indent_guide(plan: &RenderPlan) -> Option<(usize, std::ops::Range<usize>)> {
     let caret = plan.caret?;
-    let index = plan
-        .rows
-        .iter()
-        .position(|row| row.line == caret.position.line && !row.indent_guides.is_empty())?;
+    let index = plan.rows.iter().position(|row| {
+        row.y == caret.y
+            && row.display_column_for_source(caret.position).is_some()
+            && !row.indent_guides.is_empty()
+    })?;
     let depth = plan.rows[index]
         .indent_guides
         .iter()
@@ -141,10 +144,12 @@ pub(super) fn draw_plan<Renderer>(
     let scroll_text_clip_bounds =
         scroll_text_area_bounds(bounds, layout, decorations, total_visible_rows);
     let batch_text = fast_text
-        && plan
-            .rows
-            .iter()
-            .all(|row| row.syntax_spans.is_empty() && can_batch_fast_text(&row.text));
+        && plan.rows.iter().all(|row| {
+            row.projection.is_empty()
+                && row.collapsed_delimiter().is_none()
+                && row.syntax_spans.is_empty()
+                && can_batch_fast_text(&row.text)
+        });
     let gutter_bounds = Rectangle {
         x: bounds.x,
         y: bounds.y,
@@ -308,6 +313,31 @@ pub(super) fn draw_plan<Renderer>(
     }
 
     renderer.with_layer(scroll_text_clip_bounds, |renderer| {
+        for (row_index, row) in plan.rows.iter().enumerate() {
+            for fragment in &row.projection {
+                if let ProjectionFragment::Placeholder { display_range, .. } = fragment {
+                    let geometry = row_geometries.get_by_row_index(row_index);
+                    let left = measured_caret_x(geometry, display_range.start, layout, decorations);
+                    let right = measured_caret_x(geometry, display_range.end, layout, decorations);
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: bounds.x + left,
+                                y: bounds.y + row.y + metrics.line_height * 0.05,
+                                width: (right - left).max(0.0),
+                                height: metrics.line_height * 0.9,
+                            },
+                            border: iced::Border {
+                                radius: 1.0.into(),
+                                ..iced::Border::default()
+                            },
+                            ..renderer::Quad::default()
+                        },
+                        Background::Color(style.fold_control_background),
+                    );
+                }
+            }
+        }
         if batch_text {
             draw_batched_row_text(
                 renderer,
@@ -319,7 +349,39 @@ pub(super) fn draw_plan<Renderer>(
                 scroll_text_clip_bounds,
             );
         } else {
-            for row in &plan.rows {
+            for (row_index, row) in plan.rows.iter().enumerate() {
+                let styled_projection = row
+                    .projection
+                    .iter()
+                    .any(|fragment| matches!(fragment, ProjectionFragment::Placeholder { .. }))
+                    .then(|| {
+                        let mut row = row.clone();
+                        for fragment in &row.projection {
+                            if let ProjectionFragment::Placeholder { display_range, .. } = fragment
+                            {
+                                row.syntax_spans
+                                    .push(crate::editor::render::SyntaxRenderSpan {
+                                        range: display_range.clone(),
+                                        color: Some(style.fold_controls),
+                                    });
+                            }
+                        }
+                        row.syntax_spans.sort_by_key(|span| span.range.start);
+                        row
+                    });
+                let row = styled_projection.as_ref().unwrap_or(row);
+                let mut row_clip_bounds = scroll_text_clip_bounds;
+                if let Some(delimiter) = row.collapsed_delimiter() {
+                    let opener_x = bounds.x
+                        + measured_caret_x(
+                            row_geometries.get_by_row_index(row_index),
+                            delimiter.opening_column,
+                            layout,
+                            decorations,
+                        );
+                    row_clip_bounds.width =
+                        (opener_x - row_clip_bounds.x).clamp(0.0, row_clip_bounds.width);
+                }
                 draw_row_text(
                     renderer,
                     row,
@@ -328,15 +390,10 @@ pub(super) fn draw_plan<Renderer>(
                     metrics,
                     decorations,
                     style,
-                    scroll_text_clip_bounds,
+                    row_clip_bounds,
                     frame_id,
                     rich_paragraphs,
-                    &editor_font_runs_for_fragment(
-                        &row.text,
-                        cjk_context,
-                        row.line,
-                        row.start_column,
-                    ),
+                    &editor_font_runs_for_row(row, cjk_context),
                     |renderer, content, position, bounds, color, align_x, metrics, clip_bounds| {
                         draw_text(
                             renderer,
@@ -403,14 +460,14 @@ pub(super) fn draw_plan<Renderer>(
                 continue;
             }
 
-            let text_end_x = measured_caret_x(
+            let anchor_x = measured_caret_x(
                 row_geometries.get_by_row_index(row_index),
-                row.text.len(),
+                row.collapsed_indicator_column(),
                 layout,
                 decorations,
             );
 
-            if let Some(indicator) = row.collapsed_indicator_bounds(metrics, text_end_x) {
+            if let Some(indicator) = row.collapsed_indicator_bounds(metrics, anchor_x) {
                 let indicator = Rectangle {
                     x: bounds.x + indicator.x,
                     y: bounds.y + indicator.y,
@@ -418,7 +475,15 @@ pub(super) fn draw_plan<Renderer>(
                 };
 
                 if indicator.intersects(&scroll_text_clip_bounds) {
-                    draw_collapsed_fold_indicator(renderer, indicator, metrics, style);
+                    draw_collapsed_fold_indicator(
+                        renderer,
+                        indicator,
+                        bounds.y + row.y,
+                        row.collapsed_delimiter().map(|delimiter| delimiter.opening),
+                        metrics,
+                        style,
+                        scroll_text_clip_bounds,
+                    );
                 }
             }
         }
@@ -433,22 +498,33 @@ pub(super) fn draw_plan<Renderer>(
         };
 
         for caret in carets {
-            let Some((row_index, row)) = plan
-                .rows
-                .iter()
-                .enumerate()
-                .find(|(_, row)| row.line == caret.position.line && row.y == caret.y)
-            else {
+            let Some((row_index, row)) = plan.rows.iter().enumerate().find(|(_, row)| {
+                row.y == caret.y && row.display_column_for_source(caret.position).is_some()
+            }) else {
                 continue;
             };
             let row_geometry = row_geometries.get_by_row_index(row_index);
-            let x = measured_virtual_caret_x(
+            let local_column = row
+                .display_column_for_source(caret.position)
+                .unwrap_or_default();
+            let mut x = measured_virtual_caret_x(
                 row_geometry,
-                caret.position.column.saturating_sub(row.start_column),
+                local_column,
                 caret.visual_column,
                 layout,
                 decorations,
             );
+            if let Some(delimiter) = row.collapsed_delimiter()
+                && local_column > delimiter.opening_column
+            {
+                let anchor_x =
+                    measured_caret_x(row_geometry, delimiter.opening_column, layout, decorations);
+                if let Some(indicator) = row.collapsed_indicator_bounds(metrics, anchor_x) {
+                    let source_end_x =
+                        measured_caret_x(row_geometry, row.text.len(), layout, decorations);
+                    x = indicator.x + indicator.width + (x - source_end_x).max(0.0);
+                }
+            }
             let caret_bounds = Rectangle {
                 x: bounds.x + x,
                 y: bounds.y + caret.y + 1.0,
@@ -661,10 +737,13 @@ fn draw_fold_control<Renderer>(
 fn draw_collapsed_fold_indicator<Renderer>(
     renderer: &mut Renderer,
     bounds: Rectangle,
+    row_y: f32,
+    opening: Option<char>,
     metrics: EditorMetrics,
     style: EditorStyle,
+    clip_bounds: Rectangle,
 ) where
-    Renderer: iced::advanced::Renderer,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font>,
 {
     renderer.fill_quad(
         renderer::Quad {
@@ -677,6 +756,26 @@ fn draw_collapsed_fold_indicator<Renderer>(
         },
         Background::Color(style.fold_control_background),
     );
+
+    if let Some(opening) = opening {
+        let placeholder = match opening {
+            '[' => "[...]",
+            '(' => "(...)",
+            _ => "{...}",
+        };
+        let padding = metrics.character_width * 0.2;
+        draw_text(
+            renderer,
+            placeholder,
+            Point::new(bounds.x + padding, row_y + text_baseline_offset(metrics)),
+            Size::new(metrics.character_width * 5.0, metrics.line_height),
+            style.fold_controls,
+            text::Alignment::Left,
+            metrics,
+            clip_bounds,
+        );
+        return;
+    }
 
     // Keep the three dots on the same inexpensive solid-quad path as visible
     // spaces, independent of the active font's ellipsis glyph or text batching.

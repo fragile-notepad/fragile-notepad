@@ -26,6 +26,16 @@ pub(super) fn draw_row_markers<Renderer>(
         + text::Renderer<Font = Font>
         + advanced_image::Renderer<Handle = advanced_image::Handle>,
 {
+    let collapsed_eol_x = row.eol.and_then(|_| {
+        row.collapsed_delimiter().and_then(|delimiter| {
+            let anchor_x =
+                measured_caret_x(line_geometry, delimiter.opening_column, layout, decorations);
+            row.collapsed_indicator_bounds(layout.metrics, anchor_x)
+                .map(|indicator| {
+                    indicator.x + indicator.width + layout.metrics.character_width * 0.25
+                })
+        })
+    });
     let context = MarkerRenderContext {
         bounds,
         layout,
@@ -33,6 +43,7 @@ pub(super) fn draw_row_markers<Renderer>(
         row,
         style,
         clip_bounds,
+        collapsed_eol_x,
     };
 
     match line_geometry {
@@ -49,6 +60,7 @@ struct MarkerRenderContext<'a> {
     row: &'a RowRenderPlan,
     style: EditorStyle,
     clip_bounds: Rectangle,
+    collapsed_eol_x: Option<f32>,
 }
 
 fn draw_fast_row_markers<Renderer>(renderer: &mut Renderer, context: MarkerRenderContext<'_>)
@@ -77,6 +89,12 @@ where
     };
 
     for whitespace in &row.whitespace {
+        if row
+            .collapsed_delimiter()
+            .is_some_and(|delimiter| whitespace.column >= delimiter.opening_column)
+        {
+            continue;
+        }
         let visual_column = visual_column_for_with_offset(
             &row.text,
             whitespace.column,
@@ -98,6 +116,10 @@ where
     }
 
     if row.eol.is_some() {
+        if let Some(x) = context.collapsed_eol_x {
+            draw_marker_icon_at_x(renderer, context, x, HeroIcon::ArrowTurnDownLeft);
+            return;
+        }
         let visual_column = visual_column_for_with_offset(
             &row.text,
             row.text.len(),
@@ -148,6 +170,13 @@ fn draw_measured_row_markers<Renderer>(
         advanced_image::Renderer<Handle = advanced_image::Handle> + text::Renderer<Font = Font>,
 {
     for whitespace in &context.row.whitespace {
+        if context
+            .row
+            .collapsed_delimiter()
+            .is_some_and(|delimiter| whitespace.column >= delimiter.opening_column)
+        {
+            continue;
+        }
         let x = measured_caret_x(
             line_geometry,
             whitespace.column,
@@ -163,12 +192,14 @@ fn draw_measured_row_markers<Renderer>(
     }
 
     if context.row.eol.is_some() {
-        let x = measured_caret_x(
-            line_geometry,
-            context.row.text.len(),
-            context.layout,
-            context.decorations,
-        );
+        let x = context.collapsed_eol_x.unwrap_or_else(|| {
+            measured_caret_x(
+                line_geometry,
+                context.row.text.len(),
+                context.layout,
+                context.decorations,
+            )
+        });
 
         draw_marker_icon_at_x(renderer, context, x, HeroIcon::ArrowTurnDownLeft);
     }

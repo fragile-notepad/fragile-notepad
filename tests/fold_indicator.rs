@@ -1,8 +1,11 @@
 use fragile_notepad::editor::layout::{caret_x, scrolled_text_origin_x};
-use fragile_notepad::editor::render::collapsed_fold_indicator_bounds;
+use fragile_notepad::editor::render::{
+    collapsed_delimiter_indicator_bounds, collapsed_fold_indicator_bounds,
+    collapsed_fold_indicator_reservation,
+};
 use fragile_notepad::editor::{
     DecorationModel, DecorationSettings, EditorBuffer, EditorLayout, EditorMetrics, EditorPosition,
-    EditorSelection, FoldModel, FoldRange, RenderPlan, ScrollOffset, SyntaxLineCache,
+    EditorSelection, FoldRange, IndentBraceFoldProvider, RenderPlan, ScrollOffset, SyntaxLineCache,
     ViewportModel, build_render_plan_with_cache, planned_text_draws,
 };
 use iced::Rectangle;
@@ -13,9 +16,25 @@ fn plan_for(
     settings: DecorationSettings,
     layout: EditorLayout,
 ) -> (RenderPlan, DecorationModel) {
+    plan_for_range(
+        text,
+        FoldRange::new(0, EditorBuffer::from_text(text).line_count() - 1),
+        collapsed,
+        settings,
+        layout,
+    )
+}
+
+fn plan_for_range(
+    text: &str,
+    range: FoldRange,
+    collapsed: bool,
+    settings: DecorationSettings,
+    layout: EditorLayout,
+) -> (RenderPlan, DecorationModel) {
     let buffer = EditorBuffer::from_text(text);
-    let range = FoldRange::new(0, buffer.line_count() - 1);
-    let mut folds = FoldModel::new(vec![range]);
+    let mut folds = IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+    assert!(folds.ranges().contains(&range), "Fixture fold {range:?}");
     folds.set_collapsed(range, collapsed);
     let viewport = ViewportModel::new(buffer.line_count(), &folds);
     let decorations = DecorationModel::from_folds(settings, buffer.line_count(), &folds, vec![]);
@@ -82,21 +101,33 @@ fn collapsed_indicator_survives_hidden_gutter_controls() {
 }
 
 #[test]
-fn collapsed_indicator_uses_measured_endpoint_and_reserves_eol_marker_cell() {
+fn delimiter_indicator_replaces_the_opener_at_its_measured_position() {
     let layout = default_layout();
     let (plan, _) = plan_for("\t字 {\n}", true, DecorationSettings::default(), layout);
-    let measured_end_x = 173.25;
+    let measured_opener_x = 173.25;
     let indicator = plan.rows[0]
-        .collapsed_indicator_bounds(layout.metrics, measured_end_x)
+        .collapsed_indicator_bounds(layout.metrics, measured_opener_x)
         .expect("collapsed indicator");
-    let with_eol =
-        collapsed_fold_indicator_bounds(layout.metrics, plan.rows[0].y, measured_end_x, true);
+    let expected =
+        collapsed_delimiter_indicator_bounds(layout.metrics, plan.rows[0].y, measured_opener_x);
 
-    assert!(indicator.x > measured_end_x);
-    assert!(indicator.x < measured_end_x + layout.metrics.character_width);
-    assert_eq!(with_eol.x - indicator.x, layout.metrics.character_width);
-    assert_eq!(with_eol.y, indicator.y);
-    assert_eq!(with_eol.size(), indicator.size());
+    assert_eq!(plan.rows[0].text, "\t字 {");
+    assert_eq!(plan.rows[0].collapsed_indicator_column(), "\t字 ".len());
+    assert_eq!(indicator, expected);
+    assert_eq!(indicator.x, measured_opener_x);
+    let (with_eol, _) = plan_for(
+        "\t字 {\n}",
+        true,
+        DecorationSettings {
+            show_end_of_line_markers: true,
+            ..DecorationSettings::default()
+        },
+        layout,
+    );
+    assert_eq!(
+        with_eol.rows[0].collapsed_indicator_bounds(layout.metrics, measured_opener_x),
+        Some(indicator)
+    );
 }
 
 #[test]
@@ -120,7 +151,12 @@ fn collapsed_indicator_moves_with_horizontal_scroll_and_stays_after_long_header(
     let indicator_at = |layout: EditorLayout| {
         row.collapsed_indicator_bounds(
             layout.metrics,
-            caret_x(&header, header.len(), layout, &decorations),
+            caret_x(
+                &header,
+                row.collapsed_indicator_column(),
+                layout,
+                &decorations,
+            ),
         )
         .expect("collapsed indicator")
     };
@@ -136,17 +172,147 @@ fn collapsed_indicator_moves_with_horizontal_scroll_and_stays_after_long_header(
 }
 
 #[test]
+fn only_parser_matched_terminal_delimiters_replace_source_syntax() {
+    for (source, opening) in [
+        ("fn main() {\n    run();\n}", '{'),
+        ("fn main() { \t\n    run();\n}", '{'),
+        ("let entries = [\n    1,\n];", '['),
+        ("call(\n    value\n);", '('),
+    ] {
+        let (plan, _) = plan_for(
+            source,
+            true,
+            DecorationSettings::default(),
+            default_layout(),
+        );
+        let row = &plan.rows[0];
+        let delimiter = row
+            .hidden_lines
+            .unwrap()
+            .delimiter
+            .expect("Matched delimiter");
+        assert_eq!(delimiter.opening, opening);
+        assert_eq!(delimiter.opening_column, row.text.find(opening).unwrap());
+        assert_eq!(row.collapsed_indicator_column(), delimiter.opening_column);
+        assert_eq!(row.text, source.lines().next().unwrap());
+    }
+
+    for source in [
+        "// {\n    }",
+        "let text = \"{\n    }\";",
+        "let text = r#\"{\n    }\"#;",
+        "if ready {\n    run();",
+        "if ready:\n    run();",
+    ] {
+        let (plan, _) = plan_for(
+            source,
+            true,
+            DecorationSettings::default(),
+            default_layout(),
+        );
+        let row = &plan.rows[0];
+        assert!(
+            row.hidden_lines.unwrap().delimiter.is_none(),
+            "Source {source:?}"
+        );
+        assert_eq!(row.collapsed_indicator_column(), row.text.len());
+        assert_eq!(
+            row.collapsed_indicator_bounds(default_layout().metrics, 180.0),
+            Some(collapsed_fold_indicator_bounds(
+                default_layout().metrics,
+                row.y,
+                180.0,
+                false
+            ))
+        );
+    }
+
+    for (source, range) in [
+        ("fn main() {\n    run();\n}", FoldRange::new(0, 1)),
+        ("fn main() { // header\n    run();\n}", FoldRange::new(0, 2)),
+    ] {
+        let (plan, _) = plan_for_range(
+            source,
+            range,
+            true,
+            DecorationSettings::default(),
+            default_layout(),
+        );
+        assert!(plan.rows[0].hidden_lines.unwrap().delimiter.is_none());
+        assert_eq!(
+            plan.rows[0].collapsed_indicator_column(),
+            plan.rows[0].text.len()
+        );
+    }
+}
+
+#[test]
+fn wrapped_delimiter_uses_the_opener_in_the_final_fragment_and_fits_the_reserved_width() {
+    let source = "fn wrapped_thing() {\n    run();\n}";
+    let buffer = EditorBuffer::from_text(source);
+    let mut folds = IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+    folds.set_collapsed(FoldRange::new(0, 2), true);
+    let decorations = DecorationModel::from_folds(
+        DecorationSettings::default(),
+        buffer.line_count(),
+        &folds,
+        vec![],
+    );
+    for zoom in [0.5, 1.0, 3.0] {
+        let metrics = EditorMetrics::new(20.0 * zoom, 8.8 * zoom);
+        let reservation = (collapsed_fold_indicator_reservation(metrics.character_width)
+            / metrics.character_width)
+            .ceil() as usize;
+        let viewport = ViewportModel::new_wrapped_with_fold_indicator_columns(
+            &buffer,
+            &folds,
+            8,
+            4,
+            reservation,
+        );
+        let layout = EditorLayout::new(metrics, ScrollOffset::ZERO, 500.0, 600.0);
+        let plan = build_render_plan_with_cache(
+            &buffer,
+            &viewport,
+            &decorations,
+            EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+            layout,
+            &SyntaxLineCache::default(),
+        );
+        let row = plan
+            .rows
+            .iter()
+            .find(|row| row.hidden_lines.is_some())
+            .unwrap();
+        let column = row.collapsed_indicator_column();
+        assert_eq!(row.collapsed_delimiter().unwrap().opening, '{');
+        assert_eq!(row.start_column + column, source.find('{').unwrap());
+        assert_eq!(&row.text[column..], "{");
+        let anchor = caret_x(&row.text, column, layout, &decorations);
+        let bounds = row.collapsed_indicator_bounds(metrics, anchor).unwrap();
+        assert_eq!(bounds.x, anchor);
+        assert!(
+            bounds.x + bounds.width
+                <= metrics.text_origin_x(&decorations) + 8.0 * metrics.character_width
+        );
+    }
+}
+
+#[test]
 fn collapsed_indicator_fits_inside_its_row_and_scales_with_zoom() {
     for line_height in [10.0, 18.0, 36.0, 72.0] {
         let metrics = EditorMetrics::new(line_height, line_height * 0.45);
         let row_y = 40.0;
-        let indicator = collapsed_fold_indicator_bounds(metrics, row_y, 180.0, false);
-
-        assert!(indicator.y >= row_y);
-        assert!(indicator.y + indicator.height <= row_y + line_height);
-        assert_eq!(indicator.center_y(), row_y + line_height / 2.0);
-        assert!(indicator.width >= metrics.character_width * 2.0);
-        assert!(indicator.height > 0.0);
+        for indicator in [
+            collapsed_fold_indicator_bounds(metrics, row_y, 180.0, false),
+            collapsed_delimiter_indicator_bounds(metrics, row_y, 180.0),
+        ] {
+            assert!(indicator.y >= row_y);
+            assert!(indicator.y + indicator.height <= row_y + line_height);
+            assert_eq!(indicator.center_y(), row_y + line_height / 2.0);
+            assert!(indicator.width >= metrics.character_width * 2.0);
+            assert!(indicator.height > 0.0);
+        }
     }
 }
 

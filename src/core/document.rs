@@ -8,8 +8,8 @@ use crate::editor::cjk::{CjkContext, CjkContextCache};
 use crate::editor::wrap_measurement::WrapMeasurement;
 use crate::editor::{
     DecorationModel, DecorationSettings, EditorBuffer, EditorHistory, EditorPosition,
-    EditorSelection, FoldModel, FoldProvider, IndentBraceFoldProvider, IndentGuide, ScrollOffset,
-    SelectionSet, SyntaxLineCache, ViewportModel,
+    EditorSelection, FoldModel, IndentBraceFoldProvider, IndentGuide, ScrollOffset, SelectionSet,
+    SyntaxLineCache, ViewportModel,
 };
 use std::cell::RefCell;
 use std::fmt;
@@ -209,11 +209,12 @@ impl Document {
         let decoration_settings = DecorationSettings::default();
         let can_run_full_document_analysis = buffer.len_bytes() <= MAX_FULL_DOCUMENT_ANALYSIS_BYTES;
         let folds = if can_run_full_document_analysis {
-            FoldModel::new(fold_provider(decoration_settings, &syntax_token).compute_folds(&buffer))
+            fold_provider(decoration_settings, &syntax_token).compute_fold_model(&buffer)
         } else {
             FoldModel::default()
         };
-        let viewport = ViewportModel::new(buffer.line_count(), &folds);
+        let viewport =
+            ViewportModel::new_with_buffer(&buffer, &folds, decoration_settings.indent_width);
         let indent_guides = if can_run_full_document_analysis {
             indent_guides(&buffer, decoration_settings.indent_width)
         } else {
@@ -670,12 +671,15 @@ impl Document {
                 }
                 self.decorations
                     .sync_loading_line_count(self.buffer.line_count());
-            } else if self.word_wrap || self.viewport.line_count() != self.buffer.line_count() {
+            } else if self.word_wrap
+                || self.viewport.has_projections()
+                || self.viewport.line_count() != self.buffer.line_count()
+            {
                 self.refresh_wrapped_lines(first_changed_line, last_changed_line);
             }
         } else if self.can_run_full_document_analysis() {
             self.folds
-                .recompute(self.fold_provider().compute_folds(&self.buffer));
+                .recompute_from_model(self.fold_provider().compute_fold_model(&self.buffer));
             self.refresh_view_models();
         } else if !self.folds.ranges().is_empty() || !self.decorations.indent_guides.is_empty() {
             self.folds.recompute(Vec::new());
@@ -780,10 +784,11 @@ impl Document {
             return true;
         }
         let cursor = self.buffer.clamp_position(self.main_selection().cursor);
-        let line = self.buffer.line(cursor.line).unwrap_or_default();
+        let display = self.viewport.display_position(cursor).unwrap_or(cursor);
+        let line = self.viewport.display_text(display.line, &self.buffer);
         let column = crate::editor::layout::visual_column_for(
             &line,
-            cursor.column,
+            display.column,
             self.decorations.settings.indent_width,
         );
         let x = column as f32 * self.viewport_character_width.max(1.0);
@@ -911,8 +916,10 @@ impl Document {
                 } else {
                     0
                 };
-                self.buffer
-                    .clamp_position(EditorPosition::new(line, column))
+                self.buffer.clamp_position(
+                    self.viewport
+                        .source_position(EditorPosition::new(line, column)),
+                )
             })
     }
 
@@ -946,8 +953,8 @@ impl Document {
                 context.as_deref(),
             )
         } else {
-            ViewportModel::new_with_tab_width(
-                self.buffer.line_count(),
+            ViewportModel::new_with_buffer(
+                &self.buffer,
                 &self.folds,
                 self.decorations.settings.indent_width,
             )
@@ -957,7 +964,12 @@ impl Document {
 
     fn restore_viewport_top(&mut self, top_position: Option<EditorPosition>) {
         if let Some(mut position) = top_position {
-            while let Some(range) = self.folds.collapsed_covering(position.line) {
+            while self.viewport.display_position(position).is_none()
+                && let Some(range) = self
+                    .folds
+                    .collapsed_covering_position(position)
+                    .or_else(|| self.folds.collapsed_covering(position.line))
+            {
                 position = EditorPosition::new(range.start_line, 0);
             }
             if let Some(row) = self.viewport.position_to_visible_row(position) {
@@ -976,16 +988,17 @@ impl Document {
 
     pub fn position_visible_row(&self, position: EditorPosition) -> Option<usize> {
         let position = self.buffer.clamp_position(position);
+        let display = self.viewport.display_position(position)?;
         if let Some(&(_, row)) = self
             .caret_row_affinities
             .iter()
             .find(|(caret, _)| *caret == position)
-            && self.viewport.visible_row_to_document_line(row) == Some(position.line)
+            && self.viewport.visible_row_to_document_line(row) == Some(display.line)
             && self
                 .viewport
                 .row_segment(row, &self.buffer)
                 .is_some_and(|segment| {
-                    position.column >= segment.start_column && position.column <= segment.end_column
+                    display.column >= segment.start_column && display.column <= segment.end_column
                 })
         {
             return Some(row);
@@ -1017,7 +1030,12 @@ impl Document {
     pub fn ensure_caret_visible(&mut self) {
         let cursor = self.buffer.clamp_position(self.main_selection().cursor);
         let mut unfolded = false;
-        while let Some(range) = self.folds.collapsed_covering(cursor.line) {
+        while self.viewport.display_position(cursor).is_none()
+            && let Some(range) = self
+                .folds
+                .collapsed_covering_position(cursor)
+                .or_else(|| self.folds.collapsed_covering(cursor.line))
+        {
             self.folds.set_collapsed(range, false);
             unfolded = true;
         }
@@ -1036,10 +1054,11 @@ impl Document {
             self.scroll.horizontal_px = 0.0;
             return;
         }
-        let line = self.buffer.line(cursor.line).unwrap_or_default();
+        let display = self.viewport.display_position(cursor).unwrap_or(cursor);
+        let line = self.viewport.display_text(display.line, &self.buffer);
         let column = crate::editor::layout::visual_column_for(
             &line,
-            cursor.column,
+            display.column,
             self.decorations.settings.indent_width,
         );
         let char_width = self.viewport_character_width.max(1.0);
@@ -1059,7 +1078,12 @@ impl Document {
     pub fn reveal_position(&mut self, position: EditorPosition) {
         let position = self.buffer.clamp_position(position);
         let mut unfolded = false;
-        while let Some(range) = self.folds.collapsed_covering(position.line) {
+        while self.viewport.display_position(position).is_none()
+            && let Some(range) = self
+                .folds
+                .collapsed_covering_position(position)
+                .or_else(|| self.folds.collapsed_covering(position.line))
+        {
             self.folds.set_collapsed(range, false);
             unfolded = true;
         }
@@ -1113,8 +1137,9 @@ impl Document {
             return;
         }
         if self.can_run_full_document_analysis() {
-            self.folds
-                .recompute(fold_provider(settings, &self.syntax_token).compute_folds(&self.buffer));
+            self.folds.recompute_from_model(
+                fold_provider(settings, &self.syntax_token).compute_fold_model(&self.buffer),
+            );
         } else {
             self.folds.recompute(Vec::new());
         }
@@ -1215,7 +1240,7 @@ impl Document {
         }
         if self.can_run_full_document_analysis() {
             self.folds
-                .recompute(self.fold_provider().compute_folds(&self.buffer));
+                .recompute_from_model(self.fold_provider().compute_fold_model(&self.buffer));
         } else {
             self.folds.recompute(Vec::new());
         }
@@ -1284,7 +1309,7 @@ pub struct DocumentAnalysis {
     pub revision: u64,
     pub syntax_token: String,
     pub indent_width: usize,
-    pub folds: Vec<crate::editor::FoldRange>,
+    pub folds: FoldModel,
     pub guides: Vec<IndentGuide>,
 }
 
@@ -1298,7 +1323,7 @@ impl Document {
                     revision: self.revision,
                     syntax_token: self.syntax_token.clone(),
                     indent_width: self.decorations.settings.indent_width,
-                    folds: Vec::new(),
+                    folds: FoldModel::default(),
                     guides: Vec::new(),
                 },
             )
@@ -1313,10 +1338,17 @@ impl Document {
         {
             return false;
         }
+        let delimiter_changed = self
+            .folds
+            .collapsed_ranges()
+            .any(|&range| self.folds.delimiter(range) != result.folds.delimiter(range));
         let visibility_before = self.folds.visibility_revision();
-        self.folds.recompute(result.folds);
+        self.folds.recompute_from_model(result.folds);
         let visibility_changed = self.folds.visibility_revision() != visibility_before;
-        if visibility_changed || self.viewport.line_count() != self.buffer.line_count() {
+        if visibility_changed
+            || delimiter_changed
+            || self.viewport.line_count() != self.buffer.line_count()
+        {
             self.rebuild_viewport();
         }
         self.decorations = DecorationModel::from_folds(
@@ -1354,7 +1386,7 @@ pub fn analyze_document(buffer: EditorBuffer, mut result: DocumentAnalysis) -> D
     if buffer.len_bytes() <= MAX_FULL_DOCUMENT_ANALYSIS_BYTES {
         result.folds =
             IndentBraceFoldProvider::for_syntax(result.indent_width, &result.syntax_token)
-                .compute_folds(&buffer);
+                .compute_fold_model(&buffer);
         result.guides = indent_guides(&buffer, result.indent_width);
     }
     result

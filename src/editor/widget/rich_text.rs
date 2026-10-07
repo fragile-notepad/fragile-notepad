@@ -1050,6 +1050,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: Vec::new(),
         };
         let metrics = EditorMetrics {
@@ -1088,6 +1089,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: vec![
                 SyntaxRenderSpan {
                     range: 0..16,
@@ -1139,6 +1141,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: vec![SyntaxRenderSpan {
                 range: 0..1_000,
                 color: Some(Color::from_rgb(1.0, 0.0, 0.0)),
@@ -1186,6 +1189,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans,
         };
 
@@ -1209,6 +1213,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: Vec::new(),
         };
         let metrics = EditorMetrics {
@@ -1249,6 +1254,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: Vec::new(),
         };
         let metrics = EditorMetrics {
@@ -1291,6 +1297,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: vec![SyntaxRenderSpan {
                 range: 0..length,
                 color: Some(Color::from_rgb(1.0, 0.0, 0.0)),
@@ -1335,6 +1342,7 @@ mod tests {
             whitespace: Vec::new(),
             eol: None,
             indent_guides: Vec::new(),
+            projection: Vec::new(),
             syntax_spans: vec![SyntaxRenderSpan {
                 range: 12..128,
                 color: Some(Color::from_rgb(1.0, 0.0, 0.0)),

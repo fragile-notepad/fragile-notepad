@@ -1,6 +1,9 @@
+use std::{borrow::Cow, collections::HashMap, ops::Range};
+
 use super::buffer::EditorBuffer;
 use super::cjk::CjkContext;
-use super::fold::{FoldModel, FoldRange};
+use super::fold::{FoldDelimiter, FoldModel, FoldRange};
+pub use super::fold_projection::{FoldProjection, ProjectionFragment};
 use super::layout::{visual_column_for, visual_width_with_tab_width};
 use super::position::EditorPosition;
 use super::wrap_measurement::{MeasuredWrapLine, WrapMeasurement};
@@ -12,11 +15,11 @@ pub struct VisibleRow {
     pub document_line: usize,
 }
 
-/// The portion of a logical line displayed on one screen row.
+/// The portion of a displayed line occupying one screen row.
 ///
-/// Byte columns address the original line, excluding its line ending. Visual
-/// columns also retain their original line offsets so that tabs keep the same
-/// stops when a line wraps. Neither wrapping nor reflow changes buffer text.
+/// Columns address the displayed text; fold projections map them back to source
+/// positions. Visual columns retain line offsets so tabs keep their stops when
+/// wrapping. Neither wrapping nor reflow changes buffer text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RowSegment {
     pub start_column: usize,
@@ -43,6 +46,8 @@ pub struct ViewportModel {
     collapsed_ranges: Vec<FoldRange>,
     fold_indicator_columns: usize,
     wrap_measurement: Option<WrapMeasurement>,
+    projections: HashMap<usize, FoldProjection>,
+    projection_owners: HashMap<usize, usize>,
 }
 
 impl ViewportModel {
@@ -83,9 +88,99 @@ impl ViewportModel {
             tab_width: tab_width.max(1),
             wrapped_segments: None,
             collapsed_ranges: collapsed,
-            fold_indicator_columns: 4,
+            fold_indicator_columns: 5,
             wrap_measurement: None,
+            projections: HashMap::new(),
+            projection_owners: HashMap::new(),
         }
+    }
+
+    pub fn new_with_buffer(buffer: &EditorBuffer, folds: &FoldModel, tab_width: usize) -> Self {
+        let mut viewport = Self::new_with_tab_width(buffer.line_count(), folds, tab_width);
+        if viewport.collapsed_ranges.is_empty() {
+            return viewport;
+        }
+        viewport.visible_lines.clear();
+        viewport.document_to_visible.fill(None);
+        let mut line = 0;
+        while line < viewport.line_count {
+            let row = viewport.visible_lines.len();
+            viewport.visible_lines.push(line);
+            viewport.document_to_visible[line] = Some(row);
+            let end = viewport
+                .collapsed_ranges
+                .partition_point(|range| range.start_line <= line);
+            let range = end
+                .checked_sub(1)
+                .and_then(|index| viewport.collapsed_ranges.get(index))
+                .copied()
+                .filter(|range| range.start_line == line);
+            let mut next_line = range.map_or(line + 1, |range| range.end_line + 1);
+            if let Some(projection) =
+                range.and_then(|range| FoldProjection::build(buffer, folds, range))
+            {
+                next_line = projection.final_source_line() + 1;
+                for fragment in &projection.fragments {
+                    if let ProjectionFragment::Source { source_start, .. } = fragment {
+                        viewport.projection_owners.insert(source_start.line, line);
+                        viewport.document_to_visible[source_start.line] = Some(row);
+                    }
+                }
+                viewport.projection_owners.insert(line, line);
+                viewport.projections.insert(line, projection);
+            }
+            line = next_line;
+        }
+        viewport
+    }
+
+    pub fn has_projections(&self) -> bool {
+        !self.projections.is_empty()
+    }
+
+    pub fn projection(&self, line: usize) -> Option<&FoldProjection> {
+        self.projections.get(&line)
+    }
+
+    pub fn source_lines(&self, line: usize) -> Vec<usize> {
+        let Some(projection) = self.projection(line) else {
+            return vec![line];
+        };
+        let mut lines = Vec::new();
+        for fragment in &projection.fragments {
+            if let ProjectionFragment::Source { source_start, .. } = fragment
+                && lines.last() != Some(&source_start.line)
+            {
+                lines.push(source_start.line);
+            }
+        }
+        lines
+    }
+
+    pub fn display_text<'a>(&'a self, line: usize, buffer: &EditorBuffer) -> Cow<'a, str> {
+        self.projection(line).map_or_else(
+            || Cow::Owned(buffer.line(line).unwrap_or_default()),
+            |projection| Cow::Borrowed(projection.text.as_str()),
+        )
+    }
+
+    pub fn display_position(&self, source: EditorPosition) -> Option<EditorPosition> {
+        if let Some(&owner) = self.projection_owners.get(&source.line) {
+            self.document_line_to_visible_row(owner)?;
+            return self
+                .projections
+                .get(&owner)?
+                .source_to_display(source)
+                .map(|column| EditorPosition::new(owner, column));
+        }
+        self.document_line_to_visible_row(source.line)?;
+        Some(source)
+    }
+
+    pub fn source_position(&self, display: EditorPosition) -> EditorPosition {
+        self.projection(display.line).map_or(display, |projection| {
+            projection.display_to_source(display.column)
+        })
     }
 
     /// Builds a soft-wrapped viewport without changing logical line numbers.
@@ -99,7 +194,7 @@ impl ViewportModel {
         columns: usize,
         tab_width: usize,
     ) -> Self {
-        Self::new_wrapped_with_fold_indicator_columns(buffer, folds, columns, tab_width, 4)
+        Self::new_wrapped_with_fold_indicator_columns(buffer, folds, columns, tab_width, 5)
     }
 
     /// Uses the rendered badge's measured column reservation, including its
@@ -131,7 +226,7 @@ impl ViewportModel {
         measurement: Option<WrapMeasurement>,
         context: Option<&CjkContext>,
     ) -> Self {
-        let mut viewport = Self::new_with_tab_width(buffer.line_count(), folds, tab_width);
+        let mut viewport = Self::new_with_buffer(buffer, folds, tab_width);
         let visible_lines = std::mem::take(&mut viewport.visible_lines);
         viewport.wrap_columns = Some(columns.max(1));
         viewport.fold_indicator_columns = fold_indicator_columns;
@@ -139,10 +234,41 @@ impl ViewportModel {
         viewport.wrapped_segments = Some(Vec::with_capacity(visible_lines.len()));
 
         for line in visible_lines {
-            if let Some(text) = buffer.line(line) {
+            if let Some(projection) = viewport.projection(line).cloned() {
+                let segments = viewport
+                    .wrapped_segments
+                    .as_mut()
+                    .expect("wrapped segments");
+                viewport.document_to_visible[line] = Some(viewport.visible_lines.len());
+                let atomic_ranges = projection
+                    .fragments
+                    .iter()
+                    .filter_map(|fragment| match fragment {
+                        ProjectionFragment::Placeholder { display_range, .. } => {
+                            Some(display_range.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                append_wrapped_segments_with_measurement(
+                    segments,
+                    &projection.text,
+                    columns,
+                    tab_width,
+                    line,
+                    measurement,
+                    context,
+                    &atomic_ranges,
+                );
+                viewport.visible_lines.resize(segments.len(), line);
+            } else if let Some(text) = buffer.line(line) {
                 let line_columns = viewport.wrapped_line_columns(line, columns);
-                viewport.append_wrapped_line(line, &text, line_columns, context);
+                let delimiter = viewport.collapsed_delimiter(line, folds);
+                viewport.append_wrapped_line(line, &text, line_columns, delimiter, context);
             }
+        }
+        for (&source, &owner) in &viewport.projection_owners {
+            viewport.document_to_visible[source] = viewport.document_to_visible[owner];
         }
 
         viewport
@@ -186,7 +312,7 @@ impl ViewportModel {
         }
 
         let line = self.visible_row_to_document_line(visible_row)?;
-        let text = buffer.line(line)?;
+        let text = self.display_text(line, buffer);
         Some(RowSegment {
             start_column: 0,
             end_column: text.len(),
@@ -199,6 +325,11 @@ impl ViewportModel {
     /// Maps a caret to its screen row. At a wrap boundary, the caret belongs
     /// to the following row; the logical line end belongs to its final row.
     pub fn position_to_visible_row(&self, position: EditorPosition) -> Option<usize> {
+        let position = self.display_position(position)?;
+        self.display_position_to_visible_row(position)
+    }
+
+    fn display_position_to_visible_row(&self, position: EditorPosition) -> Option<usize> {
         let first_row = self.document_line_to_visible_row(position.line)?;
         let Some(segments) = &self.wrapped_segments else {
             return Some(first_row);
@@ -226,8 +357,8 @@ impl ViewportModel {
     /// unchanged text. The caller must include every line whose text changed.
     ///
     /// Returns `false`, leaving this viewport unchanged, if it is unwrapped,
-    /// the logical line count changed, or collapsed fold ranges changed. In
-    /// those cases the caller must rebuild the viewport. Otherwise only the
+    /// the logical line count or collapsed folds changed, or the view contains
+    /// fold projections. Those cases require rebuilding the viewport. Otherwise
     /// edited visible lines are measured; cached suffix rows and their indices
     /// are shifted when the replacement has a different number of rows.
     pub fn reflow_wrapped_lines(
@@ -252,6 +383,16 @@ impl ViewportModel {
             return false;
         };
         if self.line_count != buffer.line_count() {
+            return false;
+        }
+        if !self.projections.is_empty()
+            || self.collapsed_ranges.iter().any(|range| {
+                (range.start_line >= first_line && range.start_line <= last_line
+                    || range.end_line >= first_line && range.end_line <= last_line)
+                    && folds.delimiter(*range).is_some()
+                    && FoldProjection::build(buffer, folds, *range).is_some()
+            })
+        {
             return false;
         }
         let mut collapsed = folds.collapsed_ranges().copied().collect::<Vec<_>>();
@@ -285,7 +426,7 @@ impl ViewportModel {
                 return false;
             };
             replacement_starts.push((line, replacement_segments.len()));
-            append_wrapped_segments_with_measurement(
+            append_wrapped_segments_with_fold(
                 &mut replacement_segments,
                 &text,
                 self.wrapped_line_columns(line, columns),
@@ -293,6 +434,7 @@ impl ViewportModel {
                 line,
                 self.wrap_measurement,
                 context,
+                self.collapsed_delimiter(line, folds),
             );
             replacement_lines.resize(replacement_segments.len(), line);
         }
@@ -342,8 +484,10 @@ impl ViewportModel {
             self.wrap_columns = None;
             self.wrapped_segments = None;
             self.collapsed_ranges.clear();
-            self.fold_indicator_columns = 4;
+            self.fold_indicator_columns = 5;
             self.wrap_measurement = None;
+            self.projections.clear();
+            self.projection_owners.clear();
             return;
         }
 
@@ -397,7 +541,7 @@ impl ViewportModel {
 
         for line in first_line..self.line_count {
             if let Some(text) = buffer.line(line) {
-                self.append_wrapped_line(line, &text, columns, context);
+                self.append_wrapped_line(line, &text, columns, None, context);
             }
         }
     }
@@ -407,6 +551,7 @@ impl ViewportModel {
         line: usize,
         text: &str,
         columns: usize,
+        delimiter: Option<FoldDelimiter>,
         context: Option<&CjkContext>,
     ) {
         let Some(segments) = &mut self.wrapped_segments else {
@@ -414,7 +559,7 @@ impl ViewportModel {
         };
 
         self.document_to_visible[line] = Some(self.visible_lines.len());
-        append_wrapped_segments_with_measurement(
+        append_wrapped_segments_with_fold(
             segments,
             text,
             columns,
@@ -422,17 +567,29 @@ impl ViewportModel {
             line,
             self.wrap_measurement,
             context,
+            delimiter,
         );
         self.visible_lines.resize(segments.len(), line);
     }
 
-    fn wrapped_line_columns(&self, line: usize, columns: usize) -> usize {
-        // A collapsed header ends with an interactive ellipsis box. Reserve
-        // its width during reflow so it stays inside the text viewport.
-        if self
+    fn collapsed_delimiter(&self, line: usize, folds: &FoldModel) -> Option<FoldDelimiter> {
+        let end = self
             .collapsed_ranges
-            .binary_search_by_key(&line, |range| range.start_line)
-            .is_ok()
+            .partition_point(|range| range.start_line <= line);
+        self.collapsed_ranges
+            .get(end.checked_sub(1)?)
+            .filter(|range| range.start_line == line)
+            .and_then(|range| folds.delimiter(*range))
+    }
+
+    fn wrapped_line_columns(&self, line: usize, columns: usize) -> usize {
+        // A collapsed header ends with an interactive fold placeholder. Reserve
+        // its width during reflow so it stays inside the text viewport.
+        if !self.projections.contains_key(&line)
+            && self
+                .collapsed_ranges
+                .binary_search_by_key(&line, |range| range.start_line)
+                .is_ok()
         {
             columns.saturating_sub(self.fold_indicator_columns).max(1)
         } else {
@@ -441,6 +598,44 @@ impl ViewportModel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn append_wrapped_segments_with_fold(
+    segments: &mut Vec<RowSegment>,
+    text: &str,
+    columns: usize,
+    tab_width: usize,
+    line: usize,
+    measurement: Option<WrapMeasurement>,
+    context: Option<&CjkContext>,
+    delimiter: Option<FoldDelimiter>,
+) {
+    let wrapped_text = delimiter
+        .filter(|delimiter| {
+            text.get(delimiter.opening_column..)
+                .and_then(|tail| tail.strip_prefix(delimiter.opening))
+                .is_some_and(|tail| tail.trim().is_empty())
+        })
+        .map_or(text, |delimiter| {
+            &text[..delimiter.opening_column + delimiter.opening.len_utf8()]
+        });
+    append_wrapped_segments_with_measurement(
+        segments,
+        wrapped_text,
+        columns,
+        tab_width,
+        line,
+        measurement,
+        context,
+        &[],
+    );
+    if wrapped_text.len() < text.len() {
+        let last = segments.last_mut().expect("wrapped terminal opener");
+        last.end_column = text.len();
+        last.end_visual_column = visual_column_for(text, text.len(), tab_width);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn append_wrapped_segments_with_measurement(
     segments: &mut Vec<RowSegment>,
     text: &str,
@@ -449,13 +644,16 @@ fn append_wrapped_segments_with_measurement(
     line: usize,
     measurement: Option<WrapMeasurement>,
     context: Option<&CjkContext>,
+    atomic_ranges: &[Range<usize>],
 ) {
     let Some(measurement) = measurement.filter(|_| !text.is_ascii()) else {
-        append_wrapped_segments(segments, text, columns, tab_width);
+        append_wrapped_segments_atomic(segments, text, columns, tab_width, atomic_ranges);
         return;
     };
     let measured = MeasuredWrapLine::new(text, tab_width, line, context, measurement);
-    let widths = measured.grapheme_widths();
+    let measured_widths = measured.grapheme_widths();
+    let mut widths = Vec::with_capacity(measured_widths.len());
+    let mut unit_width = 0.0;
     let mut word_boundaries = text
         .split_word_bound_indices()
         .map(|(offset, word)| offset + word.len())
@@ -464,7 +662,8 @@ fn append_wrapped_segments_with_measurement(
     // advances. Every consumer continues to use this same fragment map.
     let mut boundaries = vec![(0usize, 0usize, false)];
     let mut visual_column = 0usize;
-    for (column, grapheme) in text.grapheme_indices(true) {
+    let mut atomic_index = 0;
+    for (index, (column, grapheme)) in text.grapheme_indices(true).enumerate() {
         for ch in grapheme.chars() {
             visual_column = visual_column.saturating_add(visual_width_with_tab_width(
                 ch,
@@ -473,6 +672,7 @@ fn append_wrapped_segments_with_measurement(
             ));
         }
         let end = column + grapheme.len();
+        unit_width += measured_widths[index].1;
         let mut can_break = false;
         while word_boundaries
             .peek()
@@ -484,6 +684,20 @@ fn append_wrapped_segments_with_measurement(
             .chars()
             .next()
             .is_some_and(|ch| ch.is_ascii_punctuation() && ch != '_');
+        while atomic_ranges
+            .get(atomic_index)
+            .is_some_and(|range| end > range.end)
+        {
+            atomic_index += 1;
+        }
+        if atomic_ranges
+            .get(atomic_index)
+            .is_some_and(|range| range.start < end && end < range.end)
+        {
+            continue;
+        }
+        widths.push(unit_width);
+        unit_width = 0.0;
         boundaries.push((end, visual_column, can_break));
     }
     debug_assert_eq!(widths.len() + 1, boundaries.len());
@@ -494,7 +708,7 @@ fn append_wrapped_segments_with_measurement(
         let mut fit = start;
         let mut estimated_width = 0.0;
         while fit < final_boundary {
-            let next_width = estimated_width + widths[fit].1;
+            let next_width = estimated_width + widths[fit];
             if fit > start && next_width > limit + 0.01 {
                 break;
             }
@@ -537,11 +751,12 @@ fn append_wrapped_segments_with_measurement(
     }
 }
 
-fn append_wrapped_segments(
+fn append_wrapped_segments_atomic(
     segments: &mut Vec<RowSegment>,
     text: &str,
     columns: usize,
     tab_width: usize,
+    atomic_ranges: &[Range<usize>],
 ) {
     let mut word_boundaries = text
         .split_word_bound_indices()
@@ -555,7 +770,24 @@ fn append_wrapped_segments(
     // Each grapheme and each Unicode word boundary is visited once. A wrap
     // can reuse its latest boundary without rescanning the remainder of a
     // long word, which is especially important for minified source files.
+    let mut atomic_index = 0;
     for (column, grapheme) in text.grapheme_indices(true) {
+        while atomic_ranges
+            .get(atomic_index)
+            .is_some_and(|range| column >= range.end)
+        {
+            atomic_index += 1;
+        }
+        if atomic_ranges
+            .get(atomic_index)
+            .is_some_and(|range| range.start < column && column < range.end)
+        {
+            continue;
+        }
+        let grapheme = atomic_ranges
+            .get(atomic_index)
+            .filter(|range| range.start == column)
+            .map_or(grapheme, |range| &text[range.clone()]);
         let mut end_visual_column = visual_column;
         for ch in grapheme.chars() {
             end_visual_column = end_visual_column.saturating_add(visual_width_with_tab_width(

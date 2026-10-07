@@ -17,7 +17,8 @@ use crate::editor::viewport::ViewportModel;
 #[cfg(test)]
 use super::font::editor_font_runs;
 use super::font::{
-    EDITOR_FONT, EDITOR_TEXT_SHAPING, EditorFontRun, editor_font_runs_for_fragment, remap_font_runs,
+    EDITOR_FONT, EDITOR_TEXT_SHAPING, EditorFontRun, editor_font_runs_for_display_fragment,
+    editor_font_runs_for_row, remap_font_runs,
 };
 
 const LINE_GEOMETRY_CACHE_MINIMUM: usize = 256;
@@ -197,7 +198,7 @@ where
         layout.scroll.horizontal_px = 0.0;
     }
 
-    let line_text = buffer.line(line).unwrap_or_default();
+    let line_text = viewport.display_text(line, buffer);
     let fragment = &line_text[segment.start_column..segment.end_column];
     let text_x = scrolled_text_origin_x(layout, decorations);
     let x = (position.x - text_x).max(0.0);
@@ -208,11 +209,19 @@ where
             renderer,
             segment.start_visual_column,
             decorations.settings.indent_width,
-            &editor_font_runs_for_fragment(fragment, context, line, segment.start_column),
+            &editor_font_runs_for_display_fragment(
+                fragment,
+                context,
+                line,
+                segment.start_column,
+                viewport,
+            ),
         )
         .byte_column_for_x(x, decorations.settings.indent_width);
 
-    HitTarget::Text(buffer.clamp_position(EditorPosition::new(line, column)))
+    HitTarget::Text(
+        buffer.clamp_position(viewport.source_position(EditorPosition::new(line, column))),
+    )
 }
 
 /// Measures a document position within its visual row. The optional row keeps
@@ -256,22 +265,26 @@ where
     Renderer: text::Renderer<Font = Font>,
 {
     let position = buffer.clamp_position(position);
+    let display_position = viewport.display_position(position).unwrap_or(position);
     if viewport.wrap_columns().is_some() {
         layout.scroll.horizontal_px = 0.0;
     }
     let visible_row = caret_row
         .filter(|row| {
-            viewport.visible_row_to_document_line(*row) == Some(position.line)
+            viewport.visible_row_to_document_line(*row) == Some(display_position.line)
                 && viewport.row_segment(*row, buffer).is_some_and(|segment| {
-                    position.column >= segment.start_column && position.column <= segment.end_column
+                    display_position.column >= segment.start_column
+                        && display_position.column <= segment.end_column
                 })
         })
         .or_else(|| viewport.position_to_visible_row(position))
         .unwrap_or(layout.scroll.first_visible_row);
-    let line = buffer.line(position.line).unwrap_or_default();
+    let line = viewport.display_text(display_position.line, buffer);
     let (start, end, visual_offset) = viewport
         .row_segment(visible_row, buffer)
-        .filter(|_| viewport.visible_row_to_document_line(visible_row) == Some(position.line))
+        .filter(|_| {
+            viewport.visible_row_to_document_line(visible_row) == Some(display_position.line)
+        })
         .map(|segment| {
             (
                 segment.start_column,
@@ -287,13 +300,19 @@ where
         renderer,
         visual_offset,
         decorations.settings.indent_width,
-        &editor_font_runs_for_fragment(fragment, context, position.line, start),
+        &editor_font_runs_for_display_fragment(
+            fragment,
+            context,
+            display_position.line,
+            start,
+            viewport,
+        ),
     );
 
     Point::new(
         measured_caret_x(
             &geometry,
-            position.column.saturating_sub(start),
+            display_position.column.saturating_sub(start),
             layout,
             decorations,
         ),
@@ -397,12 +416,7 @@ where
                         renderer,
                         context.and_then(|context| context.language_for_line(row.line)),
                         tab_width,
-                        &editor_font_runs_for_fragment(
-                            &row.text,
-                            context,
-                            row.line,
-                            row.start_column,
-                        ),
+                        &editor_font_runs_for_row(row, context),
                     ),
                 )
             })

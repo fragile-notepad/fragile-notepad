@@ -6,6 +6,7 @@ pub mod cjk;
 pub mod decoration;
 pub mod delimiter;
 pub mod fold;
+pub mod fold_projection;
 pub mod history;
 pub mod layout;
 pub mod movement;
@@ -24,7 +25,8 @@ pub use decoration::{
     DecorationModel, DecorationSettings, HiddenLineSpan, IndentGuide, LineDecoration,
 };
 pub use delimiter::{DelimiterMatch, matching_delimiter_at, matching_delimiter_near_caret};
-pub use fold::{FoldModel, FoldProvider, FoldRange, IndentBraceFoldProvider};
+pub use fold::{FoldDelimiter, FoldModel, FoldProvider, FoldRange, IndentBraceFoldProvider};
+pub use fold_projection::{FoldProjection, ProjectionFragment};
 pub use history::{EditTransaction, EditorHistory};
 pub use layout::{
     EditorLayout, EditorMetrics, HitTarget, ScrollOffset, caret_x, hit_test, hit_visible_row, row_y,

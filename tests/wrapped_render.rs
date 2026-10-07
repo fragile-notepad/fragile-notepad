@@ -302,7 +302,7 @@ fn wrapped_zoom_reflows_badge_reservation_when_text_column_budget_is_unchanged()
     let mut document = Document::from_path(
         DocumentId::new(1),
         "wrapped.txt",
-        &format!("{}\nhidden", "x".repeat(36)),
+        &format!("{}\nhidden", "x".repeat(35)),
     );
     let fold = FoldRange::new(0, 1);
     document.folds = FoldModel::new(vec![fold]);
@@ -310,7 +310,7 @@ fn wrapped_zoom_reflows_badge_reservation_when_text_column_budget_is_unchanged()
     document.update_viewport_geometry(10, 40.0 * 8.0 + 2.0, 8.0);
     document.set_word_wrap(true);
     assert_eq!(document.viewport.visible_row_count(), 1);
-    assert_eq!(document.viewport.fold_indicator_columns(), 4);
+    assert_eq!(document.viewport.fold_indicator_columns(), 5);
 
     document.update_viewport_geometry(10, 40.0 * 4.4 + 2.0, 4.4);
 

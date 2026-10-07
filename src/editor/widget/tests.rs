@@ -151,11 +151,22 @@ fn wrapped_fold_indicator_hits_only_the_final_header_fragment() {
     let editor = fixture.editor();
     let node = fold_test_node();
     let editor_layout = editor.editor_layout(node.bounds());
-    let last_row = 2;
+    let last_row = fixture
+        .viewport
+        .position_to_visible_row(EditorPosition::new(
+            0,
+            fixture.buffer.line(0).unwrap().len(),
+        ))
+        .unwrap();
+    let fragment = fixture
+        .viewport
+        .row_segment(last_row, &fixture.buffer)
+        .unwrap();
     let indicator = collapsed_fold_indicator_bounds(
         editor.metrics,
         row_y(last_row, editor_layout),
-        editor.metrics.text_origin_x(editor.decorations) + 2.0 * editor.metrics.character_width,
+        editor.metrics.text_origin_x(editor.decorations)
+            + (fragment.end_column - fragment.start_column) as f32 * editor.metrics.character_width,
         false,
     );
     let last_point = indicator.center() + iced::Vector::new(node.bounds().x, node.bounds().y);
@@ -457,6 +468,80 @@ fn fold_gutter_control_uses_pointer_cursor() {
 }
 
 #[test]
+fn matched_fold_placeholder_clicks_expand_from_the_opener_through_the_closer() {
+    let source = "fn 字_long_function() {\n    run();\n}\nafter";
+    let range = FoldRange::new(0, 2);
+    for wrapped in [false, true] {
+        let buffer = EditorBuffer::from_text(source);
+        let mut folds =
+            crate::editor::IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+        folds.set_collapsed(range, true);
+        let mut fixture = FoldPointerFixture::new(source, folds.clone());
+        if wrapped {
+            fixture.viewport = ViewportModel::new_wrapped(&fixture.buffer, &folds, 12, 4);
+        }
+        let mut editor = fixture.editor();
+        let node = layout::Node::new(Size::new(360.0, 180.0)).move_to(Point::new(10.0, 20.0));
+        let editor_layout = editor.editor_layout(node.bounds());
+        let plan = build_render_plan_for_selection_set_with_cache_and_caret_row(
+            &fixture.buffer,
+            &fixture.viewport,
+            &fixture.decorations,
+            editor.selections.clone(),
+            editor_layout,
+            &SyntaxLineCache::default(),
+            None,
+        );
+        let row = plan
+            .rows
+            .iter()
+            .find(|row| row.hidden_lines.is_some())
+            .unwrap();
+        let geometry = LineGeometry::new_with_font_runs(
+            &row.text,
+            editor.metrics,
+            &(),
+            row.start_visual_column,
+            4,
+            &font::editor_font_runs_for_fragment(&row.text, None, row.line, row.start_column),
+        );
+        let anchor_x = measured_caret_x(
+            &geometry,
+            row.collapsed_indicator_column(),
+            editor_layout,
+            &fixture.decorations,
+        );
+        let indicator = row
+            .collapsed_indicator_bounds(editor.metrics, anchor_x)
+            .unwrap();
+        for x in [
+            indicator.x + 0.5,
+            indicator.center_x(),
+            indicator.x + indicator.width - 0.5,
+        ] {
+            let point = Point::new(node.bounds().x + x, node.bounds().y + indicator.center_y());
+            assert_eq!(
+                editor.hit_collapsed_indicator(
+                    Layout::new(&node),
+                    mouse::Cursor::Available(point),
+                    &()
+                ),
+                Some(range),
+                "wrapped={wrapped}, point={point:?}, indicator={indicator:?}, row={row:?}"
+            );
+        }
+        let mut tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
+        let point = indicator.center() + iced::Vector::new(node.bounds().x, node.bounds().y);
+        let (messages, captured) = press_fold_test_editor(&mut editor, &mut tree, &node, point);
+        assert!(captured);
+        assert_eq!(
+            messages,
+            [EditorAction::Focus, EditorAction::ToggleFold(range)]
+        );
+    }
+}
+
+#[test]
 fn folding_gutter_hover_redraws_only_on_visibility_changes() {
     for enabled in [true, false] {
         let mut fixture =
@@ -510,6 +595,193 @@ fn folding_gutter_hover_redraws_only_on_visibility_changes() {
                 "enabled={enabled}, cursor={cursor:?}"
             );
             assert!(!shell.is_event_captured());
+        }
+    }
+}
+
+#[test]
+fn projected_suffix_text_and_each_placeholder_keep_their_source_targets() {
+    let source = "if condition {\n    first();\n} else {\n    second();\n}; // tail";
+    let first = FoldRange::new(0, 2);
+    let second = FoldRange::new(2, 4);
+    let buffer = EditorBuffer::from_text(source);
+    let mut folds =
+        crate::editor::IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+    folds.set_collapsed(first, true);
+    folds.set_collapsed(second, true);
+    for wrapped in [false, true] {
+        let mut fixture = FoldPointerFixture::new(source, folds.clone());
+        fixture.viewport = if wrapped {
+            ViewportModel::new_wrapped(&fixture.buffer, &folds, 12, 4)
+        } else {
+            ViewportModel::new_with_buffer(&fixture.buffer, &folds, 4)
+        };
+        let mut editor = fixture.editor();
+        let source_caret = EditorPosition::new(2, 4);
+        editor.selections = EditorSelection::new(source_caret, source_caret).into();
+        let node = layout::Node::new(Size::new(600.0, 240.0)).move_to(Point::new(10.0, 20.0));
+        let editor_layout = editor.editor_layout(node.bounds());
+        let plan = build_render_plan_for_selection_set_with_cache_and_caret_row(
+            &fixture.buffer,
+            &fixture.viewport,
+            &fixture.decorations,
+            editor.selections.clone(),
+            editor_layout,
+            &SyntaxLineCache::default(),
+            None,
+        );
+        assert_eq!(plan.caret.unwrap().position, source_caret);
+        let suffix_point = line_cache::measured_position_point_with_context(
+            &fixture.buffer,
+            &fixture.viewport,
+            &fixture.decorations,
+            editor_layout,
+            source_caret,
+            None,
+            &(),
+            None,
+        );
+        assert_eq!(
+            line_cache::measured_text_hit_target_with_context(
+                suffix_point,
+                editor_layout,
+                &fixture.buffer,
+                &fixture.viewport,
+                &fixture.decorations,
+                &(),
+                None,
+            ),
+            HitTarget::Text(source_caret),
+        );
+        let mut hit_ranges = Vec::new();
+        for row in &plan.rows {
+            let geometry = LineGeometry::new_with_font_runs(
+                &row.text,
+                editor.metrics,
+                &(),
+                row.start_visual_column,
+                fixture.decorations.settings.indent_width,
+                &font::editor_font_runs_for_row(row, None),
+            );
+            for fragment in &row.projection {
+                if let ProjectionFragment::Placeholder {
+                    display_range,
+                    range,
+                    ..
+                } = fragment
+                {
+                    let left = measured_caret_x(
+                        &geometry,
+                        display_range.start,
+                        editor_layout,
+                        &fixture.decorations,
+                    );
+                    let right = measured_caret_x(
+                        &geometry,
+                        display_range.end,
+                        editor_layout,
+                        &fixture.decorations,
+                    );
+                    let point = Point::new(
+                        node.bounds().x + (left + right) / 2.0,
+                        node.bounds().y + row.y + editor.metrics.line_height / 2.0,
+                    );
+                    assert_eq!(
+                        editor.hit_collapsed_indicator(
+                            Layout::new(&node),
+                            mouse::Cursor::Available(point),
+                            &()
+                        ),
+                        Some(*range)
+                    );
+                    hit_ranges.push(*range);
+                }
+            }
+        }
+        assert!(hit_ranges.contains(&first));
+        assert!(hit_ranges.contains(&second));
+    }
+}
+
+#[test]
+fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
+    use iced::advanced::renderer::Headless;
+    let mut renderer = futures::executor::block_on(<iced::Renderer as Headless>::new(
+        renderer::Settings::default(),
+        Some("tiny-skia"),
+    ))
+    .expect("software renderer");
+    for source in [
+        "fn main() {\n    run();\n}",
+        "fn main() {                          \t\n    run();\n}",
+    ] {
+        let buffer = EditorBuffer::from_text(source);
+        let mut folds =
+            crate::editor::IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+        folds.set_collapsed(FoldRange::new(0, 2), true);
+        let fixture = FoldPointerFixture::new(source, folds);
+        let position = EditorPosition::new(0, buffer.line(0).unwrap().len());
+        let size = Size::new(520, 180);
+        let bounds = Rectangle::with_size(Size::new(size.width as f32, size.height as f32));
+        for zoom in [0.5, 1.0, 3.0] {
+            let metrics = EditorMetrics::new(20.0 * zoom, 8.8 * zoom);
+            let layout =
+                EditorLayout::new(metrics, ScrollOffset::ZERO, bounds.width, bounds.height);
+            let plan = build_render_plan_for_selection_set_with_cache_and_caret_row(
+                &fixture.buffer,
+                &fixture.viewport,
+                &fixture.decorations,
+                EditorSelection::new(position, position).into(),
+                layout,
+                &SyntaxLineCache::default(),
+                None,
+            );
+            let row = &plan.rows[0];
+            let anchor = super::super::layout::caret_x(
+                &row.text,
+                row.collapsed_indicator_column(),
+                layout,
+                &fixture.decorations,
+            );
+            let indicator = row.collapsed_indicator_bounds(metrics, anchor).unwrap();
+            let mut draw = |caret_visible| {
+                renderer::Renderer::reset(&mut renderer, bounds);
+                draw_plan(
+                    &mut renderer,
+                    bounds,
+                    layout,
+                    &fixture.decorations,
+                    &plan,
+                    EditorStyle::from_theme(&Theme::Light),
+                    fixture.viewport.visible_row_count(),
+                    None,
+                    false,
+                    caret_visible,
+                    false,
+                    1,
+                    &mut RichParagraphCache::default(),
+                    &mut LineGeometryCache::default(),
+                    None,
+                );
+                renderer.screenshot(size, 1.0, Color::WHITE)
+            };
+            let hidden = draw(false);
+            let visible = draw(true);
+            let changes: Vec<_> = hidden
+                .chunks_exact(4)
+                .zip(visible.chunks_exact(4))
+                .enumerate()
+                .filter(|(_, (before, after))| before != after)
+                .map(|(index, _)| index % size.width as usize)
+                .collect();
+            assert!(!changes.is_empty());
+            assert!(
+                changes.iter().all(|&x| {
+                    x as f32 >= (indicator.x + indicator.width).floor()
+                        && x as f32 <= (indicator.x + indicator.width).ceil() + 2.0
+                }),
+                "Caret must stay after the placeholder: zoom={zoom}, pixels={changes:?}"
+            );
         }
     }
 }
@@ -766,6 +1038,7 @@ fn rich_text_visible_range_limits_long_ascii_lines_to_clip_columns() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: Vec::new(),
     };
     let metrics = EditorMetrics {
@@ -804,6 +1077,7 @@ fn rich_text_visible_range_backs_up_to_syntax_boundary() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: vec![
             SyntaxRenderSpan {
                 range: 0..16,
@@ -855,6 +1129,7 @@ fn rich_text_visible_range_subdivides_long_syntax_runs() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: vec![SyntaxRenderSpan {
             range: 0..1_000,
             color: Some(Color::from_rgb(1.0, 0.0, 0.0)),
@@ -902,6 +1177,7 @@ fn first_visible_syntax_span_skips_offscreen_spans() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans,
     };
 
@@ -925,6 +1201,7 @@ fn rich_text_visible_range_clips_tabbed_lines_to_visible_columns() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: Vec::new(),
     };
     let metrics = EditorMetrics {
@@ -965,6 +1242,7 @@ fn rich_text_visible_range_clips_non_ascii_lines_on_utf8_boundaries() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: Vec::new(),
     };
     let metrics = EditorMetrics {
@@ -1005,6 +1283,7 @@ fn rich_text_visible_range_falls_back_for_invalid_syntax_spans() {
         whitespace: Vec::new(),
         eol: None,
         indent_guides: Vec::new(),
+        projection: Vec::new(),
         syntax_spans: vec![SyntaxRenderSpan {
             range: 12..128,
             color: Some(Color::from_rgb(1.0, 0.0, 0.0)),

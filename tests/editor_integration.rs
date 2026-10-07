@@ -1,11 +1,12 @@
 use fragile_notepad::app::App;
+use fragile_notepad::core::document::analyze_document;
 use fragile_notepad::core::{
     DecodedText, Document, DocumentId, ShortcutCommand, ShortcutGroup, ShortcutMap, TextEncoding,
 };
 use fragile_notepad::editor::outline::{OutlineParseRequest, OutlineTree};
 use fragile_notepad::editor::{
     CaretMotion, DecorationSettings, EditTransaction, EditorAction, EditorPosition, EditorRange,
-    EditorSelection, FoldRange, FunctionEntry, FunctionKind, OutlineParseResult,
+    EditorSelection, FoldDelimiter, FoldRange, FunctionEntry, FunctionKind, OutlineParseResult,
     outline_registry_hash, parse_outline_snapshot, position_after_text,
 };
 use fragile_notepad::message::{Menu, Message};
@@ -132,6 +133,62 @@ fn document_editor_flow_handles_insert_newline_selection_replacement_and_history
     document.selection = selection(position(0, 2), position(0, 3));
     replace_selection(&mut document, "");
     assert_eq!(document.text(), "hiorld");
+}
+
+#[test]
+fn background_fold_analysis_refreshes_delimiters_without_expanding_matching_folds() {
+    for wrapped in [false, true] {
+        let mut document = Document::from_path(
+            DocumentId::new(1),
+            "main.rs",
+            "fn main() {                          \t\n    run();\n}",
+        );
+        document.update_viewport_geometry(4, 66.0, 8.0);
+        document.set_word_wrap(wrapped);
+        let range = FoldRange::new(0, 2);
+        assert_eq!(document.folds.delimiter(range).unwrap().opening_column, 10);
+        document.restore_collapsed_folds(&[(0, 2)]);
+        document.defer_analysis = true;
+        document
+            .buffer
+            .replace_range(EditorRange::new(position(0, 0), position(0, 0)), "pub ");
+        document.refresh_after_text_change();
+
+        let (buffer, request) = document.analysis_request().unwrap();
+        let result = analyze_document(buffer, request);
+        let expected = FoldDelimiter {
+            opening_column: 14,
+            opening: '{',
+            closing_column: 1,
+        };
+        assert_eq!(result.folds.delimiter(range), Some(expected));
+        assert!(document.apply_analysis(result));
+        assert_eq!(document.folds.delimiter(range), Some(expected));
+        assert_eq!(
+            document.decorations.line_decorations[0].fold_delimiter,
+            Some(expected)
+        );
+        assert!(document.folds.is_collapsed(range));
+        assert_eq!(document.viewport.document_line_to_visible_row(1), None);
+        if wrapped {
+            let opener_row = document
+                .viewport
+                .position_to_visible_row(position(0, expected.opening_column))
+                .unwrap();
+            let end_row = document
+                .viewport
+                .position_to_visible_row(position(0, document.buffer.line(0).unwrap().len()))
+                .unwrap();
+            assert_eq!(opener_row, end_row);
+            assert!(
+                document
+                    .viewport
+                    .row_segment(end_row, &document.buffer)
+                    .unwrap()
+                    .is_last
+            );
+        }
+    }
 }
 
 #[test]

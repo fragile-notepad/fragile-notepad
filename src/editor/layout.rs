@@ -205,12 +205,11 @@ pub fn hit_test(
         .floor()
         .max(0.0) as usize
         + start_visual_column;
-    let column = buffer
-        .line(line)
-        .map(|text| byte_column_for(&text, visual_column, decorations.settings.indent_width))
-        .unwrap_or(0)
+    let text = viewport.display_text(line, buffer);
+    let column = byte_column_for(&text, visual_column, decorations.settings.indent_width)
         .min(segment.map_or(usize::MAX, |segment| segment.end_column));
-    let position = buffer.clamp_position(EditorPosition::new(line, column));
+    let position =
+        buffer.clamp_position(viewport.source_position(EditorPosition::new(line, column)));
 
     HitTarget::Text(position)
 }

@@ -1,7 +1,8 @@
 use fragile_notepad::editor::layout::visual_column_for;
 use fragile_notepad::editor::viewport::RowSegment;
 use fragile_notepad::editor::{
-    EditorBuffer, EditorPosition, EditorRange, FoldModel, FoldRange, ViewportModel,
+    EditorBuffer, EditorPosition, EditorRange, FoldModel, FoldRange, IndentBraceFoldProvider,
+    ViewportModel,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -54,6 +55,57 @@ fn preserves_indentation_repeated_spaces_and_trailing_whitespace() {
             .iter()
             .all(|row| !row.is_empty() && row.len() <= 5)
     );
+}
+
+#[test]
+fn collapsed_terminal_opener_keeps_trailing_whitespace_and_carets_on_its_final_row() {
+    let header = String::from("fn 字() {") + &"\t ".repeat(16);
+    let source = format!("{header}\n    run();\n}}\nafter");
+    let range = FoldRange::new(0, 2);
+    for columns in [8, 16] {
+        let mut buffer = EditorBuffer::from_text(&source);
+        let mut folds = IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+        assert!(folds.set_collapsed(range, true));
+        let opener = folds.delimiter(range).unwrap().opening_column;
+        let mut viewport = ViewportModel::new_wrapped(&buffer, &folds, columns, 4);
+        for extra in ["", "\t  "] {
+            if !extra.is_empty() {
+                let end = EditorPosition::new(0, buffer.line(0).unwrap().len());
+                buffer.replace_range(EditorRange::new(end, end), extra);
+                assert!(viewport.reflow_wrapped_lines(&buffer, &folds, 0, 0));
+            }
+            let header = buffer.line(0).unwrap();
+            let header_rows = rows(&buffer, &viewport)
+                .into_iter()
+                .filter(|(line, _, _)| *line == 0)
+                .collect::<Vec<_>>();
+            let (_, _, last) = header_rows.last().unwrap();
+            assert!(last.is_last);
+            assert!(last.start_column <= opener && opener < last.end_column);
+            assert_eq!(last.end_column, header.len());
+            assert_eq!(
+                last.end_visual_column,
+                visual_column_for(&header, header.len(), 4)
+            );
+            assert_eq!(
+                header_rows
+                    .iter()
+                    .map(|(_, text, _)| text.as_str())
+                    .collect::<String>(),
+                header
+            );
+            for column in [opener, opener + 1, header.len()] {
+                assert_eq!(
+                    viewport.position_to_visible_row(EditorPosition::new(0, column)),
+                    Some(header_rows.len() - 1)
+                );
+            }
+            assert_eq!(
+                viewport,
+                ViewportModel::new_wrapped(&buffer, &folds, columns, 4)
+            );
+        }
+    }
 }
 
 #[test]
@@ -164,7 +216,7 @@ fn hides_fold_bodies_and_reserves_space_for_the_collapsed_header_badge() {
     folds.set_collapsed(range, true);
     let viewport = ViewportModel::new_wrapped(&buffer, &folds, 10, 4);
 
-    assert_eq!(row_texts(&buffer, &viewport), ["abcdef", "ghij", "tail"]);
+    assert_eq!(row_texts(&buffer, &viewport), ["abcde", "fghij", "tail"]);
     assert_eq!(viewport.document_line_to_visible_row(0), Some(0));
     assert_eq!(viewport.document_line_to_visible_row(1), None);
     assert_eq!(viewport.document_line_to_visible_row(2), None);

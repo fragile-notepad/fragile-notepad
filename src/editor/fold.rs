@@ -1,9 +1,10 @@
 use std::{
     cmp::Reverse,
-    collections::{HashSet, hash_set},
+    collections::{HashMap, HashSet, hash_set},
 };
 
 use super::buffer::EditorBuffer;
+use super::position::EditorPosition;
 use super::syntax_hints::{StringHint, SyntaxHintSet, SyntaxHints};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,9 +34,17 @@ pub trait FoldProvider {
     fn compute_folds(&self, buffer: &EditorBuffer) -> Vec<FoldRange>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoldDelimiter {
+    pub opening_column: usize,
+    pub opening: char,
+    pub closing_column: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct FoldModel {
     ranges: Vec<FoldRange>,
+    delimiters: HashMap<FoldRange, FoldDelimiter>,
     collapsed: HashSet<FoldRange>,
     visibility_revision: u64,
 }
@@ -54,18 +63,27 @@ impl FoldModel {
 
         Self {
             ranges,
+            delimiters: HashMap::new(),
             collapsed,
             visibility_revision: 0,
         }
     }
 
     pub fn recompute(&mut self, ranges: Vec<FoldRange>) {
+        self.recompute_from_model(Self::new(ranges));
+    }
+
+    pub fn recompute_from_model(&mut self, mut model: Self) {
         let revision = self.visibility_revision;
         let previous_count = self.collapsed.len();
-        let collapsed = std::mem::take(&mut self.collapsed);
-        *self = Self::with_collapsed(ranges, collapsed);
-        self.visibility_revision =
-            revision.wrapping_add(u64::from(previous_count != self.collapsed.len()));
+        model.collapsed = std::mem::take(&mut self.collapsed);
+        if !model.collapsed.is_empty() {
+            let available = model.ranges.iter().copied().collect::<HashSet<_>>();
+            model.collapsed.retain(|range| available.contains(range));
+        }
+        model.visibility_revision =
+            revision.wrapping_add(u64::from(previous_count != model.collapsed.len()));
+        *self = model;
     }
 
     pub(crate) fn visibility_revision(&self) -> u64 {
@@ -74,6 +92,10 @@ impl FoldModel {
 
     pub fn ranges(&self) -> &[FoldRange] {
         &self.ranges
+    }
+
+    pub fn delimiter(&self, range: FoldRange) -> Option<FoldDelimiter> {
+        self.delimiters.get(&range).copied()
     }
 
     pub fn collapsed_ranges(&self) -> hash_set::Iter<'_, FoldRange> {
@@ -157,6 +179,23 @@ impl FoldModel {
     pub fn is_line_hidden(&self, line: usize) -> bool {
         self.collapsed_covering(line).is_some()
     }
+
+    pub fn collapsed_covering_position(&self, position: EditorPosition) -> Option<FoldRange> {
+        self.collapsed
+            .iter()
+            .copied()
+            .filter(|range| {
+                self.delimiter(*range).map_or_else(
+                    || range.contains_hidden_line(position.line),
+                    |delimiter| {
+                        position > EditorPosition::new(range.start_line, delimiter.opening_column)
+                            && position
+                                < EditorPosition::new(range.end_line, delimiter.closing_column)
+                    },
+                )
+            })
+            .min_by_key(|range| (range.start_line, Reverse(range.end_line)))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +228,15 @@ impl IndentBraceFoldProvider {
     pub fn syntax_token(&self) -> &str {
         &self.syntax_token
     }
+
+    pub fn compute_fold_model(&self, buffer: &EditorBuffer) -> FoldModel {
+        let mut ranges = indentation_folds(buffer, self.indent_width());
+        let (brace_ranges, delimiters) = brace_folds(buffer, &self.hints);
+        ranges.extend(brace_ranges);
+        let mut model = FoldModel::new(ranges);
+        model.delimiters = delimiters;
+        model
+    }
 }
 
 impl Default for IndentBraceFoldProvider {
@@ -199,9 +247,7 @@ impl Default for IndentBraceFoldProvider {
 
 impl FoldProvider for IndentBraceFoldProvider {
     fn compute_folds(&self, buffer: &EditorBuffer) -> Vec<FoldRange> {
-        let mut ranges = indentation_folds(buffer, self.indent_width());
-        ranges.extend(brace_folds(buffer, &self.hints));
-        normalize_ranges(ranges)
+        self.compute_fold_model(buffer).ranges
     }
 }
 
@@ -271,8 +317,12 @@ fn finish_indent_candidate(
     }
 }
 
-fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
+fn brace_folds(
+    buffer: &EditorBuffer,
+    hints: &SyntaxHints,
+) -> (Vec<FoldRange>, HashMap<FoldRange, FoldDelimiter>) {
     let mut ranges = Vec::new();
+    let mut delimiters = HashMap::new();
     let mut stack = Vec::new();
     let mut syntax = BraceSyntax::Code;
 
@@ -377,19 +427,35 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
                 .next()
                 .expect("index should be on a character boundary");
             match ch {
-                '{' | '[' | '(' => stack.push((ch, line_index)),
+                '{' | '[' | '(' => stack.push((
+                    ch,
+                    line_index,
+                    line[index + ch.len_utf8()..]
+                        .trim()
+                        .is_empty()
+                        .then_some(FoldDelimiter {
+                            opening_column: index,
+                            opening: ch,
+                            closing_column: 0,
+                        }),
+                )),
                 '}' | ']' | ')' => {
-                    let Some(index) = stack
+                    let Some(stack_index) = stack
                         .iter()
-                        .rposition(|(open, _)| matching_close(*open) == ch)
+                        .rposition(|(open, _, _)| matching_close(*open) == ch)
                     else {
                         index += ch.len_utf8();
                         continue;
                     };
-                    let (_, start_line) = stack.remove(index);
+                    let (_, start_line, delimiter) = stack.remove(stack_index);
 
                     if line_index > start_line {
-                        ranges.push(FoldRange::new(start_line, line_index));
+                        let range = FoldRange::new(start_line, line_index);
+                        ranges.push(range);
+                        if let Some(mut delimiter) = delimiter {
+                            delimiter.closing_column = index + ch.len_utf8();
+                            delimiters.insert(range, delimiter);
+                        }
                     }
                 }
                 _ => {}
@@ -399,7 +465,7 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
         }
     }
 
-    ranges
+    (ranges, delimiters)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

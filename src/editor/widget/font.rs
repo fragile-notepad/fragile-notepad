@@ -9,6 +9,9 @@ use std::sync::{Arc, OnceLock, RwLock};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::editor::cjk::{CjkContext, CjkLanguage, CjkRun, cjk_runs};
+use crate::editor::fold_projection::ProjectionFragment;
+use crate::editor::render::{RowRenderPlan, clipped_projection_fragments};
+use crate::editor::viewport::ViewportModel;
 
 mod profile;
 
@@ -107,6 +110,70 @@ pub(super) fn editor_font_runs_for_fragment(
         |context| context.runs_for_fragment(line, start_byte, text),
     );
     editor_font_runs_from_cjk_runs(text, &runs)
+}
+
+pub(super) fn editor_font_runs_for_row(
+    row: &RowRenderPlan,
+    context: Option<&CjkContext>,
+) -> Vec<EditorFontRun> {
+    if row.projection.is_empty() {
+        editor_font_runs_for_fragment(&row.text, context, row.line, row.start_column)
+    } else {
+        projected_font_runs(&row.text, &row.projection, context)
+    }
+}
+
+pub(super) fn editor_font_runs_for_display_fragment(
+    text: &str,
+    context: Option<&CjkContext>,
+    line: usize,
+    start_byte: usize,
+    viewport: &ViewportModel,
+) -> Vec<EditorFontRun> {
+    viewport.projection(line).map_or_else(
+        || editor_font_runs_for_fragment(text, context, line, start_byte),
+        |projection| {
+            projected_font_runs(
+                text,
+                &clipped_projection_fragments(projection, start_byte..start_byte + text.len()),
+                context,
+            )
+        },
+    )
+}
+
+fn projected_font_runs(
+    text: &str,
+    fragments: &[ProjectionFragment],
+    context: Option<&CjkContext>,
+) -> Vec<EditorFontRun> {
+    let mut runs = Vec::new();
+    for fragment in fragments {
+        match fragment {
+            ProjectionFragment::Source {
+                display_range,
+                source_start,
+            } => {
+                for run in editor_font_runs_for_fragment(
+                    &text[display_range.clone()],
+                    context,
+                    source_start.line,
+                    source_start.column,
+                ) {
+                    append_font_run(
+                        &mut runs,
+                        display_range.start + run.byte_range.start
+                            ..display_range.start + run.byte_range.end,
+                        run.font,
+                    );
+                }
+            }
+            ProjectionFragment::Placeholder { display_range, .. } => {
+                append_font_run(&mut runs, display_range.clone(), EDITOR_FONT);
+            }
+        }
+    }
+    runs
 }
 
 /// Translates original source ranges to expanded text after tab replacement.

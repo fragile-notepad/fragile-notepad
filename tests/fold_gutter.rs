@@ -70,25 +70,103 @@ fn assert_plain_gutter(pixels: &[u8], size: Size<u32>, left: f32, right: f32, ro
     }
 }
 
-fn save_review(name: &str, pixels: &[u8], size: Size<u32>) {
-    if std::env::var_os("FRAGILE_SAVE_FOLD_REVIEW").is_none() {
-        return;
+fn assert_delimited_placeholder(
+    expanded: &[u8],
+    prefix_only: &[u8],
+    collapsed: &[u8],
+    size: Size<u32>,
+    metrics: EditorMetrics,
+    text_origin: f32,
+    style: EditorStyle,
+) {
+    let in_header = |&(x, y): &(usize, usize)| {
+        x as f32 >= text_origin
+            && y as f32 >= metrics.padding_top
+            && (y as f32) < metrics.padding_top + metrics.line_height
+    };
+    let opener_left = changed_pixels(expanded, prefix_only, size.width)
+        .into_iter()
+        .filter(in_header)
+        .map(|(x, _)| x)
+        .min()
+        .expect("Source opening brace pixels");
+    let background = style.fold_control_background.into_rgba8();
+    let plate_columns: Vec<_> = collapsed
+        .chunks_exact(4)
+        .enumerate()
+        .filter_map(|(index, pixel)| {
+            let position = (index % size.width as usize, index / size.width as usize);
+            (pixel == background
+                && in_header(&position)
+                && position.0 as f32 >= opener_left as f32 - metrics.character_width)
+                .then_some(position.0)
+        })
+        .collect();
+    let left = *plate_columns.iter().min().expect("Filled fold placeholder");
+    let right = *plate_columns.iter().max().unwrap();
+    assert!(
+        left <= opener_left,
+        "The placeholder must include the original opening brace"
+    );
+    assert!(
+        changed_pixels(expanded, collapsed, size.width)
+            .into_iter()
+            .filter(in_header)
+            .all(|(x, _)| x >= left),
+        "Collapsing must preserve the source prefix before the opening brace"
+    );
+    let closer_left = left + (right - left) * 3 / 4;
+    assert!(
+        ((metrics.padding_top + metrics.line_height * 0.25) as usize
+            ..(metrics.padding_top + metrics.line_height * 0.75) as usize)
+            .any(|y| {
+                (closer_left..right).any(|x| {
+                    let offset = (y * size.width as usize + x) * 4;
+                    collapsed[offset..offset + 4] != background
+                })
+            }),
+        "The placeholder must show a closing brace after the dots"
+    );
+}
+
+fn assert_projection_text_matches_flat_code(
+    projected: &[u8],
+    expected: &[u8],
+    size: Size<u32>,
+    row_index: usize,
+    text_origin: f32,
+    style: EditorStyle,
+) {
+    let row_y = 4 + row_index * 20;
+    let background = style.fold_control_background.into_rgba8();
+    let mut plates = Vec::new();
+    let mut start = None;
+    for x in text_origin.ceil() as usize..size.width as usize {
+        let offset = ((row_y + 2) * size.width as usize + x) * 4;
+        if projected[offset..offset + 4] == background {
+            start.get_or_insert(x);
+        } else if let Some(left) = start.take() {
+            plates.push(left.saturating_sub(2)..x + 2);
+        }
     }
-    std::fs::create_dir_all("target/fold-review").expect("Create fold review directory");
-    tiny_skia::Pixmap::from_vec(
-        pixels.to_vec(),
-        tiny_skia::IntSize::from_wh(size.width, size.height).unwrap(),
-    )
-    .expect("RGBA review pixels")
-    .save_png(format!("target/fold-review/{name}.png"))
-    .expect("Write fold review image");
+    assert!(
+        !plates.is_empty(),
+        "Projected folds must paint filled placeholders"
+    );
+    assert!(
+        changed_pixels(expected, projected, size.width)
+            .into_iter()
+            .filter(|&(x, y)| x as f32 >= text_origin && y >= row_y && y < row_y + 20)
+            .all(|(x, _)| plates.iter().any(|plate| plate.contains(&x))),
+        "The prefix and closing-line suffix must render like the exact flat visible code"
+    );
 }
 
 #[test]
 fn expanded_folds_reveal_on_gutter_hover_and_collapsed_folds_remain_visible() {
     let mut renderer = software_renderer();
     let size = Size::new(600, 280);
-    for (theme, name) in [(Theme::Light, "light"), (Theme::Dark, "dark")] {
+    for theme in [Theme::Light, Theme::Dark] {
         for zoom in [EditorSettings::MIN_ZOOM, 1.0, EditorSettings::MAX_ZOOM] {
             for show_numbers in [true, false] {
                 let settings = EditorSettings {
@@ -201,11 +279,89 @@ fn expanded_folds_reveal_on_gutter_hover_and_collapsed_folds_remain_visible() {
                 );
 
                 if zoom == 1.0 && show_numbers {
-                    save_review(&format!("{name}-expanded"), &at_rest, size);
-                    save_review(&format!("{name}-hovered"), &hovered, size);
-                    save_review(&format!("{name}-collapsed"), &collapsed, size);
+                    let mut prefix_only = Document::from_path(
+                        DocumentId::new(721),
+                        "prefix.rs",
+                        "fn main() \n    run();\n}\nafter();",
+                    );
+                    prefix_only.decorations.settings = document.decorations.settings;
+                    prefix_only.restore_collapsed_folds(&[]);
+                    let prefix_pixels = render(&prefix_only, mouse::Cursor::Unavailable);
+                    assert_delimited_placeholder(
+                        &at_rest,
+                        &prefix_pixels,
+                        &collapsed,
+                        size,
+                        metrics,
+                        metrics.text_origin_x(&document.decorations),
+                        EditorStyle::from_theme(&theme),
+                    );
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn branch_placeholders_keep_else_and_semicolon_visible_in_both_themes() {
+    let source = "let mode = if cfg!(feature = \"abort\") {\n    abort();\n} else {\n    unwind();\n};\nafter();";
+    let mut renderer = software_renderer();
+    let size = Size::new(760, 160);
+    let settings = EditorSettings::default();
+    for theme in [Theme::Light, Theme::Dark] {
+        for (ranges, visible_code, row_index) in [
+            (
+                &[(0, 2)][..],
+                "let mode = if cfg!(feature = \"abort\") {...} else {\n    unwind();\n};\nafter();",
+                0,
+            ),
+            (
+                &[(2, 4)][..],
+                "let mode = if cfg!(feature = \"abort\") {\n    abort();\n} else {...};\nafter();",
+                2,
+            ),
+            (
+                &[(0, 2), (2, 4)][..],
+                "let mode = if cfg!(feature = \"abort\") {...} else {...};\nafter();",
+                0,
+            ),
+        ] {
+            let mut document = Document::from_path(DocumentId::new(730), "branch.rs", source);
+            document.decorations.settings.show_indentation_guides = false;
+            document.decorations.settings.show_wrap_guide = false;
+            document.restore_collapsed_folds(ranges);
+            let mut expected = Document::from_path(DocumentId::new(731), "flat.rs", visible_code);
+            expected.decorations.settings = document.decorations.settings;
+            expected.restore_collapsed_folds(&[]);
+            let actual_pixels = draw(
+                &mut renderer,
+                &mut Tree::empty(),
+                &document,
+                &settings,
+                &theme,
+                mouse::Cursor::Unavailable,
+                size,
+            );
+            let expected_pixels = draw(
+                &mut renderer,
+                &mut Tree::empty(),
+                &expected,
+                &settings,
+                &theme,
+                mouse::Cursor::Unavailable,
+                size,
+            );
+            let metrics =
+                EditorMetrics::new(20.0, 8.8).with_line_count(document.buffer.line_count());
+            assert_projection_text_matches_flat_code(
+                &actual_pixels,
+                &expected_pixels,
+                size,
+                row_index,
+                metrics.text_origin_x(&document.decorations),
+                EditorStyle::from_theme(&theme),
+            );
+            assert_eq!(document.text(), source);
         }
     }
 }

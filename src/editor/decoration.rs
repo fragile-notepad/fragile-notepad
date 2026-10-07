@@ -1,4 +1,4 @@
-use super::fold::{FoldModel, FoldRange};
+use super::fold::{FoldDelimiter, FoldModel, FoldRange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecorationSettings {
@@ -61,6 +61,7 @@ pub struct LineDecoration {
     pub line: usize,
     pub line_number: Option<usize>,
     pub fold_range: Option<FoldRange>,
+    pub fold_delimiter: Option<FoldDelimiter>,
     pub has_fold_control: bool,
     pub is_fold_collapsed: bool,
 }
@@ -112,6 +113,7 @@ impl DecorationModel {
                     line,
                     line_number: settings.show_line_numbers.then_some(line + 1),
                     fold_range,
+                    fold_delimiter: fold_range.and_then(|range| folds.delimiter(range)),
                     has_fold_control: settings.show_folding_controls && fold_range.is_some(),
                     is_fold_collapsed: fold_range.is_some_and(|range| folds.is_collapsed(range)),
                 }
@@ -141,6 +143,7 @@ impl DecorationModel {
                 line,
                 line_number: self.settings.show_line_numbers.then_some(line + 1),
                 fold_range: None,
+                fold_delimiter: None,
                 has_fold_control: false,
                 is_fold_collapsed: false,
             });

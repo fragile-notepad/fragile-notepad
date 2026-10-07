@@ -17,6 +17,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `bb22add15` | Notify logical window resize when application scale changes |
 | `8d1955dc1` | Rebuild invalidated widgets during redraw even without messages |
 | `fc2cfe937` | Keep toggler geometry in logical coordinates with crisp disabled |
+| `f3ee4cfdc` | Preserve fractional scroll offsets until physical-pixel drawing |
 
 ## Application patches
 

@@ -68,6 +68,28 @@ fn update(
 }
 
 #[test]
+fn fractional_scroll_offsets_are_preserved_for_physical_pixel_snapping() {
+    let content = Rectangle::with_size(Size::new(1000.0, 1000.0));
+    let mut state = State::default();
+    state.scroll_to(AbsoluteOffset {
+        x: Some(12.25),
+        y: Some(25.5),
+    });
+
+    assert_eq!(
+        state.translation(
+            Direction::Both {
+                vertical: Scrollbar::default(),
+                horizontal: Scrollbar::default(),
+            },
+            BOUNDS,
+            content,
+        ),
+        Vector::new(12.25, 25.5),
+    );
+}
+
+#[test]
 fn rebuilding_scrollable_preserves_hover_and_requests_redraw_on_exit() {
     let observed = Cell::new(None);
     let make = || {

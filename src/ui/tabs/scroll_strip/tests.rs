@@ -361,9 +361,9 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         }),
         cursor,
     );
-    // The operation reports the native displayed translation, which snaps
-    // fractional precise input to pixels (60 + 12.5 displays at 73).
-    close(tree.state.downcast_ref::<State>().metrics.offset, 73.0);
+    // Native operations preserve logical offsets; only drawing snaps to the
+    // physical pixel grid. The strip follows precise input without rounding.
+    close(tree.state.downcast_ref::<State>().metrics.offset, 72.5);
     // Preserve the native horizontal row convention: Shift + vertical wheel.
     dispatch(
         &mut element,
@@ -389,7 +389,7 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         }),
         cursor,
     );
-    close(tree.state.downcast_ref::<State>().metrics.offset, 103.0);
+    close(tree.state.downcast_ref::<State>().metrics.offset, 102.5);
 }
 
 #[test]

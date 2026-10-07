@@ -139,3 +139,17 @@ fn gradient_quads_match_solid_shadow_and_snapped_edges() {
     assert_eq!(actual[(40 * 64 + 40) * 4 + 3], 191, "shadow outside quad");
     assert_eq!(actual[(20 * 64 + 16) * 4 + 3], 0, "edge snaps up");
 }
+
+#[test]
+fn single_stop_gradient_keeps_its_color_across_the_quad() {
+    let Some((device, queue)) = device() else {
+        eprintln!("Skipping Vulkan gradient validation: adapter unavailable");
+        return;
+    };
+    let gradient = gradient::Linear::new(0.0).add_stop(0.5, Color::WHITE);
+    let actual = capture(&device, &queue, Background::Gradient(gradient.into()));
+    for (x, y) in [(20, 20), (32, 32)] {
+        let offset = (y * 64 + x) * 4;
+        assert_eq!(&actual[offset..offset + 4], &[255, 255, 255, 255]);
+    }
+}

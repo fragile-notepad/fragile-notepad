@@ -24,6 +24,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `044364c029` | Align CPU clips and GPU quad edges using the same pixel nudge; preserve signed image bounds and snap(false) |
 | `3542404b15` | Read gradient quad snap flags from their correct vertex offset |
 | `ee455ef9bb` | Render gradient quad shadows with shared solid-quad shadow logic |
+| `ba94c520a1` | Resolve single-stop gradients and short-circuit stop interpolation |
 
 ## Application patches
 

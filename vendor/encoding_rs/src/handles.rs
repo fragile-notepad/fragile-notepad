@@ -1272,7 +1272,7 @@ impl<'a> Utf16Source<'a> {
                 Some((non_ascii, consumed)) => {
                     self.pos += consumed;
                     dest.advance(consumed);
-                    if dest.remaining().len() >= 1 {
+                    if dest.remaining().len() >= 2 {
                         self.pos += 1; // commit to reading `non_ascii`
                         let unit = non_ascii;
                         let unit_minus_surrogate_start = unit.wrapping_sub(0xD800);
@@ -1341,7 +1341,7 @@ impl<'a> Utf16Source<'a> {
                 Some((non_ascii, consumed)) => {
                     self.pos += consumed;
                     dest.advance(consumed);
-                    if dest.remaining().len() >= 3 {
+                    if dest.remaining().len() >= 4 {
                         self.pos += 1; // commit to reading `non_ascii`
                         let unit = non_ascii;
                         let unit_minus_surrogate_start = unit.wrapping_sub(0xD800);
@@ -1614,7 +1614,7 @@ impl<'a> Utf8Source<'a> {
                 Some((non_ascii, consumed)) => {
                     self.pos += consumed;
                     dest.advance(consumed);
-                    if dest.remaining().len() >= 1 {
+                    if dest.remaining().len() >= 2 {
                         if non_ascii < 0xE0 {
                             let point = ((u16::from(non_ascii) & 0x1F) << 6)
                                 | (u16::from(self.slice[self.pos + 1]) & 0x3F);
@@ -1670,7 +1670,7 @@ impl<'a> Utf8Source<'a> {
                 Some((non_ascii, consumed)) => {
                     self.pos += consumed;
                     dest.advance(consumed);
-                    if dest.remaining().len() >= 3 {
+                    if dest.remaining().len() >= 4 {
                         if non_ascii < 0xE0 {
                             let point = ((u16::from(non_ascii) & 0x1F) << 6)
                                 | (u16::from(self.slice[self.pos + 1]) & 0x3F);

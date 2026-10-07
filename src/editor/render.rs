@@ -210,7 +210,7 @@ pub fn text_size(metrics: EditorMetrics) -> f32 {
     (metrics.line_height / 1.25).max(8.0)
 }
 
-/// Returns the boxed ellipsis bounds after a collapsed block's header text.
+/// Returns the inline ellipsis bounds after a collapsed block's header text.
 ///
 /// Coordinates are editor-local and already include horizontal scrolling in
 /// `measured_text_end_x`. Sharing this geometry with pointer handling keeps the

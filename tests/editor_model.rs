@@ -1431,6 +1431,36 @@ fn editor_model_viewport_maps_visible_rows_around_collapsed_fold_children() {
 }
 
 #[test]
+fn editor_model_shared_fold_header_tracks_the_longest_collapsed_range() {
+    let buffer = EditorBuffer::from_text("fn main() {\n    run();\n}\nafter();");
+    let inner = FoldRange::new(0, 1);
+    let outer = FoldRange::new(0, 2);
+    let mut folds =
+        FoldModel::new(IndentBraceFoldProvider::for_syntax(4, "rs").compute_folds(&buffer));
+    assert!(folds.ranges().contains(&inner));
+    assert!(folds.ranges().contains(&outer));
+
+    let header_state = |folds: &FoldModel| {
+        let decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            folds,
+            vec![],
+        );
+        let header = decorations.line_decorations[0];
+        (header.fold_range, header.is_fold_collapsed)
+    };
+
+    assert_eq!(header_state(&folds), (Some(outer), false));
+    folds.set_collapsed(inner, true);
+    assert_eq!(header_state(&folds), (Some(inner), true));
+    folds.set_collapsed(outer, true);
+    assert_eq!(header_state(&folds), (Some(outer), true));
+    folds.set_collapsed(outer, false);
+    assert_eq!(header_state(&folds), (Some(inner), true));
+}
+
+#[test]
 fn editor_model_decorations_capture_settings_hidden_spans_and_fold_controls() {
     let mut folds = FoldModel::new(vec![FoldRange::new(0, 2)]);
     folds.set_collapsed(FoldRange::new(0, 2), true);

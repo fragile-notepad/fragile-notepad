@@ -17,6 +17,7 @@ const DOUBLE_CLICK_INTERVAL_MS: u128 = 500;
 pub struct AdvancedEditorState<Paragraph> {
     pub(super) is_focused: bool,
     pub(super) is_window_focused: bool,
+    pub(super) fold_controls_hovered: Cell<bool>,
     pub(super) caret_updated_at: Instant,
     pub(super) caret_now: Cell<Instant>,
     pub(super) drag_anchor: Option<EditorPosition>,
@@ -41,6 +42,7 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
         Self {
             is_focused: false,
             is_window_focused: true,
+            fold_controls_hovered: Cell::new(false),
             caret_updated_at: now,
             caret_now: Cell::new(now),
             drag_anchor: None,

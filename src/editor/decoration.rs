@@ -95,9 +95,12 @@ impl DecorationModel {
             .filter_map(HiddenLineSpan::from_fold)
             .collect();
         let mut fold_ranges_by_start = vec![None; line_count];
+        let priority = |range: FoldRange| (folds.is_collapsed(range), range.end_line);
         for range in folds.ranges().iter().copied() {
-            if let Some(entry) = fold_ranges_by_start.get_mut(range.start_line) {
-                entry.get_or_insert(range);
+            if let Some(entry) = fold_ranges_by_start.get_mut(range.start_line)
+                && entry.is_none_or(|current| priority(range) > priority(current))
+            {
+                *entry = Some(range);
             }
         }
 

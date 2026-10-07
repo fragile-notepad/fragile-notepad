@@ -276,6 +276,7 @@ fn wrapped_fragments_render_distinct_geometry_with_software_renderer() {
             viewport.wrap_columns(),
             false,
             false,
+            false,
             1,
             &mut RichParagraphCache::default(),
             &mut LineGeometryCache::default(),
@@ -398,16 +399,36 @@ fn collapsed_indicator_uses_outer_span_when_folds_share_a_header() {
     let outer = FoldRange::new(0, 2);
     let mut folds = FoldModel::new(vec![inner, outer]);
     folds.set_all_collapsed(true);
-    let mut fixture = FoldPointerFixture::new("header\nchild\n}\nafter", folds);
-    fixture.decorations.settings.show_folding_controls = false;
-    let editor = fixture.editor();
-    let node = fold_test_node();
-    let point = first_fold_indicator_center(&editor, &node);
+    for controls in [false, true] {
+        let mut fixture = FoldPointerFixture::new("header\nchild\n}\nafter", folds.clone());
+        fixture.decorations.settings.show_folding_controls = controls;
+        let mut editor = fixture.editor();
+        let node = fold_test_node();
+        let point = first_fold_indicator_center(&editor, &node);
 
-    assert_eq!(
-        editor.hit_collapsed_indicator(Layout::new(&node), mouse::Cursor::Available(point), &()),
-        Some(outer),
-    );
+        assert_eq!(
+            editor.hit_collapsed_indicator(
+                Layout::new(&node),
+                mouse::Cursor::Available(point),
+                &()
+            ),
+            Some(outer),
+        );
+        if controls {
+            let mut tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
+            let gutter = Point::new(
+                node.bounds().x
+                    + editor.metrics.padding_left
+                    + editor.metrics.line_number_width
+                    + 4.0,
+                node.bounds().y + editor.metrics.padding_top + 4.0,
+            );
+            let (messages, captured) =
+                press_fold_test_editor(&mut editor, &mut tree, &node, gutter);
+            assert!(messages.ends_with(&[EditorAction::Focus, EditorAction::ToggleFold(outer)]));
+            assert!(captured);
+        }
+    }
 }
 
 #[test]
@@ -433,6 +454,64 @@ fn fold_gutter_control_uses_pointer_cursor() {
         ),
         mouse::Interaction::Pointer,
     );
+}
+
+#[test]
+fn folding_gutter_hover_redraws_only_on_visibility_changes() {
+    for enabled in [true, false] {
+        let mut fixture =
+            FoldPointerFixture::new("{\nchild\n}", FoldModel::new(vec![FoldRange::new(0, 2)]));
+        fixture.decorations.settings.show_folding_controls = enabled;
+        let mut editor = fixture.editor();
+        let node = fold_test_node();
+        let mut tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
+        let gutter = Point::new(node.bounds().x + 4.0, node.bounds().y + 8.0);
+        let fold_lane = Point::new(
+            node.bounds().x + editor.metrics.padding_left + editor.metrics.line_number_width + 4.0,
+            gutter.y,
+        );
+        let text = Point::new(
+            node.bounds().x + editor.metrics.text_origin_x(editor.decorations) + 20.0,
+            gutter.y,
+        );
+        for (cursor, changed) in [
+            (mouse::Cursor::Available(text), false),
+            (mouse::Cursor::Available(gutter), true),
+            (mouse::Cursor::Available(fold_lane), false),
+            (mouse::Cursor::Available(text), true),
+            (mouse::Cursor::Available(gutter), true),
+            (mouse::Cursor::Unavailable, true),
+            (mouse::Cursor::Unavailable, false),
+        ] {
+            let event = cursor
+                .position()
+                .map_or(Event::Mouse(mouse::Event::CursorLeft), |position| {
+                    Event::Mouse(mouse::Event::CursorMoved { position })
+                });
+            let mut messages = Vec::new();
+            let mut shell = Shell::new(&iced::window::Headless, Waker::noop(), &mut messages);
+            Widget::<EditorAction, Theme, ()>::update(
+                &mut editor,
+                &mut tree,
+                &event,
+                Layout::new(&node),
+                cursor,
+                &(),
+                &mut shell,
+                &node.bounds(),
+            );
+            assert_eq!(
+                shell.redraw_request(),
+                if enabled && changed {
+                    iced::window::RedrawRequest::NextFrame
+                } else {
+                    iced::window::RedrawRequest::Wait
+                },
+                "enabled={enabled}, cursor={cursor:?}"
+            );
+            assert!(!shell.is_event_captured());
+        }
+    }
 }
 
 fn span_key(line: usize) -> Vec<SyntaxSpanKey> {

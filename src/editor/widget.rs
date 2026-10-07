@@ -222,7 +222,7 @@ where
         theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
         let trace_enabled = crate::perf_trace::enabled();
@@ -233,6 +233,8 @@ where
         let state = tree
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
+        let fold_controls_hovered = self.fold_controls_hovered(bounds, cursor);
+        state.fold_controls_hovered.set(fold_controls_hovered);
         let fast_text = is_scroll_fast_frame(state);
         let caret_visible = state.is_caret_visible() && state.text_drag.is_none();
         // Drawing only consumes completed spans. Parser work is scheduled by
@@ -332,6 +334,7 @@ where
                 ),
                 fast_text,
                 caret_visible,
+                fold_controls_hovered,
                 frame_id,
                 &mut rich_paragraphs,
                 &mut line_geometries,
@@ -435,6 +438,10 @@ where
         let state = tree
             .state
             .downcast_mut::<AdvancedEditorState<Renderer::Paragraph>>();
+        let fold_controls_hovered = self.fold_controls_hovered(layout.bounds(), cursor);
+        if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
+            shell.request_redraw();
+        }
         let editor_layout = self.editor_layout(layout.bounds());
         let outcome = if matches!(
             event,
@@ -551,6 +558,13 @@ static DEFAULT_SHORTCUTS: std::sync::LazyLock<ShortcutMap> =
     std::sync::LazyLock::new(ShortcutMap::default);
 
 impl<Message> AdvancedEditor<'_, Message> {
+    fn fold_controls_hovered(&self, bounds: Rectangle, cursor: mouse::Cursor) -> bool {
+        self.decorations.settings.show_folding_controls
+            && cursor
+                .position_in(bounds)
+                .is_some_and(|position| position.x < self.metrics.text_origin_x(self.decorations))
+    }
+
     fn editor_layout(&self, bounds: Rectangle) -> EditorLayout {
         let mut scroll = self.scroll;
         if self.viewport.wrap_columns().is_some() {

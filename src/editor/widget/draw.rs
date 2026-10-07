@@ -124,6 +124,7 @@ pub(super) fn draw_plan<Renderer>(
     wrap_guide_column: Option<usize>,
     fast_text: bool,
     caret_visible: bool,
+    fold_controls_hovered: bool,
     frame_id: u64,
     rich_paragraphs: &mut RichParagraphCache<Renderer::Paragraph>,
     line_geometries: &mut LineGeometryCache<Renderer::Paragraph>,
@@ -287,7 +288,9 @@ pub(super) fn draw_plan<Renderer>(
     for row in &plan.rows {
         let row_y = bounds.y + row.y;
 
-        if let Some(fold) = row.fold {
+        if let Some(fold) = row.fold
+            && (fold.collapsed || fold_controls_hovered)
+        {
             draw_fold_control(
                 renderer,
                 bounds,
@@ -299,7 +302,7 @@ pub(super) fn draw_plan<Renderer>(
             );
         }
 
-        if row.hidden_lines.is_some() {
+        if row.hidden_lines.is_some() && row.fold.is_none_or(|fold| !fold.collapsed) {
             draw_hidden_line_hint(renderer, bounds, row_y, metrics, decorations, style);
         }
     }
@@ -630,37 +633,19 @@ fn draw_fold_control<Renderer>(
         + text::Renderer<Font = Font>
         + advanced_image::Renderer<Handle = advanced_image::Handle>,
 {
-    let icon_size = (metrics.fold_lane_width - 5.0).max(7.0);
+    let icon_size = metrics.fold_lane_width.min(metrics.line_height * 0.8);
     let x = bounds.x + metrics.text_origin_x(decorations)
         - metrics.hidden_indicator_width
         - metrics.fold_lane_width
-        + 2.5;
+        + (metrics.fold_lane_width - icon_size) / 2.0;
     let y = row_y + (metrics.line_height - icon_size) / 2.0;
-
-    renderer.fill_quad(
-        renderer::Quad {
-            bounds: Rectangle {
-                x,
-                y,
-                width: icon_size,
-                height: icon_size,
-            },
-            border: iced::Border {
-                color: style.fold_controls.scale_alpha(0.55),
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..renderer::Quad::default()
-        },
-        Background::Color(style.fold_control_background),
-    );
 
     draw_icon(
         renderer,
         if collapsed {
-            HeroIcon::Plus
+            HeroIcon::ChevronRight
         } else {
-            HeroIcon::Minus
+            HeroIcon::ChevronDown
         },
         Rectangle {
             x,
@@ -685,9 +670,8 @@ fn draw_collapsed_fold_indicator<Renderer>(
         renderer::Quad {
             bounds,
             border: iced::Border {
-                color: style.fold_controls.scale_alpha(0.65),
-                width: 1.0,
-                radius: 3.0.into(),
+                radius: 1.0.into(),
+                ..iced::Border::default()
             },
             ..renderer::Quad::default()
         },

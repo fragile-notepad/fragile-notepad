@@ -37,7 +37,7 @@ impl EditorStyle {
                         Color::from_rgba(225.0 / 255.0, 174.0 / 255.0, 75.0 / 255.0, 0.18),
                         Color::from_rgba(177.0 / 255.0, 131.0 / 255.0, 232.0 / 255.0, 0.18),
                     ],
-                    Color::from_rgb8(37, 38, 41),
+                    Color::from_rgb8(45, 47, 51),
                 )
             } else {
                 (
@@ -54,7 +54,7 @@ impl EditorStyle {
                         Color::from_rgba(176.0 / 255.0, 117.0 / 255.0, 20.0 / 255.0, 0.16),
                         Color::from_rgba(136.0 / 255.0, 77.0 / 255.0, 190.0 / 255.0, 0.16),
                     ],
-                    Color::from_rgb8(250, 250, 250),
+                    Color::from_rgb8(232, 234, 237),
                 )
             };
 

@@ -13,6 +13,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `7c6ce8789` | Preserve stronger mouse interaction across nested overlays |
 | `3c81aac2e` | Retain scrollbar interaction across widget rebuilds |
 | `d8dabb4ab` | Suppress content cursor while dragging a scrollbar |
+| `79cba74a6`, `63a82addc`, `82acd61ea` | Update the winit fork to `48116469f15d3bc52b5e56bb516694be8882870d` and align `smol_str` to 0.3; includes native IME/crash fixes, Wayland wheel and repeated-key handling, and Windows `Sync` restoration |
 
 ## Application patches
 

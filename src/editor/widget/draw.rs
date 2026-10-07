@@ -256,7 +256,12 @@ pub(super) fn draw_plan<Renderer>(
                 draw_line_number(renderer, line_number, bounds, row_y, metrics, style);
             }
             if row.start_column > 0 && decorations.settings.show_wrap_indicator {
-                let size = metrics.character_width.clamp(8.0, 12.0);
+                let mut size = (metrics.character_width * 1.5)
+                    .clamp(12.0, 18.0)
+                    .min(metrics.line_height * 0.75);
+                if !decorations.settings.show_line_numbers {
+                    size = size.min(metrics.hidden_indicator_width);
+                }
                 let x = if decorations.settings.show_line_numbers {
                     bounds.x + line_number_left_x(metrics, size)
                 } else {
@@ -273,7 +278,7 @@ pub(super) fn draw_plan<Renderer>(
                         height: size,
                     },
                     gutter_bounds,
-                    style.line_numbers.scale_alpha(0.55),
+                    style.line_numbers,
                 );
             }
         }

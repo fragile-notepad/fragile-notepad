@@ -20,6 +20,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `f3ee4cfdc` | Preserve fractional scroll offsets until physical-pixel drawing |
 | `9efcdf274` | Intersect nested scrollable update viewports with parent clipping |
 | `3e309ef55` | Reset retained scrollable state when its widget ID changes |
+| `6c9b87d37` | Probe image file contents when identifying its format |
 
 ## Application patches
 

@@ -1,63 +1,30 @@
 # Local encoding_rs changes
 
-[Upstream](https://github.com/hsivonen/encoding_rs) revision:
-`229d34374bde30c8b9603a03654d7c308ade5df1`.
+Base: `229d34374bde30c8b9603a03654d7c308ade5df1`.
+Upstream: https://github.com/hsivonen/encoding_rs.
 
 `src/lib.rs` exposes `oem`; `src/oem.rs` adds encoding/decoding, labels, and
 tables for CP437, CP720, CP737, CP775, CP850, CP852, CP855, CP857, CP858,
 CP860, CP861, CP862, CP863, CP865, CP866, and CP869.
 
-## Upstream backports
+## Backports
 
-Audited the changes from the original revision through upstream
-`a155adc7271c9e507556d053c95b459186671d2a` (0.8.42) on 2026-10-08.
-The original revision remains the base for this selective backport.
+| Upstream commits | Change |
+| --- | --- |
+| `a074922` | Reserve complete two-byte/four-byte output before consuming legacy characters |
+| `aa6c866`, `98f0e5a`, `36db69e`, `5063e28` | Initialize spare capacity before writing; update String/Vec lengths after conversion and assert capacity limits |
+| `9451175` | Zero borrowed string destinations on unwinding; use `scopeguard` without default features to preserve no-std builds |
+| `9cfe36a` | Annotate constructor output lifetimes to resolve compiler warnings |
 
-- `a074922023d74acbc56ee53aa931978315419916`: reserve the complete
-  two-byte or four-byte destination before consuming a non-ASCII character
-  in legacy encoders. Regression coverage exercises UTF-8 and UTF-16 inputs
-  with a destination that is one byte short, including resuming conversion.
+Requires Rust 1.60 for `Vec::spare_capacity_mut`. Portable initialization fully
+zeros spare output capacity instead of using upstream's page-touching/assembly
+optimization, costing O(spare capacity) work per call. Oversized reused buffers
+add overhead; the application's loader sizes a fresh String for each chunk.
 
-- `aa6c866206162ee8dc22521a0adaa40948ed03e8`,
-  `98f0e5a623219e61877da1a4c64252baebd9ce16`, and
-  `36db69e88d2c5a6e39e209005cf89a4e6dc1f4ce`: write into spare capacity
-  before increasing `String`/`Vec` lengths, and assert the length stays within
-  capacity in release builds. The initialization helper uses upstream's
-  original full-zeroing path for every target to preserve portability without
-  importing the later assembly-based optimization. The pointer is obtained
-  after initialization, as in `5063e286befaa4a1cf36034b3efac4c4d6e2e168`.
-  This requires Rust 1.60 for `Vec::spare_capacity_mut`; existing APIs and the
-  local OEM module are preserved. Regression coverage catches reuse of a
-  finished decoder and verifies the destination retains its contents, length,
-  and capacity, with and without replacement.
+## Checks
 
-- `945117503ea6b67aefce20363dcddb4b2bad7a98`: guard decoder and UTF-16
-  conversion destinations of type `&mut str` so they are zeroed on unwinding
-  and remain valid UTF-8. This adds upstream's `scopeguard` dependency with
-  default features disabled, retaining no-std builds. Regression coverage
-  checks unwinding in both decoder modes and UTF-16 partial conversion.
+Run the standalone development tests from the repository root:
 
-Skipped the broad SIMD/ASCII rewrite and CPU detection dependencies,
-edition migration, Debug implementations, lint/doc-only edits, and release
-version bumps. They are outside these targeted backports; the crate version
-continues to identify the original 0.8.35 base.
-
-
-- `9cfe36a46ee303c50a7b437bca5c86477d065ea6`: annotate the elided output
-  lifetimes of internal source/destination constructors, resolving six
-  `mismatched_lifetime_syntaxes` diagnostics with current Rust compilers.
-  This retains the existing API's inferred lifetime relationships.
-
-Additional scalar ASCII audit: all source/destination offsets from 0 through 7,
-lengths from 0 through 64, and each possible first non-ASCII position (137,280
-cases) preserved the expected ASCII prefix, code unit, and consumed length.
-This targeted check passed with the existing scalar implementation; it does
-not cover the optional nightly SIMD paths or substitute for the complete
-upstream architecture rewrite.
-
-
-Portable initialization zeros all spare output bytes on each call, costing
-O(spare capacity) work. The application's chunked loader creates a fresh
-output String sized for each chunk, avoiding repeated scans of a large
-reused destination. Callers reusing oversized buffers for small chunks may
-see additional overhead compared with upstream's page-touching optimization.
+```sh
+cargo test --manifest-path vendor/encoding_rs/Cargo.toml --tests
+```

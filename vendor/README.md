@@ -14,6 +14,7 @@ Patches: [Iced](iced/LOCAL_CHANGES.md), [Cryoglyph](cryoglyph/LOCAL_CHANGES.md),
 
 ## Updates
 
-Compare upstream revisions, port selected changes, and update provenance and patch
-notes. Run [application checks](../README.md#checks) and affected vendor tests
-with the application's lockfile (`--locked`).
+Compare upstream revisions, port selected fixes, and update patch provenance.
+Run [application checks](../README.md#checks) and affected Iced/Cryoglyph tests
+with `--locked`; [encoding_rs checks](encoding_rs/LOCAL_CHANGES.md#checks) use its
+standalone manifest.

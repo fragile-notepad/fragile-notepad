@@ -39,7 +39,7 @@ Alongside the [application checks](README.md#checks), renderer changes need:
 
 ```sh
 cargo test --locked -p iced_graphics --lib
-cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
+cargo test --locked -p iced_tiny_skia --lib
 cargo test --locked -p iced_winit -p iced_wgpu --lib
 ```
 

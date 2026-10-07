@@ -30,3 +30,14 @@ The original revision remains the base for this selective backport.
   local OEM module are preserved. Regression coverage catches reuse of a
   finished decoder and verifies the destination retains its contents, length,
   and capacity, with and without replacement.
+
+- `945117503ea6b67aefce20363dcddb4b2bad7a98`: guard decoder and UTF-16
+  conversion destinations of type `&mut str` so they are zeroed on unwinding
+  and remain valid UTF-8. This adds upstream's `scopeguard` dependency with
+  default features disabled, retaining no-std builds. Regression coverage
+  checks unwinding in both decoder modes and UTF-16 partial conversion.
+
+Skipped the broad SIMD/ASCII rewrite and CPU detection dependencies,
+edition migration, Debug implementations, lint/doc-only edits, and release
+version bumps. They are outside these targeted backports; the crate version
+continues to identify the original 0.8.35 base.

@@ -4035,8 +4035,15 @@ impl Decoder {
         // to overwrite trailing garbage that may have been written. Then we also
         // overwrite a possible partial UTF-8 byte sequence after that. Then the
         // rest must be valid on the assumption that `dst` was valid to begin with.
-        let bytes: &mut [u8] = unsafe { dst.as_bytes_mut() };
-        let (result, read, written, replaced) = self.decode_to_utf8(src, bytes, last);
+        // In case of a panic, the `ScopeGuard` zeros the whole slice, which ensures
+        // it's valid UTF-8 in an use-after-panic scenario when unwinding is enabled.
+        // (Relevant only if there's a panic due to a crate-internal bug. Panics
+        // arising from misuse of the public API don't need this guard and end up
+        // zeroing the slice unnecessarily.)
+        let mut bytes = scopeguard::guard(unsafe { dst.as_bytes_mut() }, |bytes| {
+            bytes.iter_mut().for_each(|b| *b = 0)
+        });
+        let (result, read, written, replaced) = self.decode_to_utf8(src, &mut bytes, last);
         let len = bytes.len();
         let mut trail = written;
         // Non-UTF-8 ASCII-compatible decoders may write up to `MAX_STRIDE_SIZE`
@@ -4053,6 +4060,8 @@ impl Decoder {
             bytes[trail] = 0;
             trail += 1;
         }
+        // Defuse the zeroing guard.
+        let _ = scopeguard::ScopeGuard::<&mut [u8], _>::into_inner(bytes);
         (result, read, written, replaced)
     }
 
@@ -4150,8 +4159,16 @@ impl Decoder {
         // to overwrite trailing garbage that may have been written. Then we also
         // overwrite a possible partial UTF-8 byte sequence after that. Then the
         // rest must be valid on the assumption that `dst` was valid to begin with.
-        let bytes: &mut [u8] = unsafe { dst.as_bytes_mut() };
-        let (result, read, written) = self.decode_to_utf8_without_replacement(src, bytes, last);
+        // In case of a panic, the `ScopeGuard` zeros the whole slice, which ensures
+        // it's valid UTF-8 in an use-after-panic scenario when unwinding is enabled.
+        // (Relevant only if there's a panic due to a crate-internal bug. Panics
+        // arising from misuse of the public API don't need this guard and end up
+        // zeroing the slice unnecessarily.)
+        let mut bytes = scopeguard::guard(unsafe { dst.as_bytes_mut() }, |bytes| {
+            bytes.iter_mut().for_each(|b| *b = 0)
+        });
+        let (result, read, written) =
+            self.decode_to_utf8_without_replacement(src, &mut bytes, last);
         let len = bytes.len();
         let mut trail = written;
         // Non-UTF-8 ASCII-compatible decoders may write up to `MAX_STRIDE_SIZE`
@@ -4168,6 +4185,8 @@ impl Decoder {
             bytes[trail] = 0;
             trail += 1;
         }
+        // Defuse the zeroing guard.
+        let _ = scopeguard::ScopeGuard::<&mut [u8], _>::into_inner(bytes);
         (result, read, written)
     }
 

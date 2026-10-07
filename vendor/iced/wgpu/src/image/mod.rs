@@ -1,3 +1,4 @@
+use crate::nudge;
 pub(crate) mod cache;
 pub(crate) use cache::Cache;
 
@@ -266,7 +267,7 @@ impl State {
                     let bounds = *bounds * scale;
                     let clip_bounds = *clip_bounds * scale;
                     let (bounds, clip_bounds) = if image.snap {
-                        (bounds.round(), clip_bounds.round())
+                        (nudge::round(bounds), nudge::round(clip_bounds))
                     } else {
                         (bounds, clip_bounds)
                     };
@@ -317,8 +318,8 @@ impl State {
                     bounds,
                     clip_bounds,
                 } => {
-                    let bounds = (*bounds * scale).round();
-                    let clip_bounds = (*clip_bounds * scale).round();
+                    let bounds = nudge::round(*bounds * scale);
+                    let clip_bounds = nudge::round(*clip_bounds * scale);
 
                     if bounds.width < 1.0 || bounds.height < 1.0 {
                         continue;

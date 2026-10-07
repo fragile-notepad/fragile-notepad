@@ -80,6 +80,8 @@ impl Pipeline {
                     "\n",
                     include_str!("../shader/quad.wgsl"),
                     "\n",
+                    include_str!("../shader/quad/snap.wgsl"),
+                    "\n",
                     include_str!("../shader/vertex.wgsl"),
                     "\n",
                     include_str!("../shader/quad/solid.wgsl"),

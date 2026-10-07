@@ -6,6 +6,8 @@ use crate::core::{Point, Rectangle, Size, Transformation, Vector};
 use crate::graphics::Antialiasing;
 use crate::graphics::mesh::{self, Mesh};
 
+use crate::nudge;
+
 use rustc_hash::FxHashMap;
 use std::collections::hash_map;
 use std::sync::Arc;
@@ -406,8 +408,7 @@ impl Layer {
 
         for mesh in meshes {
             let clip_bounds = mesh.clip_bounds() * transformation;
-            let snap_distance = clip_bounds
-                .snap()
+            let snap_distance = nudge::snap(clip_bounds)
                 .map(|snapped_bounds| {
                     Point::new(snapped_bounds.x as f32, snapped_bounds.y as f32)
                         - clip_bounds.position()
@@ -478,7 +479,7 @@ impl Layer {
         for mesh in meshes {
             let Some(clip_bounds) = bounds
                 .intersection(&(mesh.clip_bounds() * transformation))
-                .and_then(Rectangle::snap)
+                .and_then(nudge::snap)
             else {
                 match mesh {
                     Mesh::Solid { buffers, .. } => {

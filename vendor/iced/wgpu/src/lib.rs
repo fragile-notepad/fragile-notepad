@@ -32,6 +32,7 @@ pub mod geometry;
 mod buffer;
 mod color;
 mod engine;
+mod nudge;
 mod quad;
 mod text;
 mod triangle;
@@ -467,7 +468,7 @@ impl Renderer {
 
             if physical_bounds
                 .intersection(&clip_bounds)
-                .and_then(Rectangle::snap)
+                .and_then(nudge::snap)
                 .is_none()
             {
                 continue;
@@ -632,7 +633,7 @@ impl Renderer {
                 continue;
             };
 
-            let Some(scissor_rect) = physical_bounds.snap() else {
+            let Some(scissor_rect) = nudge::snap(physical_bounds) else {
                 continue;
             };
 
@@ -700,7 +701,7 @@ impl Renderer {
 
                     if let Some(clip_bounds) = (instance.bounds * scale)
                         .intersection(&physical_bounds)
-                        .and_then(Rectangle::snap)
+                        .and_then(nudge::snap)
                     {
                         render_pass.set_viewport(
                             bounds.x,
@@ -812,7 +813,7 @@ impl Renderer {
                     !layer.is_empty()
                         && physical_bounds
                             .intersection(&(layer.bounds * scale_factor))
-                            .is_some_and(|viewport| viewport.snap().is_some())
+                            .is_some_and(|viewport| nudge::snap(viewport).is_some())
                 })
                 .count()
         });

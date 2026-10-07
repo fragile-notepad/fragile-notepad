@@ -21,6 +21,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `9efcdf274` | Intersect nested scrollable update viewports with parent clipping |
 | `3e309ef55` | Reset retained scrollable state when its widget ID changes |
 | `6c9b87d37` | Probe image file contents when identifying its format |
+| `044364c029` | Align CPU clips and GPU quad edges using the same pixel nudge; preserve signed image bounds and snap(false) |
 
 ## Application patches
 

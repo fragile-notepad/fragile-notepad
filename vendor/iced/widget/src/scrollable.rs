@@ -398,6 +398,15 @@ where
     fn diff(&mut self, tree: &mut Tree) {
         tree.diff_children(std::slice::from_mut(&mut self.content));
 
+        let state = tree.state.downcast_mut::<State>();
+
+        if state.last_id != self.id {
+            *state = State {
+                last_id: self.id.clone(),
+                ..State::default()
+            };
+        }
+
         let size = self.content.as_widget().size();
 
         if self.direction.horizontal().is_none() {
@@ -1536,7 +1545,7 @@ fn notify_viewport<Message>(
     true
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct State {
     offset_y: Offset,
     offset_x: Offset,
@@ -1548,6 +1557,7 @@ struct State {
     last_status: Option<Status>,
     smooth_motion: Option<SmoothMotion>,
     wheel_input: WheelScrollInput,
+    last_id: Option<widget::Id>,
 }
 
 /// Distinguishes whole wheel steps from precise scrolling by their input
@@ -1624,6 +1634,7 @@ impl Default for State {
             last_status: None,
             smooth_motion: None,
             wheel_input: WheelScrollInput::default(),
+            last_id: None,
         }
     }
 }

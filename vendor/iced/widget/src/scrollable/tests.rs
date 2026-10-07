@@ -105,6 +105,37 @@ fn update(
 }
 
 #[test]
+fn changing_scrollable_identity_resets_position_and_pending_interactions() {
+    let make = |id| smooth_widget().id(id);
+    let mut scrollable = make("first");
+    let mut tree = Tree::empty();
+    tree.diff(&mut scrollable as &mut dyn Widget<(), Theme, ()>);
+    let content = Rectangle::with_size(Size::new(1000.0, 1000.0));
+    let state = tree.state.downcast_mut::<State>();
+    state.scroll_to(AbsoluteOffset {
+        x: None,
+        y: Some(30.0),
+    });
+    assert!(state.queue_smooth_scroll(Vector::new(0.0, 60.0), BOUNDS, content, Instant::now()));
+    state.interaction = Interaction::YScrollerGrabbed(0.5);
+
+    let mut rebuilt = make("first");
+    tree.diff(&mut rebuilt as &mut dyn Widget<(), Theme, ()>);
+    let state = tree.state.downcast_ref::<State>();
+    assert_eq!(state.offset_y, Offset::Absolute(30.0));
+    assert!(state.smooth_motion.is_some());
+    assert!(state.scrollers_grabbed());
+
+    let mut replacement = make("second");
+    tree.diff(&mut replacement as &mut dyn Widget<(), Theme, ()>);
+    let state = tree.state.downcast_ref::<State>();
+    assert_eq!(state.offset_y, Offset::Absolute(0.0));
+    assert!(state.smooth_motion.is_none());
+    assert!(!state.scrollers_grabbed());
+    assert_eq!(state.last_id, Some(widget::Id::from("second")));
+}
+
+#[test]
 fn child_updates_receive_the_visible_parent_viewport_in_content_coordinates() {
     let observed = Cell::new(None);
     let mut scrollable = Scrollable::<(), Theme, ()>::new(Element::new(ViewportContent(&observed)))

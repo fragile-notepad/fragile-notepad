@@ -19,6 +19,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `fc2cfe937` | Keep toggler geometry in logical coordinates with crisp disabled |
 | `f3ee4cfdc` | Preserve fractional scroll offsets until physical-pixel drawing |
 | `9efcdf274` | Intersect nested scrollable update viewports with parent clipping |
+| `3e309ef55` | Reset retained scrollable state when its widget ID changes |
 
 ## Application patches
 

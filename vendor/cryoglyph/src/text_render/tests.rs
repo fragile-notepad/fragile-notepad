@@ -342,3 +342,51 @@ fn instance() -> &'static wgpu::Instance {
         })
     })
 }
+
+#[test]
+fn cached_glyphs_remain_protected_until_the_next_trim() {
+    let Ok(adapter) = block_on(instance().request_adapter(&Default::default())) else {
+        eprintln!("Skipping Vulkan glyph generation validation: no Vulkan adapter");
+        return;
+    };
+    let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
+    let cache = Cache::new(&device);
+    let mut atlas = TextAtlas::new(&device, &queue, &cache, wgpu::TextureFormat::Rgba8Unorm);
+    let mut viewport = Viewport::new(&device, &cache);
+    viewport.update(
+        &queue,
+        Resolution {
+            width: 512,
+            height: 256,
+        },
+    );
+    let mut renderer = TextRenderer::new(&mut atlas, &device, Default::default(), None);
+    let mut fonts = FontSystem::new();
+    let mut swash = SwashCache::new();
+    let buffer = text(&mut fonts, "Cached glyph protection", 18.0);
+    for _ in 0..2 {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        renderer
+            .prepare(
+                &device,
+                &queue,
+                &mut encoder,
+                &mut fonts,
+                &mut atlas,
+                &viewport,
+                [area(&buffer, 0)],
+                &mut swash,
+            )
+            .unwrap();
+        queue.submit([encoder.finish()]);
+        let entries = atlas.mask_atlas.glyph_cache.len();
+        assert!(entries > 0);
+        let size = atlas.mask_atlas.size as usize;
+        assert!(atlas.mask_atlas.try_allocate(size, size).is_none());
+        assert_eq!(atlas.mask_atlas.glyph_cache.len(), entries);
+        atlas.trim();
+    }
+    let size = atlas.mask_atlas.size as usize;
+    assert!(atlas.mask_atlas.try_allocate(size, size).is_some());
+    assert!(atlas.mask_atlas.glyph_cache.is_empty());
+}

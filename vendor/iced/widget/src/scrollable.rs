@@ -557,7 +557,7 @@ where
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         const AUTOSCROLL_DEADZONE: f32 = 20.0;
         const AUTOSCROLL_SMOOTHNESS: f32 = 1.5;
@@ -781,11 +781,7 @@ where
                     cursor,
                     renderer,
                     shell,
-                    &Rectangle {
-                        y: bounds.y + translation.y,
-                        x: bounds.x + translation.x,
-                        ..bounds
-                    },
+                    &(bounds.intersection(viewport).unwrap_or_default() + translation),
                 );
 
                 if !had_input_method

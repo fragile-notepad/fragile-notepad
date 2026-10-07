@@ -18,6 +18,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `8d1955dc1` | Rebuild invalidated widgets during redraw even without messages |
 | `fc2cfe937` | Keep toggler geometry in logical coordinates with crisp disabled |
 | `f3ee4cfdc` | Preserve fractional scroll offsets until physical-pixel drawing |
+| `9efcdf274` | Intersect nested scrollable update viewports with parent clipping |
 
 ## Application patches
 

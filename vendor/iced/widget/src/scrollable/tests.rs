@@ -4,6 +4,43 @@ use std::cell::Cell;
 
 struct CursorContent<'a>(&'a Cell<Option<bool>>);
 
+struct ViewportContent<'a>(&'a Cell<Option<Rectangle>>);
+
+impl Widget<(), Theme, ()> for ViewportContent<'_> {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(1000.0), Length::Fixed(1000.0))
+    }
+
+    fn layout(&mut self, _: &mut Tree, _: &(), _: &layout::Limits) -> layout::Node {
+        layout::Node::new(Size::new(1000.0, 1000.0))
+    }
+
+    fn draw(
+        &self,
+        _: &Tree,
+        _: &mut (),
+        _: &Theme,
+        _: &renderer::Style,
+        _: Layout<'_>,
+        _: mouse::Cursor,
+        _: &Rectangle,
+    ) {
+    }
+
+    fn update(
+        &mut self,
+        _: &mut Tree,
+        _: &Event,
+        _: Layout<'_>,
+        _: mouse::Cursor,
+        _: &(),
+        _: &mut Shell<'_, ()>,
+        viewport: &Rectangle,
+    ) {
+        self.0.set(Some(*viewport));
+    }
+}
+
 impl Widget<(), Theme, ()> for CursorContent<'_> {
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(1000.0), Length::Fixed(1000.0))
@@ -65,6 +102,47 @@ fn update(
         &BOUNDS,
     );
     shell.redraw_request()
+}
+
+#[test]
+fn child_updates_receive_the_visible_parent_viewport_in_content_coordinates() {
+    let observed = Cell::new(None);
+    let mut scrollable = Scrollable::<(), Theme, ()>::new(Element::new(ViewportContent(&observed)))
+        .width(100)
+        .height(100);
+    let mut tree = Tree::empty();
+    tree.diff(&mut scrollable as &mut dyn Widget<(), Theme, ()>);
+    let node = scrollable.layout(
+        &mut tree,
+        &(),
+        &layout::Limits::new(Size::ZERO, BOUNDS.size()),
+    );
+    tree.state
+        .downcast_mut::<State>()
+        .scroll_to(AbsoluteOffset {
+            x: None,
+            y: Some(30.0),
+        });
+    let mut messages = Vec::new();
+    let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
+    let viewport = Rectangle {
+        x: 20.0,
+        y: 40.0,
+        width: 40.0,
+        height: 30.0,
+    };
+
+    scrollable.update(
+        &mut tree,
+        &Event::Window(window::Event::RedrawRequested(Instant::now())),
+        Layout::new(&node),
+        mouse::Cursor::Available(BOUNDS.center()),
+        &(),
+        &mut shell,
+        &viewport,
+    );
+
+    assert_eq!(observed.get(), Some(viewport + Vector::new(0.0, 30.0)));
 }
 
 #[test]

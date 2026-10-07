@@ -41,3 +41,23 @@ Skipped the broad SIMD/ASCII rewrite and CPU detection dependencies,
 edition migration, Debug implementations, lint/doc-only edits, and release
 version bumps. They are outside these targeted backports; the crate version
 continues to identify the original 0.8.35 base.
+
+
+- `9cfe36a46ee303c50a7b437bca5c86477d065ea6`: annotate the elided output
+  lifetimes of internal source/destination constructors, resolving six
+  `mismatched_lifetime_syntaxes` diagnostics with current Rust compilers.
+  This retains the existing API's inferred lifetime relationships.
+
+Additional scalar ASCII audit: all source/destination offsets from 0 through 7,
+lengths from 0 through 64, and each possible first non-ASCII position (137,280
+cases) preserved the expected ASCII prefix, code unit, and consumed length.
+This targeted check passed with the existing scalar implementation; it does
+not cover the optional nightly SIMD paths or substitute for the complete
+upstream architecture rewrite.
+
+
+Portable initialization zeros all spare output bytes on each call, costing
+O(spare capacity) work. The application's chunked loader creates a fresh
+output String sized for each chunk, avoiding repeated scans of a large
+reused destination. Callers reusing oversized buffers for small chunks may
+see additional overhead compared with upstream's page-touching optimization.

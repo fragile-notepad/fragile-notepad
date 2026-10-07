@@ -1,39 +1,30 @@
 # Vulkan rendering
 
-Hardware uses explicit wgpu Vulkan and portability features across platforms.
-Software startup creates no Vulkan instance, pipeline, or GPU buffer.
-The [hybrid handoff](SEAMLESS_HYBRID_RENDERING.md#handoff) owns preparation,
-warm-up, presentation, and rollback.
+Hardware uses wgpu Vulkan with portability support. Software startup allocates
+no Vulkan resources; the [hybrid handoff](SEAMLESS_HYBRID_RENDERING.md#handoff)
+owns preparation and rollback.
 
 ## Resources
 
-- About's WGSL trail uses one engine pipeline and 16-byte immediate parameters.
-  Devices without sufficient `IMMEDIATES` support reuse a uniform/binding per
-  widget. Widget and recorded-frame ownership retain resources until both end.
-- Quad transforms use 80-byte immediates and image transforms use 64 bytes when
-  device limits allow; each pipeline otherwise uses uniforms. Devices request
-  supported immediates up to 128 bytes. Image sampler bindings are engine-wide.
-- Quad buffers allocate on first use and grow for actual batches. Mesh, MSAA,
-  gradient, and image pipelines initialize lazily and are shared across engine clones.
-- Image caches and workers initialize on demand. Small rasters use a lazy
-  256-square atlas; larger images/SVGs use 1024-square pages. Atlas growth respects
-  device limits; failed fragmented reservations roll back. Full pools spill to
-  another pool or independent textures; impossible uploads report an error.
-- Uploads over 100 KiB use temporary mapped buffers retained through GPU completion.
-  Staging belts start at 4 KiB and grow with writes.
-- Quad, image, and glyph buffers retain CPU data and upload changed spans.
-  Growth invalidates retained copies. Glyph atlas entries remain marked in use;
-  pending draws retain old buffer handles.
-
-Windows paints an offscreen initial frame during the native opening fade.
-Synchronous window-size results update the viewport even if the backend emits
-no later resize event. Animated images preserve fractional physical positions.
+- Pipelines, caches, workers, and buffers initialize on demand; engine clones
+  share pipelines. Parameters use supported immediates, otherwise uniforms.
+- Widgets and recorded frames jointly retain custom resources. Temporary uploads
+  and replaced buffers survive pending GPU work; in-use glyphs remain protected.
+- Atlas allocations respect device limits and roll back failed reservations.
+  Full pools spill to additional pools or textures; impossible uploads report errors.
 
 ## Runtime and maintenance
 
 Windows uses the graphics driver's Vulkan runtime. Linux needs a Vulkan loader
-and driver; CI uses Lavapipe. macOS uses the loader and MoltenVK packaged by
+and driver. macOS uses the loader and MoltenVK packaged by
 [scripts/package-macos.sh](scripts/package-macos.sh).
 
-See [development checks](DEVELOPMENT.md#checks-and-previews),
+Renderer tests require a Vulkan adapter. CI selects Lavapipe on Linux and
+SwiftShader on Windows using `scripts/setup-ci-vulkan.*`.
+For macOS checks, install `molten-vk vulkan-loader vulkan-tools` with Homebrew,
+then source `scripts/setup-macos-vulkan.sh` and `scripts/ci.sh` in the same shell;
+a new system shell may lose `DYLD_LIBRARY_PATH` through SIP.
+
+See [application checks](README.md#checks),
+[renderer checks and tracing](SEAMLESS_HYBRID_RENDERING.md#checks-and-tracing),
 [packaging](PACKAGING.md), and [Iced patches](vendor/iced/LOCAL_CHANGES.md).

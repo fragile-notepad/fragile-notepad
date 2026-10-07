@@ -1,9 +1,9 @@
 # Illustrations
 
-[Bunny artwork](bunny/README.md) supplies application branding.
-`macaw-quill.svg` supplies the decorative About quill, generated as
-400×440 straight RGBA by `python scripts/rasterize_illustrations.py`.
-The standard asset scripts regenerate all illustrations.
+[Bunny artwork](bunny/README.md) supplies application branding; `macaw-quill.svg`
+supplies the About quill. Regenerate all illustrations with the
+[asset scripts](../../README.md#build-from-source), or just the quill with
+`python scripts/rasterize_illustrations.py`.
 
 Original artwork and derived rasters are **all rights reserved**, excluded from
 the code's BSD license; see [LICENSE](LICENSE).

@@ -1,7 +1,5 @@
 # Local dependencies
 
-Customized dependencies used by Fragile Notepad.
-
 | Dependency | Upstream | Original revision | License |
 | --- | --- | --- | --- |
 | Iced | https://github.com/iced-rs/iced | `ddd7c42a9ba625b219e5e8062ff9be83eea467c5` | [MIT](iced/LICENSE) |
@@ -11,7 +9,11 @@ Customized dependencies used by Fragile Notepad.
 Additional notices: [Druid layout code](iced/core/src/layout/DRUID_LICENSE)
 and [encoding_rs copyright](encoding_rs/COPYRIGHT).
 
-See [Iced changes](iced/LOCAL_CHANGES.md),
-[Cryoglyph changes](cryoglyph/LOCAL_CHANGES.md),
-[encoding_rs changes](encoding_rs/LOCAL_CHANGES.md), and the
-[update process](../DEVELOPMENT.md#vendored-dependencies).
+Patches: [Iced](iced/LOCAL_CHANGES.md), [Cryoglyph](cryoglyph/LOCAL_CHANGES.md),
+[encoding_rs](encoding_rs/LOCAL_CHANGES.md).
+
+## Updates
+
+Compare upstream revisions, port selected changes, and update provenance and patch
+notes. Run [application checks](../README.md#checks) and affected vendor tests
+with the application's lockfile (`--locked`).

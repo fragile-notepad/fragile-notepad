@@ -7,25 +7,22 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 
 | Upstream commits | Change |
 | --- | --- |
-| `b54f2c599`, `8caf9e44f` | Drop expired redraw deadlines when merging event-loop control flow |
+| `b54f2c599`, `8caf9e44f` | Drop expired redraw deadlines |
 | `8e05eade2`, `40339edb7` | Throttle surface-error recovery; preserve strict handoff rollback |
-| `ca79fdb70` | Preserve remaining events and clear layout when an overlay disappears |
+| `ca79fdb70` | Preserve events and clear layout when an overlay disappears |
 | `7c6ce8789` | Preserve stronger mouse interaction across nested overlays |
 | `3c81aac2e` | Retain scrollbar interaction across widget rebuilds |
 | `d8dabb4ab` | Suppress content cursor while dragging a scrollbar |
 
 ## Application patches
 
-- Software-first renderer replacement with async prepare, offscreen warm-up,
-  commit, first-presentation checks, and rollback.
-- Bounded software damage/scroll matching, retained frames, resampling caches,
-  and reusable clipping storage.
-- Vulkan feature selection, optional immediate parameters, shared lazy pipelines,
-  demand-sized buffers, bounded atlases, and changed-span uploads.
-- Initial Windows offscreen frame painting during native opening fade.
-- Apply synchronous window-size results to viewport and redraw state.
-- `Image::snap(false)` supports fractional image bounds in both renderers.
+- Software-first handoff with offscreen warm-up, presentation checks, and rollback.
+- Bounded software damage/scroll matching, retained frames, and reusable image/clip caches.
+- Vulkan portability, optional immediates, shared lazy resources, bounded atlases,
+  and changed-span uploads.
+- Windows opening-fade painting and synchronous resize viewport updates.
+- Fractional image bounds through `Image::snap(false)` in both renderers.
 
 Details: [hybrid rendering](../../SEAMLESS_HYBRID_RENDERING.md),
 [Vulkan resources](../../VULKAN_RENDERING.md),
-[update process](../../DEVELOPMENT.md#vendored-dependencies).
+[update process](../README.md#updates).

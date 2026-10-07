@@ -1,40 +1,34 @@
 # Application routing
 
-`app.rs` composes state; `bootstrap.rs` initializes it and `subscriptions.rs`
-supplies runtime events. The catalog in `message.rs` declares each message's
-feature and shutdown policy and generates exhaustive routing.
+`App` owns workflows and task cancellation; services return typed results.
+`WorkbenchView` borrows state for UI widgets, which emit commands. `message.rs`
+declares feature routing and shutdown policy; `update.rs` wires subscribers.
 
-An update dispatches one command, collects mutation events, delivers them FIFO,
-and runs reactions in dependency order until synchronous work settles.
-Iced executes async tasks; preparation order does not determine completion order.
+Updates dispatch a command, deliver mutation events FIFO, and run reactions until
+synchronous work settles. Async completion order is independent of preparation order.
 
 ## Ownership
 
-Workspace structural operations journal events. Mutable document access compares
-scalar stamps only for touched documents at the update boundary. Use document
-editing/setter methods to maintain revisions and preserve immutable document IDs.
-The journal avoids copying text or scanning every tab; structural reorderings
-rebuild the ID index.
+Workspace operations journal changes; document access compares scalar stamps at
+update boundaries. Use document editing/setter methods to maintain revisions and
+immutable IDs. Structural reorderings rebuild the ID index.
 
-File workflows own load handles and save/close/reload queues. Session state owns
-recovery and persistence. Analysis, outline, and syntax own their workers and
-stale-result checks. Subscribers receive their state and required inputs, never
-`&mut App`; wiring belongs in `update.rs`.
+File workflows own load/save/close queues; sessions own persistence and recovery;
+analysis features own workers and stale-result checks. Subscribers receive feature
+state and required inputs, never `&mut App`.
 
-Settings writes record intentional edits at mutation sites, including early
-startup edits. Session persistence observes workspace changes.
+Record intentional settings edits at mutation sites; session persistence observes
+workspace changes.
 
 ## Scheduling and shutdown
 
-`bus.rs` preserves lifecycle events and coalesces invalidations only while queued.
-Removing a key before delivery permits later republication. Events carry IDs and
-facts rather than snapshots; queue storage is reused.
+`bus.rs` preserves lifecycle events and coalesces invalidations only while queued;
+remove keys before delivery to permit republication. Events carry IDs and facts.
 
-Reactions merge repeated requests. File state settles before deferred search;
-search precedes workers and session persistence; analysis precedes syntax.
-Save-then-close remains an explicitly sequenced command.
+Reaction order: files → search → workers/session persistence; analysis → syntax.
+Save-then-close is explicitly sequenced.
 
-Shutdown rejects new user commands and IPC admission receipts. Background messages
-queue losslessly: successful exit discards them; failed exit replays them in order
-through `App::update`, each with its own update boundary, then resumes reactions.
-New async messages must declare their delivery policy.
+Shutdown rejects new commands and IPC admission. Background messages queue
+losslessly: successful exit discards them; failed exit replays them through separate
+`App::update` boundaries before reactions resume. Declare delivery policy for new
+async messages.

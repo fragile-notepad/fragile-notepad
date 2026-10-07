@@ -1,8 +1,7 @@
 # Hybrid rendering
 
-The default `hybrid-rendering` feature adds Vulkan to tiny-skia.
-`--no-default-features` builds only software rendering. Startup always uses
-`Backend::Software` with antialiasing and vsync disabled.
+Default `hybrid-rendering` builds start in tiny-skia with Vulkan handoff available.
+`--no-default-features` excludes Vulkan. Startup disables antialiasing and vsync.
 
 ## Policy
 
@@ -12,52 +11,37 @@ The default `hybrid-rendering` feature adds Vulkan to tiny-skia.
 | Value | Behavior |
 | --- | --- |
 | `software` | Suppress hardware requests |
-| `lazy-gpu` | Allow hardware handoff, preferring a low-power GPU |
-| `hardware-diagnostic` | Allow diagnostic handoff, preferring a high-performance GPU |
+| `lazy-gpu` | Prefer low-power Vulkan |
+| `hardware-diagnostic` | Prefer high-performance Vulkan |
 
-Recognized overrides win; invalid values are ignored and shown in About debug
-information. Loading saved lazy/diagnostic settings requests a boost when the main
-window opens; without saved settings, opening About can trigger it.
-Hardware requests select Vulkan. Keep `WGPU_BACKEND` unset or set to `vulkan`.
-`WGPU_POWER_PREF=low|high|none` overrides the adapter preference for diagnostics.
-The renderer is shared across windows and remains active after About closes.
-
-States are Software → PreparingHardware → Hardware, or Failed.
-Duplicate requests are suppressed. Failure retains software and suppresses retries
-for the process. Changing policy to software does not switch an active GPU back.
+Valid overrides win; invalid values are ignored and shown in About debug info.
+Saved hardware policies request a handoff when the main window opens; otherwise
+opening About can trigger it. Keep `WGPU_BACKEND` unset or `vulkan`;
+`WGPU_POWER_PREF=low|high|none` overrides adapter preference.
+All windows share the renderer. Failed handoffs disable retries and retain
+software. Software policy cannot reverse an active GPU handoff.
 
 ## Handoff
 
-`backend::prepare_warm_and_commit` reports `StrictHandoffOutcome` through
-`Message::BackendBoostConfigured`. The implementation spans vendored Iced's
-winit runtime, wgpu compositor, and fallback renderer.
+1. Prepare asynchronously and warm each live window offscreen while software draws.
+2. After software presents successfully, install warmed renderers and configure
+   surfaces, retaining software for rollback.
+3. Require each window's first GPU presentation before its deadline. Release
+   software on success; restore it on failure.
 
-1. Prepare a pending GPU compositor asynchronously while software stays active.
-2. Draw each live window into a pending renderer and warm it offscreen.
-   Completion polls use redraw deadlines; warm-up has a three-second timeout.
-3. Retain warmed renderers until a successful software presentation.
-4. Install them and configure visible surfaces, retaining software state for rollback.
-5. Require each live window's first GPU presentation within three seconds.
-   Success releases software resources; failure restores them.
+Warm-up has a deadline and retains resources through submission completion.
+Duplicate requests are suppressed; window closure and resizing update participation
+and dimensions. See [Vulkan resource ownership](VULKAN_RENDERING.md#resources).
 
-Software continues drawing during preparation. Warm-up owns recorded primitives
-and resources until submission completes. Closing or resizing windows updates
-handoff participation and dimensions. Prepare, warm, commit, presentation,
-cancellation, unsupported operations, and rollback failures have distinct outcomes.
+## Checks and tracing
 
-## Software resources
+Alongside the [application checks](README.md#checks), renderer changes need:
 
-Text scroll matching is bounded to 65,536 comparisons; exhausted searches redraw.
-Damage merging bounds cases above 256 regions with a union. Zero-damage frames
-share layer snapshots; opaque bounded scroll regions copy in place.
+```sh
+cargo test --locked -p iced_graphics --lib
+cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
+cargo test --locked -p iced_winit -p iced_wgpu --lib
+```
 
-Linear-image resampling caches up to 128 entries and 4 Mi pixels.
-Text clipping borrows full-width strips or reuses crop storage; clip masks reuse
-identical bounds. Animated images use fractional bounds with `Image::snap(false)`.
-
-About uses a shared pausable 60 Hz clock. Vulkan draws its trail procedurally;
-software generates the field on the CPU. Closing, clipping, and focus loss stop
-animation scheduling.
-
-See [Vulkan resource ownership](VULKAN_RENDERING.md) and
-[diagnostics and checks](DEVELOPMENT.md#renderer-diagnostics).
+Set `FRAGILE_PERF_TRACE=1` and optionally `FRAGILE_PERF_TRACE_DIR` for shared CSV
+traces. Use a fresh directory per capture; tracing adds formatting and I/O cost.

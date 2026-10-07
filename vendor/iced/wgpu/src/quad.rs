@@ -1,6 +1,9 @@
 mod gradient;
 mod solid;
 
+#[cfg(test)]
+mod tests;
+
 use gradient::Gradient;
 use solid::Solid;
 

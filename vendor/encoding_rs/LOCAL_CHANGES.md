@@ -17,3 +17,16 @@ The original revision remains the base for this selective backport.
   two-byte or four-byte destination before consuming a non-ASCII character
   in legacy encoders. Regression coverage exercises UTF-8 and UTF-16 inputs
   with a destination that is one byte short, including resuming conversion.
+
+- `aa6c866206162ee8dc22521a0adaa40948ed03e8`,
+  `98f0e5a623219e61877da1a4c64252baebd9ce16`, and
+  `36db69e88d2c5a6e39e209005cf89a4e6dc1f4ce`: write into spare capacity
+  before increasing `String`/`Vec` lengths, and assert the length stays within
+  capacity in release builds. The initialization helper uses upstream's
+  original full-zeroing path for every target to preserve portability without
+  importing the later assembly-based optimization. The pointer is obtained
+  after initialization, as in `5063e286befaa4a1cf36034b3efac4c4d6e2e168`.
+  This requires Rust 1.60 for `Vec::spare_capacity_mut`; existing APIs and the
+  local OEM module are preserved. Regression coverage catches reuse of a
+  finished decoder and verifies the destination retains its contents, length,
+  and capacity, with and without replacement.

@@ -490,19 +490,31 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
                 .spacing(5),
                 wrap_controls,
                 rule::horizontal(1).style(styles::utility_rule),
-                toggle_row(
-                    "Wrap indicator",
-                    settings.decorations.show_wrap_indicator,
-                    Message::DraftWrapIndicatorToggled
-                ),
-                toggle_row(
-                    "Wrap guide line",
-                    settings.decorations.show_wrap_guide,
-                    Message::DraftWrapGuideToggled
-                ),
-                utility::description(
-                    "Show continuation arrows and the wrap boundary when word wrap is on."
-                ),
+                column![
+                    toggle_row(
+                        "Wrap continuation markers",
+                        settings.decorations.show_wrap_indicator,
+                        Message::DraftWrapIndicatorToggled
+                    ),
+                    utility::description("Mark wrapped continuation lines in the gutter."),
+                ]
+                .spacing(5),
+                column![
+                    toggle_row(
+                        "Column guide",
+                        settings.decorations.show_wrap_guide,
+                        Message::DraftWrapGuideToggled
+                    ),
+                    container(
+                        text(format!(
+                            "Show the wrap boundary. With word wrap off, show the fixed column or column {}.",
+                            EditorSettings::DEFAULT_WRAP_COLUMN,
+                        ))
+                        .size(12),
+                    )
+                    .style(styles::info_muted),
+                ]
+                .spacing(5),
             ]
             .spacing(10)
             .into()

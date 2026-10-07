@@ -34,6 +34,8 @@ pub enum EditorAction {
         visible_rows: usize,
         text_width: u32,
         character_width_milli: u32,
+        font_size_milli: u32,
+        hint_factor_milli: Option<u32>,
     },
     ToggleFold(FoldRange),
     FoldCurrent,

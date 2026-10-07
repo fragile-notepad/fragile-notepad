@@ -356,6 +356,8 @@ fn wrapped_settings_and_pointer_affinity_reach_the_active_document() {
             visible_rows: 2,
             text_width: 34,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     assert_eq!(

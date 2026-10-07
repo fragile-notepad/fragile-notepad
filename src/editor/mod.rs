@@ -16,6 +16,7 @@ mod syntax_hints;
 pub mod viewport;
 pub mod widget;
 mod word;
+pub(crate) mod wrap_measurement;
 
 pub use action::{CaretMotion, EditorAction};
 pub use buffer::{EditDelta, EditorBuffer};

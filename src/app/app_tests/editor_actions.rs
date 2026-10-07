@@ -51,6 +51,8 @@ fn navigation_keeps_caret_visible_without_scrolling_visible_moves() {
             visible_rows: 10,
             text_width: 640,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     let _ = app.update(Message::EditorAction(

@@ -256,11 +256,15 @@ impl App {
                 visible_rows,
                 text_width,
                 character_width_milli,
+                font_size_milli,
+                hint_factor_milli,
             } => {
-                document.update_viewport_geometry(
+                document.update_viewport_geometry_with_typography(
                     visible_rows,
                     text_width as f32,
                     character_width_milli as f32 / 1000.0,
+                    font_size_milli as f32 / 1000.0,
+                    hint_factor_milli.map(|scale| scale as f32 / 1000.0),
                 );
                 document.set_word_wrap(self.settings.word_wrap);
                 document.finish_session_scroll_restore();

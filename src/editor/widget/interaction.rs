@@ -88,11 +88,17 @@ where
     let text_width =
         (bounds.width - context.metrics.text_origin_x(context.decorations) - 14.0).max(1.0) as u32;
     let character_width_milli = (context.metrics.character_width * 1000.0).max(1.0) as u32;
+    let font_size_milli = (text_size(context.metrics) * 1000.0).round().max(1.0) as u32;
+    let hint_factor_milli = renderer
+        .scale_factor()
+        .map(|scale| (scale * 1000.0).round().max(1.0) as u32);
     let geometry = (
         context.viewport_key,
         visible_rows,
         text_width,
         character_width_milli,
+        font_size_milli,
+        hint_factor_milli,
     );
     if state.viewport_geometry != Some(geometry) {
         state.viewport_geometry = Some(geometry);
@@ -100,6 +106,8 @@ where
             visible_rows,
             text_width,
             character_width_milli,
+            font_size_milli,
+            hint_factor_milli,
         }));
     }
 

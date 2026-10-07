@@ -121,7 +121,7 @@ pub(super) fn draw_plan<Renderer>(
     plan: &RenderPlan,
     style: EditorStyle,
     total_visible_rows: usize,
-    wrap_columns: Option<usize>,
+    wrap_guide_column: Option<usize>,
     fast_text: bool,
     caret_visible: bool,
     frame_id: u64,
@@ -151,28 +151,6 @@ pub(super) fn draw_plan<Renderer>(
         height: bounds.height,
     };
 
-    if decorations.settings.show_wrap_guide
-        && let Some(columns) = wrap_columns
-    {
-        let x = bounds.x
-            + scrolled_text_origin_x(layout, decorations)
-            + columns as f32 * metrics.character_width;
-        renderer.with_layer(scroll_text_clip_bounds, |renderer| {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x,
-                        y: bounds.y,
-                        width: 1.0,
-                        height: bounds.height,
-                    },
-                    ..renderer::Quad::default()
-                },
-                Background::Color(style.line_numbers.scale_alpha(0.20)),
-            );
-        });
-    }
-
     renderer.fill_quad(
         renderer::Quad {
             bounds: gutter_bounds,
@@ -198,6 +176,30 @@ pub(super) fn draw_plan<Renderer>(
                 Background::Color(style.active_line),
             );
         }
+    }
+
+    // Draw over row backgrounds so the guide stays visible on the active line.
+    // Its column remains independent of wrapping and scrolls with the text.
+    if decorations.settings.show_wrap_guide
+        && let Some(columns) = wrap_guide_column
+    {
+        let x = bounds.x
+            + scrolled_text_origin_x(layout, decorations)
+            + columns as f32 * metrics.character_width;
+        renderer.with_layer(scroll_text_clip_bounds, |renderer| {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x,
+                        y: bounds.y,
+                        width: 1.0,
+                        height: bounds.height,
+                    },
+                    ..renderer::Quad::default()
+                },
+                Background::Color(style.line_numbers.scale_alpha(0.20)),
+            );
+        });
     }
 
     let row_geometries = RowGeometries::new(
@@ -252,22 +254,26 @@ pub(super) fn draw_plan<Renderer>(
 
             if let Some(line_number) = row.line_number {
                 draw_line_number(renderer, line_number, bounds, row_y, metrics, style);
-            } else if row.start_column > 0 && decorations.settings.show_wrap_indicator {
-                let width = metrics.character_width * 2.0;
+            }
+            if row.start_column > 0 && decorations.settings.show_wrap_indicator {
+                let size = metrics.character_width.clamp(8.0, 12.0);
                 let x = if decorations.settings.show_line_numbers {
-                    bounds.x + line_number_left_x(metrics, width)
+                    bounds.x + line_number_left_x(metrics, size)
                 } else {
-                    bounds.x + gutter_bounds.width - width
+                    bounds.x + gutter_bounds.width - metrics.hidden_indicator_width
+                        + (metrics.hidden_indicator_width - size) / 2.0
                 };
-                draw_text(
+                draw_icon(
                     renderer,
-                    "↪".to_owned(),
-                    Point::new(x, row_y + text_baseline_offset(metrics)),
-                    Size::new(width, metrics.line_height),
-                    style.line_numbers.scale_alpha(0.55),
-                    text::Alignment::Left,
-                    metrics,
+                    HeroIcon::ArrowTurnDownRight,
+                    Rectangle {
+                        x,
+                        y: row_y + (metrics.line_height - size) / 2.0,
+                        width: size,
+                        height: size,
+                    },
                     gutter_bounds,
+                    style.line_numbers.scale_alpha(0.55),
                 );
             }
         }

@@ -87,6 +87,7 @@ pub struct AdvancedEditor<'a, Message> {
     caret_row: Option<usize>,
     caret_rows: &'a [(EditorPosition, usize)],
     scroll_speed: f32,
+    wrap_guide_column: usize,
     viewport_key: u64,
     cjk_context: Option<Arc<CjkContext>>,
     shortcuts: &'a ShortcutMap,
@@ -118,6 +119,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
             caret_row: None,
             caret_rows: &[],
             scroll_speed: 1.5,
+            wrap_guide_column: crate::core::EditorSettings::DEFAULT_WRAP_COLUMN,
             viewport_key: 0,
             cjk_context: None,
             shortcuts: &DEFAULT_SHORTCUTS,
@@ -164,6 +166,13 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
 
     pub fn scroll_speed(mut self, scroll_speed: f32) -> Self {
         self.scroll_speed = scroll_speed.max(0.0);
+        self
+    }
+
+    /// Sets the column guide when wrapping is off. Wrapped views use their
+    /// actual wrap boundary, including when it follows the window width.
+    pub fn wrap_guide_column(mut self, column: usize) -> Self {
+        self.wrap_guide_column = column.max(1);
         self
     }
 
@@ -316,7 +325,11 @@ where
                 &plan,
                 editor_style,
                 self.viewport.visible_row_count(),
-                self.viewport.wrap_columns(),
+                Some(
+                    self.viewport
+                        .wrap_columns()
+                        .unwrap_or(self.wrap_guide_column),
+                ),
                 fast_text,
                 caret_visible,
                 frame_id,

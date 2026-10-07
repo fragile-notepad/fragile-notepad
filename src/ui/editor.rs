@@ -38,6 +38,11 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
     .caret_row(document.caret_visible_row())
     .caret_rows(document.caret_row_affinities())
     .scroll_speed(settings.scroll_speed)
+    .wrap_guide_column(
+        settings
+            .wrap_column_limit
+            .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN),
+    )
     .shortcuts(&settings.shortcuts)
     .into();
 

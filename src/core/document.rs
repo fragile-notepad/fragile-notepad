@@ -5,6 +5,7 @@ use crate::core::encoding::{
     DecodedText, TextEncoding, encode_text, encode_utf8_chunks_for_save, strip_text_bom,
 };
 use crate::editor::cjk::{CjkContext, CjkContextCache};
+use crate::editor::wrap_measurement::WrapMeasurement;
 use crate::editor::{
     DecorationModel, DecorationSettings, EditorBuffer, EditorHistory, EditorPosition,
     EditorSelection, FoldModel, FoldProvider, IndentBraceFoldProvider, IndentGuide, ScrollOffset,
@@ -108,6 +109,7 @@ pub struct Document {
     session_folds_pending: bool,
     word_wrap: bool,
     wrap_column_limit: Option<usize>,
+    wrap_measurement: Option<WrapMeasurement>,
     caret_row_affinities: Vec<(EditorPosition, usize)>,
     pub is_dirty: bool,
     pub is_pinned: bool,
@@ -244,6 +246,7 @@ impl Document {
             session_folds_pending: false,
             word_wrap: false,
             wrap_column_limit: None,
+            wrap_measurement: None,
             caret_row_affinities: Vec::new(),
             is_dirty: false,
             is_pinned: false,
@@ -393,6 +396,8 @@ impl Document {
             return false;
         }
 
+        // Invalidate font routing before the new text is measured for wrapping.
+        self.revision = self.revision.saturating_add(1);
         if reset {
             self.buffer = EditorBuffer::from_text(strip_text_bom(text).to_owned());
             self.folds.recompute(Vec::new());
@@ -407,7 +412,9 @@ impl Document {
             self.buffer.append_text(text);
             let line_count = self.buffer.line_count();
             if self.word_wrap {
-                self.viewport.sync_unfolded_wrapped_buffer(&self.buffer);
+                let context = self.wrap_measurement.map(|_| self.cjk_context());
+                self.viewport
+                    .sync_unfolded_wrapped_buffer_with_context(&self.buffer, context.as_deref());
             } else {
                 self.viewport.sync_unfolded_line_count(line_count);
             }
@@ -417,7 +424,6 @@ impl Document {
         self.selection_set = SelectionSet::single(self.selection);
         self.caret_row_affinities.clear();
         self.syntax_cache.borrow_mut().clear();
-        self.revision = self.revision.saturating_add(1);
         true
     }
 
@@ -651,6 +657,7 @@ impl Document {
     /// Refreshes an inclusive span of changed logical lines. Supplying the
     /// complete edit span lets unchanged lines retain their wrap measurements.
     pub fn refresh_text_lines(&mut self, first_changed_line: usize, last_changed_line: usize) {
+        self.revision = self.revision.saturating_add(1);
         self.caret_row_affinities.clear();
         if self.defer_analysis {
             self.analysis_pending = self.has_complete_text_index();
@@ -692,7 +699,6 @@ impl Document {
             last_changed_line,
             self.buffer.line_count(),
         );
-        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn refresh_view_models(&mut self) {
@@ -797,7 +803,8 @@ impl Document {
         self.viewport_character_width = character_width.max(1.0);
         if self.word_wrap
             && (self.viewport.wrap_columns() != Some(self.wrap_columns())
-                || self.viewport.fold_indicator_columns() != self.wrap_fold_indicator_columns())
+                || self.viewport.fold_indicator_columns() != self.wrap_fold_indicator_columns()
+                || self.viewport.wrap_measurement() != self.wrap_measurement)
         {
             self.preferred_vertical_column = None;
             self.rebuild_viewport();
@@ -805,6 +812,23 @@ impl Document {
         if self.word_wrap && caret_was_visible {
             self.ensure_caret_visible();
         }
+    }
+
+    /// Uses the editor's typography for the shared Unicode wrap map.
+    pub fn update_viewport_geometry_with_typography(
+        &mut self,
+        visible_rows: usize,
+        text_width: f32,
+        character_width: f32,
+        font_size: f32,
+        hint_factor: Option<f32>,
+    ) {
+        self.wrap_measurement = Some(WrapMeasurement::new(
+            character_width,
+            font_size,
+            hint_factor,
+        ));
+        self.update_viewport_geometry(visible_rows, text_width, character_width);
     }
 
     fn wrap_columns(&self) -> usize {
@@ -894,10 +918,14 @@ impl Document {
 
     fn refresh_wrapped_lines(&mut self, first: usize, last: usize) {
         let top_position = self.viewport_top_position();
-        if self
-            .viewport
-            .reflow_wrapped_lines(&self.buffer, &self.folds, first, last)
-        {
+        let context = self.wrap_measurement.map(|_| self.cjk_context());
+        if self.viewport.reflow_wrapped_lines_with_context(
+            &self.buffer,
+            &self.folds,
+            first,
+            last,
+            context.as_deref(),
+        ) {
             self.restore_viewport_top(top_position);
         } else {
             self.rebuild_viewport();
@@ -907,12 +935,15 @@ impl Document {
     fn rebuild_viewport(&mut self) {
         let top_position = self.viewport_top_position();
         self.viewport = if self.word_wrap {
-            ViewportModel::new_wrapped_with_fold_indicator_columns(
+            let context = self.wrap_measurement.map(|_| self.cjk_context());
+            ViewportModel::new_wrapped_with_measurement(
                 &self.buffer,
                 &self.folds,
                 self.wrap_columns(),
                 self.decorations.settings.indent_width,
                 self.wrap_fold_indicator_columns(),
+                self.wrap_measurement,
+                context.as_deref(),
             )
         } else {
             ViewportModel::new_with_tab_width(

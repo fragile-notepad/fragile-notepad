@@ -26,7 +26,7 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) last_text_click: Option<TextClick>,
     pub(super) scrollbar_grab_offset_y: Option<f32>,
     pub(super) partial_scroll_lines: f32,
-    pub(super) viewport_geometry: Option<(u64, usize, u32, u32)>,
+    pub(super) viewport_geometry: Option<(u64, usize, u32, u32, u32, Option<u32>)>,
     pub preedit: Option<input_method::Preedit>,
     pub(super) scroll_fast_until: Cell<Option<Instant>>,
     pub(super) render_frame: Cell<u64>,

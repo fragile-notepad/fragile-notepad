@@ -26,6 +26,8 @@ fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis(
             visible_rows: 6,
             text_width: 962,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     let _ = original.update(Message::EditorAction(
@@ -53,6 +55,8 @@ fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis(
             visible_rows: 6,
             text_width: 242,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
 
@@ -71,6 +75,8 @@ fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis(
             visible_rows: 6,
             text_width: 482,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     assert_eq!(
@@ -127,6 +133,8 @@ fn streamed_session_restores_immediately_when_geometry_was_already_measured() {
             visible_rows: 6,
             text_width: 802,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     let document = restored.workspace.document_mut(id).unwrap();
@@ -157,6 +165,8 @@ fn streamed_session_restores_immediately_when_geometry_was_already_measured() {
             visible_rows: 6,
             text_width: 402,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     assert_eq!(
@@ -188,6 +198,8 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
             visible_rows: 4,
             text_width: 82,
             character_width_milli: 8000,
+            font_size_milli: 14_545,
+            hint_factor_milli: None,
         },
     ));
     assert_eq!(

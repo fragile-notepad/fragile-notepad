@@ -1,7 +1,9 @@
 use super::buffer::EditorBuffer;
+use super::cjk::CjkContext;
 use super::fold::{FoldModel, FoldRange};
 use super::layout::{visual_column_for, visual_width_with_tab_width};
 use super::position::EditorPosition;
+use super::wrap_measurement::{MeasuredWrapLine, WrapMeasurement};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,6 +42,7 @@ pub struct ViewportModel {
     wrapped_segments: Option<Vec<RowSegment>>,
     collapsed_ranges: Vec<FoldRange>,
     fold_indicator_columns: usize,
+    wrap_measurement: Option<WrapMeasurement>,
 }
 
 impl ViewportModel {
@@ -81,6 +84,7 @@ impl ViewportModel {
             wrapped_segments: None,
             collapsed_ranges: collapsed,
             fold_indicator_columns: 4,
+            wrap_measurement: None,
         }
     }
 
@@ -107,16 +111,37 @@ impl ViewportModel {
         tab_width: usize,
         fold_indicator_columns: usize,
     ) -> Self {
+        Self::new_wrapped_with_measurement(
+            buffer,
+            folds,
+            columns,
+            tab_width,
+            fold_indicator_columns,
+            None,
+            None,
+        )
+    }
+
+    pub(crate) fn new_wrapped_with_measurement(
+        buffer: &EditorBuffer,
+        folds: &FoldModel,
+        columns: usize,
+        tab_width: usize,
+        fold_indicator_columns: usize,
+        measurement: Option<WrapMeasurement>,
+        context: Option<&CjkContext>,
+    ) -> Self {
         let mut viewport = Self::new_with_tab_width(buffer.line_count(), folds, tab_width);
         let visible_lines = std::mem::take(&mut viewport.visible_lines);
         viewport.wrap_columns = Some(columns.max(1));
         viewport.fold_indicator_columns = fold_indicator_columns;
+        viewport.wrap_measurement = measurement;
         viewport.wrapped_segments = Some(Vec::with_capacity(visible_lines.len()));
 
         for line in visible_lines {
             if let Some(text) = buffer.line(line) {
                 let line_columns = viewport.wrapped_line_columns(line, columns);
-                viewport.append_wrapped_line(line, &text, line_columns);
+                viewport.append_wrapped_line(line, &text, line_columns, context);
             }
         }
 
@@ -129,6 +154,10 @@ impl ViewportModel {
 
     pub fn fold_indicator_columns(&self) -> usize {
         self.fold_indicator_columns
+    }
+
+    pub(crate) fn wrap_measurement(&self) -> Option<WrapMeasurement> {
+        self.wrap_measurement
     }
 
     pub fn line_count(&self) -> usize {
@@ -208,6 +237,17 @@ impl ViewportModel {
         first_line: usize,
         last_line: usize,
     ) -> bool {
+        self.reflow_wrapped_lines_with_context(buffer, folds, first_line, last_line, None)
+    }
+
+    pub(crate) fn reflow_wrapped_lines_with_context(
+        &mut self,
+        buffer: &EditorBuffer,
+        folds: &FoldModel,
+        first_line: usize,
+        last_line: usize,
+        context: Option<&CjkContext>,
+    ) -> bool {
         let Some(columns) = self.wrap_columns else {
             return false;
         };
@@ -245,11 +285,14 @@ impl ViewportModel {
                 return false;
             };
             replacement_starts.push((line, replacement_segments.len()));
-            append_wrapped_segments(
+            append_wrapped_segments_with_measurement(
                 &mut replacement_segments,
                 &text,
                 self.wrapped_line_columns(line, columns),
                 self.tab_width,
+                line,
+                self.wrap_measurement,
+                context,
             );
             replacement_lines.resize(replacement_segments.len(), line);
         }
@@ -300,6 +343,7 @@ impl ViewportModel {
             self.wrapped_segments = None;
             self.collapsed_ranges.clear();
             self.fold_indicator_columns = 4;
+            self.wrap_measurement = None;
             return;
         }
 
@@ -316,18 +360,28 @@ impl ViewportModel {
     /// measured. Completed logical lines are not measured again for each
     /// streamed chunk.
     pub fn sync_unfolded_wrapped_buffer(&mut self, buffer: &EditorBuffer) {
+        self.sync_unfolded_wrapped_buffer_with_context(buffer, None);
+    }
+
+    pub(crate) fn sync_unfolded_wrapped_buffer_with_context(
+        &mut self,
+        buffer: &EditorBuffer,
+        context: Option<&CjkContext>,
+    ) {
         let Some(columns) = self.wrap_columns else {
             self.sync_unfolded_line_count(buffer.line_count());
             return;
         };
 
         if buffer.line_count() < self.line_count || !self.collapsed_ranges.is_empty() {
-            *self = Self::new_wrapped_with_fold_indicator_columns(
+            *self = Self::new_wrapped_with_measurement(
                 buffer,
                 &FoldModel::default(),
                 columns,
                 self.tab_width,
                 self.fold_indicator_columns,
+                self.wrap_measurement,
+                context,
             );
             return;
         }
@@ -343,18 +397,32 @@ impl ViewportModel {
 
         for line in first_line..self.line_count {
             if let Some(text) = buffer.line(line) {
-                self.append_wrapped_line(line, &text, columns);
+                self.append_wrapped_line(line, &text, columns, context);
             }
         }
     }
 
-    fn append_wrapped_line(&mut self, line: usize, text: &str, columns: usize) {
+    fn append_wrapped_line(
+        &mut self,
+        line: usize,
+        text: &str,
+        columns: usize,
+        context: Option<&CjkContext>,
+    ) {
         let Some(segments) = &mut self.wrapped_segments else {
             return;
         };
 
         self.document_to_visible[line] = Some(self.visible_lines.len());
-        append_wrapped_segments(segments, text, columns, self.tab_width);
+        append_wrapped_segments_with_measurement(
+            segments,
+            text,
+            columns,
+            self.tab_width,
+            line,
+            self.wrap_measurement,
+            context,
+        );
         self.visible_lines.resize(segments.len(), line);
     }
 
@@ -370,6 +438,102 @@ impl ViewportModel {
         } else {
             columns.max(1)
         }
+    }
+}
+
+fn append_wrapped_segments_with_measurement(
+    segments: &mut Vec<RowSegment>,
+    text: &str,
+    columns: usize,
+    tab_width: usize,
+    line: usize,
+    measurement: Option<WrapMeasurement>,
+    context: Option<&CjkContext>,
+) {
+    let Some(measurement) = measurement.filter(|_| !text.is_ascii()) else {
+        append_wrapped_segments(segments, text, columns, tab_width);
+        return;
+    };
+    let measured = MeasuredWrapLine::new(text, tab_width, line, context, measurement);
+    let widths = measured.grapheme_widths();
+    let mut word_boundaries = text
+        .split_word_bound_indices()
+        .map(|(offset, word)| offset + word.len())
+        .peekable();
+    // Keep source byte positions and logical tab columns independent of pixel
+    // advances. Every consumer continues to use this same fragment map.
+    let mut boundaries = vec![(0usize, 0usize, false)];
+    let mut visual_column = 0usize;
+    for (column, grapheme) in text.grapheme_indices(true) {
+        for ch in grapheme.chars() {
+            visual_column = visual_column.saturating_add(visual_width_with_tab_width(
+                ch,
+                visual_column,
+                tab_width,
+            ));
+        }
+        let end = column + grapheme.len();
+        let mut can_break = false;
+        while word_boundaries
+            .peek()
+            .is_some_and(|boundary| *boundary <= end)
+        {
+            can_break |= word_boundaries.next() == Some(end);
+        }
+        can_break |= grapheme
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_punctuation() && ch != '_');
+        boundaries.push((end, visual_column, can_break));
+    }
+    debug_assert_eq!(widths.len() + 1, boundaries.len());
+    let limit = columns.max(1) as f32 * measurement.character_width();
+    let final_boundary = boundaries.len() - 1;
+    let mut start = 0;
+    while start < final_boundary {
+        let mut fit = start;
+        let mut estimated_width = 0.0;
+        while fit < final_boundary {
+            let next_width = estimated_width + widths[fit].1;
+            if fit > start && next_width > limit + 0.01 {
+                break;
+            }
+            estimated_width = next_width;
+            fit += 1;
+        }
+        let width = |end: usize| {
+            measured.width(boundaries[start].0, boundaries[end].0, boundaries[start].1)
+        };
+        // Verify the actual row fragment: shaping can change at a soft break.
+        // One oversized grapheme is allowed so even a tiny viewport progresses.
+        while fit > start + 1 && width(fit) > limit + 0.01 {
+            fit -= 1;
+        }
+        while fit < final_boundary && width(fit + 1) <= limit + 0.01 {
+            fit += 1;
+        }
+        let preferred_break = |fit: usize| {
+            if fit == final_boundary {
+                fit
+            } else {
+                (start + 1..=fit)
+                    .rev()
+                    .find(|&index| boundaries[index].2)
+                    .unwrap_or(fit)
+            }
+        };
+        let mut end = preferred_break(fit);
+        while end > start + 1 && width(end) > limit + 0.01 {
+            end = preferred_break(end - 1);
+        }
+        segments.push(RowSegment {
+            start_column: boundaries[start].0,
+            end_column: boundaries[end].0,
+            start_visual_column: boundaries[start].1,
+            end_visual_column: boundaries[end].1,
+            is_last: end == final_boundary,
+        });
+        start = end;
     }
 }
 

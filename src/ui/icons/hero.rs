@@ -10,6 +10,7 @@ use super::mask;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HeroIcon {
     ArrowTurnDownLeft,
+    ArrowTurnDownRight,
     ChevronDown,
     ChevronRight,
     Minus,
@@ -21,6 +22,7 @@ pub enum HeroIcon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HeroIconAsset {
     ArrowTurnDownLeft,
+    ArrowTurnDownRight,
     ChevronDown,
     ChevronRight,
     Minus,
@@ -34,6 +36,9 @@ impl HeroIconAsset {
         match self {
             HeroIconAsset::ArrowTurnDownLeft => {
                 include_bytes!("../../../assets/icons/heroicons/rgba/arrow-turn-down-left.rgba")
+            }
+            HeroIconAsset::ArrowTurnDownRight => {
+                include_bytes!("../../../assets/icons/heroicons/rgba/arrow-turn-down-right.rgba")
             }
             HeroIconAsset::ChevronDown => {
                 include_bytes!("../../../assets/icons/heroicons/rgba/chevron-down.rgba")
@@ -138,6 +143,7 @@ fn icon_bytes(icon: HeroIcon) -> &'static [u8] {
 fn hero_asset(icon: HeroIcon) -> HeroIconAsset {
     match icon {
         HeroIcon::ArrowTurnDownLeft => HeroIconAsset::ArrowTurnDownLeft,
+        HeroIcon::ArrowTurnDownRight => HeroIconAsset::ArrowTurnDownRight,
         HeroIcon::ChevronDown => HeroIconAsset::ChevronDown,
         HeroIcon::ChevronRight => HeroIconAsset::ChevronRight,
         HeroIcon::Minus => HeroIconAsset::Minus,

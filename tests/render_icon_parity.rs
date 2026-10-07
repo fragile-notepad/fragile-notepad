@@ -60,6 +60,10 @@ const ICONS: &[(&str, TestIconAsset)] = &[
         TestIconAsset::Hero(HeroIconAsset::ArrowTurnDownLeft),
     ),
     (
+        "heroicons/arrow-turn-down-right",
+        TestIconAsset::Hero(HeroIconAsset::ArrowTurnDownRight),
+    ),
+    (
         "heroicons/chevron-down",
         TestIconAsset::Hero(HeroIconAsset::ChevronDown),
     ),

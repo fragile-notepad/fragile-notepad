@@ -207,6 +207,11 @@ message_catalog! {
         DirtyCloseFadeFinished(arg0: DocumentId) => Defer,
     }
     Search(SearchMessage) {
+        AdvancedResultOptionsToggled => Reject,
+        AdvancedResultLimitChanged(arg0: String) => Reject,
+        AdvancedPreviewCharsChanged(arg0: String) => Reject,
+        AdvancedPreviewContextChanged(arg0: String) => Reject,
+        AdvancedResultOptionsReset => Reject,
         FindQueryChanged(arg0: String) => Reject,
         FindReplacementChanged(arg0: String) => Reject,
         FindCaseSensitiveToggled(arg0: bool) => Reject,

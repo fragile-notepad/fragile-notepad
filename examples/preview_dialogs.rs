@@ -4,8 +4,8 @@
 
 use fragile_notepad::{
     core::{
-        AppearanceMode, Document, DocumentId, EditorSettings, SearchMode, ShortcutCommand,
-        ShortcutConflict, ShortcutGroup, Workspace,
+        AppearanceMode, Document, DocumentId, EditorSettings, SearchMode, SearchResultSettings,
+        ShortcutCommand, ShortcutConflict, ShortcutGroup, Workspace,
     },
     message::{AdvancedSearchTab, Message, SettingsCategory, WindowTarget},
     search_dialog::SearchDialogState,
@@ -114,6 +114,60 @@ fn main() {
                     Size::new(width, height),
                     &format!("search-{tab_name}-{name}-{size_name}"),
                 );
+                let mut options_dialog = dialog.clone();
+                options_dialog.result_options_visible = true;
+                options_dialog.set_query("release");
+                options_dialog.set_replacement("launch");
+                options_dialog.set_result_settings(SearchResultSettings {
+                    result_limit: 2,
+                    ..SearchResultSettings::default()
+                });
+                let mut options_workspace = Workspace::new();
+                options_workspace.push_document(Document::from_path(
+                    DocumentId::new(30),
+                    "release-notes.md",
+                    &format!(
+                        "{}release checklist.\nPrepare the release notes.\nReview the release checklist.\nPublish the release after review.\n",
+                        "A long introductory note before the match. ".repeat(12),
+                    ),
+                ));
+                options_workspace.push_document(Document::from_path(
+                    DocumentId::new(31),
+                    "src/main.rs",
+                    "fn prepare_release() {}\n// Publish the release after review.",
+                ));
+                if matches!(
+                    tab,
+                    AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
+                ) {
+                    options_dialog.refresh_from_workspace(&options_workspace);
+                } else {
+                    options_dialog.refresh_from_documents([&options_workspace.documents()[1]]);
+                }
+                render(
+                    &mut renderer,
+                    advanced_search_panel::view(&options_dialog),
+                    &theme,
+                    Size::new(width, height),
+                    &format!("search-{tab_name}-options-{name}-{size_name}"),
+                );
+                for (suffix, limit, preview, context) in [
+                    ("limit", "0", "160", "40"),
+                    ("preview", "2", "2001", "40"),
+                    ("context", "2", "160", "160"),
+                ] {
+                    let mut invalid_dialog = options_dialog.clone();
+                    invalid_dialog.result_limit_input = limit.into();
+                    invalid_dialog.preview_chars_input = preview.into();
+                    invalid_dialog.context_before_input = context.into();
+                    render(
+                        &mut renderer,
+                        advanced_search_panel::view(&invalid_dialog),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("search-{tab_name}-options-invalid-{suffix}-{name}-{size_name}"),
+                    );
+                }
                 if matches!(
                     tab,
                     AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles

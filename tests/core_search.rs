@@ -4,6 +4,31 @@ use fragile_notepad::core::search::{
 };
 
 #[test]
+fn visiting_matches_preserves_offsets_and_filters_without_collecting() {
+    for (mode, query) in [(SearchMode::Normal, "café"), (SearchMode::Regex, "café|a+")] {
+        let search = PreparedSearch::new(
+            query,
+            SearchOptions {
+                mode,
+                case_sensitive: false,
+                whole_word: true,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let text = "CAFÉ caféx café aa aab";
+        let mut visited = Vec::new();
+        search.for_each_match_in_chunks(["CAFÉ ca", "féx café a", "a aab"], |found| {
+            visited.push(found)
+        });
+        assert_eq!(visited, search.matches(text));
+        let mut count = 0;
+        search.for_each_match_in_chunks([text], |_| count += 1);
+        assert_eq!(count, visited.len());
+    }
+}
+
+#[test]
 fn literal_search_is_independent_of_every_chunk_split() {
     for text in [
         "aaaaaa",

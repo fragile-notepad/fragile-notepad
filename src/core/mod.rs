@@ -19,7 +19,9 @@ pub use encoding::{DecodedText, EncodingError, TextEncoding, decode_bytes, encod
 pub use file_revision::FileRevision;
 pub use search::{FindState, PreparedSearch, SearchError, SearchMode, SearchOptions, TextMatch};
 pub use session::{Session, SessionDocument};
-pub use settings::{AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode};
+pub use settings::{
+    AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, SearchResultSettings,
+};
 pub use shortcuts::{
     KeyBinding, ShortcutCommand, ShortcutConflict, ShortcutDisplay, ShortcutDisplayPart,
     ShortcutEntry, ShortcutGroup, ShortcutKey, ShortcutMap, ShortcutModifierIcon,

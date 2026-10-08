@@ -116,6 +116,101 @@ fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
 }
 
 #[test]
+fn count_hydrates_matching_scope_and_clears_previously_displayed_results() {
+    let (mut app, _) = App::new();
+    let active = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        "needle needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    app.search_dialog.set_query("needle");
+    let _ = app.update(Message::AdvancedFindAllCurrentRun);
+    assert_eq!(app.search_dialog.results.len(), 2);
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    let (excluded, _) = deferred_search_document(&mut app, "excluded.rs", None);
+    app.search_dialog.active_tab = crate::message::AdvancedSearchTab::FindInFiles;
+    app.search_dialog.include_pattern = "*.txt".into();
+    let _ = app.update(Message::AdvancedCountRun);
+    assert!(app.pending_search.is_some());
+    assert!(app.search_dialog.results.is_empty());
+    assert_eq!(app.search_dialog.match_count, 0);
+    finish_search_document(&mut app, disk, generation, "needle needle needle");
+
+    assert!(app.pending_search.is_none());
+    assert_eq!(app.search_dialog.match_count, 3);
+    assert_eq!(app.search_dialog.status, "3 matches");
+    assert!(app.search_dialog.results.is_empty());
+    assert_eq!(app.workspace.active_document_id(), active);
+    assert!(matches!(
+        app.workspace.document(excluded).unwrap().load_state,
+        crate::core::DocumentLoadState::Deferred { .. }
+    ));
+}
+
+#[test]
+fn search_result_options_apply_to_next_search_and_preserve_last_valid_preferences() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    set_active_document_text(
+        &mut app,
+        &"a".repeat(1024),
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    app.search_dialog.set_query("a");
+    let _ = app.update(Message::AdvancedFindAllCurrentRun);
+    assert_eq!(app.search_dialog.results.len(), 500);
+    let _ = app.update(Message::AdvancedPreviewContextChanged("4".into()));
+    let _ = app.update(Message::AdvancedPreviewCharsChanged("16".into()));
+    let _ = app.update(Message::AdvancedResultLimitChanged("3".into()));
+    assert_eq!(app.settings.search_results.result_limit, 3);
+    assert_eq!(app.settings.search_results.preview_chars, 16);
+    assert!(app.settings_persistence.flush_scheduled());
+    assert_eq!(
+        app.settings_dialog.draft.search_results,
+        app.settings.search_results
+    );
+    assert_eq!(
+        app.search_dialog.results.len(),
+        500,
+        "existing rows stay until the next search"
+    );
+    let _ = app.update(Message::AdvancedFindAllCurrentRun);
+    assert_eq!(app.search_dialog.results.len(), 3);
+    assert!(
+        app.search_dialog
+            .results
+            .iter()
+            .all(|result| result.preview.chars().count() <= 18)
+    );
+    let _ = app.update(Message::AdvancedResultLimitChanged("0".into()));
+    let _ = app.update(Message::AdvancedFindAllCurrentRun);
+    assert!(app.search_dialog.result_options_visible);
+    assert!(app.search_dialog.status.contains("between 1 and 10,000"));
+    assert_eq!(app.settings.search_results.result_limit, 3);
+    let _ = app.update(Message::AdvancedCountRun);
+    assert_eq!(app.search_dialog.match_count, 1024);
+    assert!(app.search_dialog.results.is_empty());
+    let _ = app.update(Message::AdvancedResultOptionsReset);
+    assert_eq!(
+        app.settings.search_results,
+        crate::core::SearchResultSettings::default()
+    );
+    assert!(app.search_dialog.parsed_result_settings().is_ok());
+}
+
+#[test]
+fn early_search_options_reset_survives_saved_settings_load() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::AdvancedResultOptionsReset);
+    let mut saved = crate::core::EditorSettings::default();
+    saved.search_results.result_limit = 1000;
+    let _ = app.update(Message::SettingsLoaded(Ok(Some(saved))));
+    assert_eq!(app.settings.search_results.result_limit, 500);
+    assert_eq!(app.search_dialog.result_limit_input, "500");
+}
+
+#[test]
 fn deferred_replace_all_uses_captured_options_scope_and_replacement() {
     let (mut app, _) = App::new();
     set_active_document_text(

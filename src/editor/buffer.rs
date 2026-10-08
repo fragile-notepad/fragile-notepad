@@ -90,6 +90,35 @@ impl EditorBuffer {
         Some(self.rope.slice(start..end).to_string())
     }
 
+    /// Copies bounded context around a position without materializing the whole line.
+    pub fn line_excerpt(
+        &self,
+        position: EditorPosition,
+        max_chars: usize,
+        context_before: usize,
+    ) -> Option<String> {
+        let line_byte_start = *self.line_starts.get(position.line)?;
+        let line_start = self.byte_to_char_boundary(line_byte_start)?;
+        let line_end = self.line_content_end_char(position.line, line_start);
+        let center = self.byte_to_char_boundary(line_byte_start.checked_add(position.column)?)?;
+        if center > line_end || max_chars == 0 {
+            return None;
+        }
+        let start = center
+            .saturating_sub(context_before.min(max_chars - 1))
+            .max(line_start);
+        let end = start.saturating_add(max_chars).min(line_end);
+        let mut excerpt = String::new();
+        if start > line_start {
+            excerpt.push('…');
+        }
+        excerpt.extend(self.rope.slice(start..end).chars());
+        if end < line_end {
+            excerpt.push('…');
+        }
+        Some(excerpt)
+    }
+
     pub fn replace_range(&mut self, range: EditorRange, replacement: &str) -> EditDelta {
         let before_range = self.clamp_range(range);
         let start_offset = self.char_offset_clamped(before_range.start);

@@ -17,7 +17,14 @@ pub(super) struct PendingSearch {
     dialog: crate::search_dialog::SearchDialogState,
     search: PreparedSearch,
     documents: Vec<crate::core::DocumentId>,
-    replace: bool,
+    operation: SearchOperation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchOperation {
+    Find,
+    Count,
+    Replace,
 }
 
 impl App {
@@ -30,7 +37,15 @@ impl App {
     pub(super) fn update_search(&mut self, message: SearchMessage) -> Task<Message> {
         // Editing the request or starting a new search cancels its queued work.
         // Loading already requested documents may finish, but cannot mutate text.
-        if !matches!(message, SearchMessage::AdvancedSearchResultSelected(_, _)) {
+        if !matches!(
+            message,
+            SearchMessage::AdvancedSearchResultSelected(_, _)
+                | SearchMessage::AdvancedResultOptionsToggled
+                | SearchMessage::AdvancedResultLimitChanged(_)
+                | SearchMessage::AdvancedPreviewCharsChanged(_)
+                | SearchMessage::AdvancedPreviewContextChanged(_)
+                | SearchMessage::AdvancedResultOptionsReset
+        ) {
             if self.pending_search.is_some() {
                 self.search_dialog.status = String::from("Search canceled.");
             }
@@ -41,6 +56,28 @@ impl App {
         }
 
         match message {
+            SearchMessage::AdvancedResultOptionsToggled => {
+                self.search_dialog.result_options_visible =
+                    !self.search_dialog.result_options_visible;
+                Task::none()
+            }
+            SearchMessage::AdvancedResultLimitChanged(value) => {
+                self.search_dialog.result_limit_input = value;
+                self.persist_search_result_options()
+            }
+            SearchMessage::AdvancedPreviewCharsChanged(value) => {
+                self.search_dialog.preview_chars_input = value;
+                self.persist_search_result_options()
+            }
+            SearchMessage::AdvancedPreviewContextChanged(value) => {
+                self.search_dialog.context_before_input = value;
+                self.persist_search_result_options()
+            }
+            SearchMessage::AdvancedResultOptionsReset => {
+                self.search_dialog
+                    .set_result_settings(crate::core::SearchResultSettings::default());
+                self.persist_search_result_options()
+            }
             SearchMessage::FindQueryChanged(query) => {
                 self.find.set_query(query);
                 self.refresh_find_matches();
@@ -145,18 +182,21 @@ impl App {
                 self.search_dialog.set_include_pattern(include_pattern);
                 Task::none()
             }
-            SearchMessage::AdvancedSearchRun | SearchMessage::AdvancedCountRun => {
-                self.begin_pending_search(self.dialog_scope(), false)
+            SearchMessage::AdvancedSearchRun => {
+                self.begin_pending_search(self.dialog_scope(), SearchOperation::Find)
+            }
+            SearchMessage::AdvancedCountRun => {
+                self.begin_pending_search(self.dialog_scope(), SearchOperation::Count)
             }
             SearchMessage::AdvancedFindNextRun => {
                 self.advanced_find_next();
                 Task::none()
             }
             SearchMessage::AdvancedFindAllCurrentRun => {
-                self.begin_pending_search(SearchScope::Current, false)
+                self.begin_pending_search(SearchScope::Current, SearchOperation::Find)
             }
             SearchMessage::AdvancedFindAllOpenRun => {
-                self.begin_pending_search(SearchScope::OpenDocuments, false)
+                self.begin_pending_search(SearchScope::OpenDocuments, SearchOperation::Find)
             }
             SearchMessage::AdvancedReplaceRun => self.advanced_replace_current(),
             SearchMessage::AdvancedReplaceAllRun => self.advanced_replace_all(),
@@ -416,7 +456,7 @@ impl App {
     }
 
     fn replace_all_in(&mut self, scope: SearchScope) -> Task<Message> {
-        self.begin_pending_search(scope, true)
+        self.begin_pending_search(scope, SearchOperation::Replace)
     }
 
     fn dialog_scope(&self) -> SearchScope {
@@ -430,8 +470,19 @@ impl App {
         }
     }
 
-    fn begin_pending_search(&mut self, scope: SearchScope, replace: bool) -> Task<Message> {
+    fn begin_pending_search(
+        &mut self,
+        scope: SearchScope,
+        operation: SearchOperation,
+    ) -> Task<Message> {
         self.pending_search = None;
+        if operation == SearchOperation::Find
+            && let Err(error) = self.search_dialog.parsed_result_settings()
+        {
+            self.search_dialog.result_options_visible = true;
+            self.search_dialog.status = error.into();
+            return Task::none();
+        }
         let Some(search) = self.prepare_advanced_search() else {
             return Task::none();
         };
@@ -449,10 +500,10 @@ impl App {
             })
             .collect::<Vec<_>>();
         self.pending_search = Some(PendingSearch {
-            dialog: self.search_dialog.clone(),
+            dialog: self.search_dialog.request_snapshot(),
             search,
             documents,
-            replace,
+            operation,
         });
         let tasks = deferred
             .into_iter()
@@ -472,7 +523,7 @@ impl App {
         }
 
         let Some(document) = self.workspace.active_document() else {
-            self.search_dialog.results.clear();
+            self.search_dialog.clear_results();
             self.search_dialog.status = String::from("No document");
             return;
         };
@@ -491,7 +542,7 @@ impl App {
             .set_case_sensitive(self.search_dialog.case_sensitive);
         self.find.set_whole_word(self.search_dialog.whole_word);
         let Some(document) = self.workspace.active_document() else {
-            self.search_dialog.results.clear();
+            self.search_dialog.clear_results();
             self.search_dialog.status = String::from("No document");
             return;
         };
@@ -516,12 +567,12 @@ impl App {
         match PreparedSearch::new(&self.search_dialog.query, self.search_dialog.options()) {
             Ok(Some(search)) => Some(search),
             Ok(None) => {
-                self.search_dialog.results.clear();
+                self.search_dialog.clear_results();
                 self.search_dialog.status = String::from("No query");
                 None
             }
             Err(error) => {
-                self.search_dialog.results.clear();
+                self.search_dialog.clear_results();
                 self.search_dialog.status = crate::search_dialog::search_error_status(error);
                 None
             }
@@ -643,6 +694,14 @@ impl App {
     pub(super) fn refresh_find_matches(&mut self) {
         refresh_matches(&mut self.find, &self.workspace);
     }
+
+    fn persist_search_result_options(&mut self) -> Task<Message> {
+        let Ok(settings) = self.search_dialog.parsed_result_settings() else {
+            return Task::none();
+        };
+        self.search_dialog.result_settings = settings;
+        self.set_search_result_settings(settings)
+    }
 }
 
 /// Search reactions cannot access file, session, settings, or window state.
@@ -666,7 +725,7 @@ impl SearchSubscriber<'_> {
             })
         }) {
             *self.pending = None;
-            self.dialog.results.clear();
+            self.dialog.clear_results();
             self.dialog.status = String::from(
                 "Search canceled: a target document was closed or could not be loaded. No replacements were made.",
             );
@@ -682,13 +741,13 @@ impl SearchSubscriber<'_> {
             })
             .count();
         if waiting > 0 {
-            self.dialog.results.clear();
+            self.dialog.clear_results();
             self.dialog.status = format!("Loading {waiting} documents for search...");
             return Task::none();
         }
         let pending = self.pending.take().expect("ready search");
         let active_id = self.workspace.active_document_id();
-        if pending.replace {
+        if pending.operation == SearchOperation::Replace {
             for document_id in &pending.documents {
                 let Some(document) = self.workspace.document_mut(*document_id) else {
                     continue;
@@ -722,15 +781,21 @@ impl SearchSubscriber<'_> {
                 }
             }
         }
-        refresh_matches(self.find, self.workspace);
+        if pending.operation == SearchOperation::Replace {
+            refresh_matches(self.find, self.workspace);
+        }
         let mut completed = pending.dialog;
-        completed.refresh_from_documents(
-            pending
-                .documents
-                .iter()
-                .filter_map(|id| self.workspace.document(*id)),
-        );
+        let documents = pending
+            .documents
+            .iter()
+            .filter_map(|id| self.workspace.document(*id));
+        if pending.operation == SearchOperation::Count {
+            completed.count_from_documents(documents);
+        } else {
+            completed.refresh_from_documents(documents);
+        }
         self.dialog.results = completed.results;
+        self.dialog.match_count = completed.match_count;
         self.dialog.status = completed.status;
 
         Task::none()

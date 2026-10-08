@@ -1,4 +1,6 @@
-use iced::widget::{button, checkbox, column, container, row, rule, scrollable, text, text_input};
+use iced::widget::{
+    button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
+};
 use iced::{Center, Element, Fill, Font};
 
 use crate::core::SearchMode;
@@ -208,7 +210,12 @@ fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
         ));
     }
     actions = actions
-        .push(action("Find all", find_all, is_open, enabled))
+        .push(action(
+            "Find all",
+            find_all,
+            is_open,
+            enabled && dialog.parsed_result_settings().is_ok(),
+        ))
         .push(action("Count", Message::AdvancedCountRun, false, enabled));
     if replace_mode(dialog.active_tab) {
         if !is_open {
@@ -228,17 +235,30 @@ fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
     let count = dialog.results.len();
     let header = row![
         text("Results").size(14).font(utility::semibold()),
-        utility::badge(count.to_string()),
+        utility::badge(dialog.match_count.to_string()),
+        space::horizontal(),
+        action(
+            if dialog.result_options_visible {
+                "Hide result options"
+            } else {
+                "Result options"
+            },
+            Message::AdvancedResultOptionsToggled,
+            false,
+            true,
+        ),
     ]
     .spacing(10)
     .align_y(Center);
     let body: Element<'_, Message> = if count == 0 {
-        let label =
-            if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches") {
-                "No matches"
-            } else {
-                "No results yet"
-            };
+        let label = if dialog.match_count > 0 {
+            "Count complete. Use Find all to view matching locations."
+        } else if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches")
+        {
+            "No matches"
+        } else {
+            "No results yet"
+        };
         container(utility::description(label))
             .padding(16)
             .center(Fill)
@@ -271,12 +291,83 @@ fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
             .height(Fill)
             .into()
     };
+    let body = if dialog.result_options_visible {
+        row![
+            container(body).width(Fill).height(Fill),
+            rule::vertical(1).style(styles::utility_rule),
+            scrollable(result_options(dialog))
+                .style(styles::scrollable)
+                .spacing(4)
+                .width(240)
+                .height(Fill),
+        ]
+        .spacing(10)
+        .height(Fill)
+        .into()
+    } else {
+        body
+    };
     container(column![header, body].spacing(6).height(Fill))
         .padding(10)
         .height(Fill)
         .width(Fill)
         .style(styles::utility_card)
         .into()
+}
+
+fn result_options(dialog: &SearchDialogState) -> Element<'_, Message> {
+    let mut options = column![
+        row![
+            utility::description("Next Find all"),
+            space::horizontal(),
+            button(text("Reset").size(12))
+                .padding([4, 6])
+                .style(styles::command_button)
+                .on_press(Message::AdvancedResultOptionsReset),
+        ]
+        .spacing(6)
+        .align_y(Center),
+        result_option_field(
+            "Displayed results",
+            &dialog.result_limit_input,
+            Message::AdvancedResultLimitChanged
+        ),
+        result_option_field(
+            "Preview characters",
+            &dialog.preview_chars_input,
+            Message::AdvancedPreviewCharsChanged
+        ),
+        result_option_field(
+            "Before match (chars)",
+            &dialog.context_before_input,
+            Message::AdvancedPreviewContextChanged
+        ),
+    ]
+    .spacing(6);
+    if let Err(error) = dialog.parsed_result_settings() {
+        options = options.push(utility::description(error));
+    }
+    container(options).width(Fill).into()
+}
+
+fn result_option_field<'a>(
+    label: &'static str,
+    value: &'a str,
+    on_input: fn(String) -> Message,
+) -> Element<'a, Message> {
+    row![
+        text(label).size(12).width(Fill),
+        text_input("", value)
+            .on_input(on_input)
+            .padding([4, 6])
+            .size(12)
+            .width(72)
+            .style(styles::input),
+    ]
+    .spacing(6)
+    .align_y(Center)
+    .width(Fill)
+    .into()
 }
 
 fn result_row(result: &SearchResult) -> Element<'_, Message> {
@@ -337,7 +428,9 @@ fn action<'a>(
 }
 
 fn status_label(dialog: &SearchDialogState) -> &str {
-    if dialog.status == "No query" {
+    if let Err(error) = dialog.parsed_result_settings() {
+        error
+    } else if dialog.status == "No query" {
         "Ready to search"
     } else {
         &dialog.status

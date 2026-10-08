@@ -52,6 +52,46 @@ impl IndentationMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchResultSettings {
+    pub result_limit: usize,
+    pub preview_chars: usize,
+    pub context_before: usize,
+}
+
+impl SearchResultSettings {
+    pub const DEFAULT_RESULT_LIMIT: usize = 500;
+    pub const MIN_RESULT_LIMIT: usize = 1;
+    pub const MAX_RESULT_LIMIT: usize = 10_000;
+    pub const DEFAULT_PREVIEW_CHARS: usize = 160;
+    pub const MIN_PREVIEW_CHARS: usize = 1;
+    pub const MAX_PREVIEW_CHARS: usize = 2_000;
+    pub const DEFAULT_CONTEXT_BEFORE: usize = 40;
+
+    pub fn normalized(self) -> Self {
+        let preview_chars = self
+            .preview_chars
+            .clamp(Self::MIN_PREVIEW_CHARS, Self::MAX_PREVIEW_CHARS);
+        Self {
+            result_limit: self
+                .result_limit
+                .clamp(Self::MIN_RESULT_LIMIT, Self::MAX_RESULT_LIMIT),
+            preview_chars,
+            context_before: self.context_before.min(preview_chars - 1),
+        }
+    }
+}
+
+impl Default for SearchResultSettings {
+    fn default() -> Self {
+        Self {
+            result_limit: Self::DEFAULT_RESULT_LIMIT,
+            preview_chars: Self::DEFAULT_PREVIEW_CHARS,
+            context_before: Self::DEFAULT_CONTEXT_BEFORE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorSettings {
     pub word_wrap: bool,
@@ -59,6 +99,7 @@ pub struct EditorSettings {
     pub auto_save: bool,
     pub zoom: f32,
     pub scroll_speed: f32,
+    pub search_results: SearchResultSettings,
     pub indentation: IndentationMode,
     pub appearance: AppearanceMode,
     pub hardware_acceleration: HardwareAccelerationMode,
@@ -220,6 +261,7 @@ impl EditorSettings {
     }
 
     pub fn to_xml_string(&self) -> String {
+        let search_results = self.search_results.normalized();
         let mut shortcuts = XmlElement::new("shortcuts");
         for entry in self.shortcuts.entries() {
             let mut shortcut =
@@ -257,6 +299,12 @@ impl EditorSettings {
                     .attribute("scroll-speed", format!("{:.3}", self.scroll_speed)),
             )
             .child(XmlElement::new("appearance").attribute("zoom", format!("{:.3}", self.zoom)))
+            .child(
+                XmlElement::new("search")
+                    .attribute("result-limit", search_results.result_limit)
+                    .attribute("preview-chars", search_results.preview_chars)
+                    .attribute("context-before", search_results.context_before),
+            )
             .child(
                 XmlElement::new("decorations")
                     .attribute("wrap-indicator", self.decorations.show_wrap_indicator)
@@ -324,6 +372,28 @@ impl EditorSettings {
             {
                 settings.set_scroll_speed(scroll_speed);
             }
+        }
+
+        if let Some(search) = child(root, "search") {
+            if let Some(value) = search
+                .attribute("result-limit")
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                settings.search_results.result_limit = value;
+            }
+            if let Some(value) = search
+                .attribute("preview-chars")
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                settings.search_results.preview_chars = value;
+            }
+            if let Some(value) = search
+                .attribute("context-before")
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                settings.search_results.context_before = value;
+            }
+            settings.search_results = settings.search_results.normalized();
         }
 
         if let Some(appearance) = child(root, "appearance")
@@ -415,6 +485,7 @@ impl Default for EditorSettings {
             auto_save: false,
             zoom: Self::DEFAULT_ZOOM,
             scroll_speed: Self::DEFAULT_SCROLL_SPEED,
+            search_results: SearchResultSettings::default(),
             indentation: IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH),
             appearance: AppearanceMode::System,
             hardware_acceleration: HardwareAccelerationMode::Lazy,

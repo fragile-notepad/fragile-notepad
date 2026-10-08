@@ -17,6 +17,7 @@ enum SettingsEdit {
     EolMarkers = 32,
     IndentationGuides = 64,
     FoldingControls = 128,
+    SearchResults = 512,
     SpacesAndTabs = 8 | 16,
     Characters = 8 | 16 | 32,
     All = u32::MAX,
@@ -62,6 +63,7 @@ impl SettingsPersistence {
             settings.word_wrap,
             settings.auto_save,
             settings.decorations,
+            settings.search_results,
         );
         let before_all = matches!(edit, SettingsEdit::All).then(|| settings.clone());
         apply(settings);
@@ -73,6 +75,7 @@ impl SettingsPersistence {
                         settings.word_wrap,
                         settings.auto_save,
                         settings.decorations,
+                        settings.search_results,
                     )
             },
             |before| before != *settings,
@@ -294,6 +297,8 @@ impl App {
                     );
                     self.settings_persistence.changed = true;
                     self.settings_dialog.reset_from(&self.settings);
+                    self.search_dialog
+                        .set_result_settings(self.settings.search_results);
 
                     if super::rendering::startup_gpu_boost_requested(&self.settings) {
                         if self.lifecycle.main_window_opened {
@@ -542,6 +547,21 @@ impl App {
         )
     }
 
+    pub(super) fn set_search_result_settings(
+        &mut self,
+        limits: crate::core::SearchResultSettings,
+    ) -> Task<Message> {
+        self.settings_persistence.edit(
+            &mut self.settings,
+            SettingsEdit::SearchResults,
+            |settings| {
+                settings.search_results = limits.normalized();
+            },
+        );
+        self.settings_dialog.draft.search_results = self.settings.search_results;
+        self.persist_settings()
+    }
+
     pub(super) fn flush_settings(&mut self) -> Task<Message> {
         if !self.settings_persistence.begin_flush() {
             return Task::none();
@@ -570,7 +590,8 @@ pub(super) fn merge_initial_settings(
         appearance,
         hardware_acceleration,
         syntax_theme,
-        shortcuts
+        shortcuts,
+        search_results
     );
     if edits & 1 != 0 {
         loaded.zoom = current.zoom;
@@ -580,6 +601,9 @@ pub(super) fn merge_initial_settings(
     }
     if edits & 256 != 0 {
         loaded.auto_save = current.auto_save;
+    }
+    if edits & 512 != 0 {
+        loaded.search_results = current.search_results;
     }
     macro_rules! decoration_edit {
         ($field:ident) => {

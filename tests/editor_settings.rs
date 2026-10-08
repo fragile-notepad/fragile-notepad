@@ -1,8 +1,125 @@
 use fragile_notepad::core::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, KeyBinding,
-    ShortcutCommand, ShortcutKey,
+    SearchResultSettings, ShortcutCommand, ShortcutKey,
 };
 use std::path::PathBuf;
+
+#[test]
+fn search_result_settings_normalize_safe_bounds_and_preview_context() {
+    let defaults = SearchResultSettings::default();
+    assert_eq!(defaults.result_limit, 500);
+    assert_eq!(defaults.preview_chars, 160);
+    assert_eq!(defaults.context_before, 40);
+    assert_eq!(defaults.normalized(), defaults);
+    for (settings, expected) in [
+        (
+            SearchResultSettings {
+                result_limit: 0,
+                preview_chars: 0,
+                context_before: usize::MAX,
+            },
+            SearchResultSettings {
+                result_limit: 1,
+                preview_chars: 1,
+                context_before: 0,
+            },
+        ),
+        (
+            SearchResultSettings {
+                result_limit: usize::MAX,
+                preview_chars: usize::MAX,
+                context_before: usize::MAX,
+            },
+            SearchResultSettings {
+                result_limit: 10_000,
+                preview_chars: 2_000,
+                context_before: 1_999,
+            },
+        ),
+    ] {
+        assert_eq!(settings.normalized(), expected);
+    }
+}
+
+#[test]
+fn search_result_settings_round_trip_xml_and_normalize_before_persistence() {
+    for search_results in [
+        SearchResultSettings {
+            result_limit: 1,
+            preview_chars: 1,
+            context_before: 0,
+        },
+        SearchResultSettings {
+            result_limit: 250,
+            preview_chars: 320,
+            context_before: 80,
+        },
+        SearchResultSettings {
+            result_limit: usize::MAX,
+            preview_chars: 0,
+            context_before: usize::MAX,
+        },
+    ] {
+        let settings = EditorSettings {
+            search_results,
+            ..EditorSettings::default()
+        };
+        let xml = settings.to_xml_string();
+        assert!(xml.contains("<search "));
+        assert_eq!(
+            EditorSettings::from_xml_str(&xml).search_results,
+            search_results.normalized()
+        );
+    }
+}
+
+#[test]
+fn search_result_settings_legacy_and_malformed_xml_keep_defaults() {
+    for xml in [
+        "<fragile-notepad-settings version=\"1\"><editor word-wrap=\"true\" /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><search /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><search result-limit=\"no\" preview-chars=\"-1\" context-before=\"999999999999999999999999999999999999999\" /></fragile-notepad-settings>",
+    ] {
+        assert_eq!(
+            EditorSettings::from_xml_str(xml).search_results,
+            SearchResultSettings::default()
+        );
+    }
+}
+
+#[test]
+fn search_result_settings_xml_clamps_numeric_values_and_dependent_context() {
+    for (attributes, expected) in [
+        (
+            "result-limit=\"0\" preview-chars=\"0\" context-before=\"40\"",
+            SearchResultSettings {
+                result_limit: 1,
+                preview_chars: 1,
+                context_before: 0,
+            },
+        ),
+        (
+            "result-limit=\"10001\" preview-chars=\"2001\" context-before=\"2000\"",
+            SearchResultSettings {
+                result_limit: 10_000,
+                preview_chars: 2_000,
+                context_before: 1_999,
+            },
+        ),
+        (
+            "preview-chars=\"10\"",
+            SearchResultSettings {
+                result_limit: 500,
+                preview_chars: 10,
+                context_before: 9,
+            },
+        ),
+    ] {
+        let xml =
+            format!("<fragile-notepad-settings><search {attributes} /></fragile-notepad-settings>");
+        assert_eq!(EditorSettings::from_xml_str(&xml).search_results, expected);
+    }
+}
 
 #[test]
 fn modern_syntax_presets_persist_and_highlight_distinct_token_roles() {

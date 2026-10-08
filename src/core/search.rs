@@ -278,13 +278,24 @@ impl PreparedSearch {
         &self,
         chunks: impl IntoIterator<Item = &'a str>,
     ) -> Vec<TextMatch> {
+        let mut matches = Vec::new();
+        self.for_each_match_in_chunks(chunks, |found| matches.push(found));
+        matches
+    }
+
+    /// Visits matches without allocating a collection proportional to their count.
+    pub fn for_each_match_in_chunks<'a>(
+        &self,
+        chunks: impl IntoIterator<Item = &'a str>,
+        visit: impl FnMut(TextMatch),
+    ) {
         match &self.matcher {
             PreparedMatcher::Literal(query) => {
-                compute_literal_matches_in_chunks(chunks, query, self.options)
+                visit_literal_matches_in_chunks(chunks, query, self.options, visit);
             }
-            PreparedMatcher::Regex(_) => {
+            PreparedMatcher::Regex(regex) => {
                 let text = chunks.into_iter().collect::<String>();
-                self.matches(&text)
+                visit_regex_matches(&text, regex, self.options, visit);
             }
         }
     }
@@ -361,8 +372,19 @@ fn compute_literal_matches_in_chunks<'a>(
     query: &str,
     options: SearchOptions,
 ) -> Vec<TextMatch> {
+    let mut matches = Vec::new();
+    visit_literal_matches_in_chunks(chunks, query, options, |found| matches.push(found));
+    matches
+}
+
+fn visit_literal_matches_in_chunks<'a>(
+    chunks: impl IntoIterator<Item = &'a str>,
+    query: &str,
+    options: SearchOptions,
+    mut visit: impl FnMut(TextMatch),
+) {
     if query.is_empty() {
-        return Vec::new();
+        return;
     }
 
     // Keep a single scan cursor across chunks, plus both word-boundary neighbors.
@@ -372,7 +394,6 @@ fn compute_literal_matches_in_chunks<'a>(
     let width = query_chars.len();
     let mut input = chunks.into_iter().flat_map(str::chars);
     let mut window = VecDeque::with_capacity(width + 1);
-    let mut matches = Vec::new();
     let mut absolute_offset = 0usize;
     let mut before = None;
     loop {
@@ -409,22 +430,30 @@ fn compute_literal_matches_in_chunks<'a>(
             before = Some(ch);
         }
         if accepted {
-            matches.push(TextMatch::new(start, absolute_offset));
+            visit(TextMatch::new(start, absolute_offset));
         }
     }
-    matches
 }
 
 fn compute_regex_matches(text: &str, regex: &Regex, options: SearchOptions) -> Vec<TextMatch> {
-    regex
-        .find_iter(text)
-        .filter(|text_match| {
-            !text_match.is_empty()
-                && (!options.whole_word
-                    || is_whole_word_match(text, text_match.start(), text_match.end()))
-        })
-        .map(|text_match| TextMatch::new(text_match.start(), text_match.end()))
-        .collect()
+    let mut matches = Vec::new();
+    visit_regex_matches(text, regex, options, |found| matches.push(found));
+    matches
+}
+
+fn visit_regex_matches(
+    text: &str,
+    regex: &Regex,
+    options: SearchOptions,
+    mut visit: impl FnMut(TextMatch),
+) {
+    for found in regex.find_iter(text) {
+        if !found.is_empty()
+            && (!options.whole_word || is_whole_word_match(text, found.start(), found.end()))
+        {
+            visit(TextMatch::new(found.start(), found.end()));
+        }
+    }
 }
 
 pub fn replacement_for_match(

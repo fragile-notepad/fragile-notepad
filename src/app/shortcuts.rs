@@ -10,6 +10,7 @@ use crate::editor::EditorAction;
 use crate::message::Message;
 
 use super::App;
+use super::windowing::managed::ManagedWindow;
 
 impl App {
     pub(super) fn update_runtime_event(
@@ -75,6 +76,54 @@ impl App {
                 };
             }
             return Task::none();
+        }
+        let advanced_search = self
+            .advanced_search_window
+            .is_some_and(|search_window| search_window.is(window_id));
+        let inline_search = self.main_window_id == Some(window_id) && self.is_find_visible;
+        if (advanced_search || inline_search)
+            && let Some(action) = search_key_action(&event, status)
+        {
+            return match action {
+                SearchKeyAction::Close => self.update_search(if advanced_search {
+                    SearchMessage::AdvancedSearchClosed
+                } else {
+                    SearchMessage::HideFind
+                }),
+                SearchKeyAction::Next => self.update_search(if advanced_search {
+                    SearchMessage::AdvancedFindNextRun
+                } else {
+                    SearchMessage::FindNext
+                }),
+                SearchKeyAction::Previous => self.update_search(if advanced_search {
+                    SearchMessage::AdvancedFindPreviousRun
+                } else {
+                    SearchMessage::FindPrevious
+                }),
+                SearchKeyAction::FindAll if advanced_search => {
+                    self.update_search(SearchMessage::AdvancedSearchRun)
+                }
+                SearchKeyAction::FindAll => Task::none(),
+                SearchKeyAction::Focus { previous } => {
+                    let scope = if advanced_search {
+                        crate::ui::advanced_search_panel::PANEL_ID
+                    } else {
+                        crate::ui::find_panel::PANEL_ID
+                    };
+                    use iced::advanced::widget::{operate, operation};
+                    if previous {
+                        operate(operation::scope(
+                            scope.into(),
+                            operation::focusable::focus_previous(),
+                        ))
+                    } else {
+                        operate(operation::scope(
+                            scope.into(),
+                            operation::focusable::focus_next(),
+                        ))
+                    }
+                }
+            };
         }
         // Escape is forwarded even when a text input consumes it, so the prompt
         // can dismiss in one press. Other captured keys keep their normal behavior.
@@ -183,6 +232,50 @@ impl App {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchKeyAction {
+    Close,
+    Next,
+    Previous,
+    FindAll,
+    Focus { previous: bool },
+}
+
+fn search_key_action(event: &Event, status: Status) -> Option<SearchKeyAction> {
+    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+    if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
+        return Some(SearchKeyAction::Close);
+    }
+    // Inputs leave Enter to this handler. Keys consumed by editing or a
+    // dropdown keep that widget's behavior, including Enter inside the editor.
+    if status == Status::Captured || modifiers.alt() {
+        return None;
+    }
+    let command = command_or_control(*modifiers);
+    match key {
+        keyboard::Key::Named(keyboard::key::Named::Enter) if command => {
+            Some(SearchKeyAction::FindAll)
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter | keyboard::key::Named::F3)
+            if !command =>
+        {
+            Some(if modifiers.shift() {
+                SearchKeyAction::Previous
+            } else {
+                SearchKeyAction::Next
+            })
+        }
+        keyboard::Key::Named(keyboard::key::Named::Tab) if !command => {
+            Some(SearchKeyAction::Focus {
+                previous: modifiers.shift(),
+            })
+        }
+        _ => None,
+    }
+}
+
 pub fn event_to_message(event: Event, status: Status, window_id: window::Id) -> Option<Message> {
     should_forward_runtime_event(&event, status)
         .then_some(Message::RuntimeEvent(event, status, window_id))
@@ -225,12 +318,70 @@ fn command_or_control(modifiers: keyboard::Modifiers) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{event_to_message, shortcut_for_scroll, should_forward_runtime_event};
+    use super::{
+        SearchKeyAction, event_to_message, search_key_action, shortcut_for_scroll,
+        should_forward_runtime_event,
+    };
     use crate::core::ShortcutCommand;
     use crate::message::Message;
     use iced::event::Event;
     use iced::{keyboard, mouse, window};
     use std::path::PathBuf;
+
+    fn search_key(named: keyboard::key::Named, modifiers: keyboard::Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(named),
+            modified_key: keyboard::Key::Named(named),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn search_navigation_respects_modifiers_and_captured_editor_keys() {
+        use iced::event::Status;
+        use keyboard::Modifiers;
+        use keyboard::key::Named;
+        for key in [Named::Enter, Named::F3] {
+            assert_eq!(
+                search_key_action(&search_key(key, Modifiers::empty()), Status::Ignored),
+                Some(SearchKeyAction::Next)
+            );
+            assert_eq!(
+                search_key_action(&search_key(key, Modifiers::SHIFT), Status::Ignored),
+                Some(SearchKeyAction::Previous)
+            );
+            assert_eq!(
+                search_key_action(&search_key(key, Modifiers::empty()), Status::Captured),
+                None,
+                "search must not consume an editor's captured key"
+            );
+        }
+        assert_eq!(
+            search_key_action(&search_key(Named::Enter, Modifiers::CTRL), Status::Ignored),
+            Some(SearchKeyAction::FindAll)
+        );
+        assert_eq!(
+            search_key_action(&search_key(Named::Enter, Modifiers::ALT), Status::Ignored),
+            None
+        );
+        assert_eq!(
+            search_key_action(&search_key(Named::Tab, Modifiers::SHIFT), Status::Ignored),
+            Some(SearchKeyAction::Focus { previous: true })
+        );
+        assert_eq!(
+            search_key_action(
+                &search_key(Named::Escape, Modifiers::empty()),
+                Status::Captured
+            ),
+            Some(SearchKeyAction::Close)
+        );
+    }
 
     #[test]
     fn scroll_direction_maps_to_zoom_shortcuts() {

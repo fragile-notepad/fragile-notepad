@@ -17,13 +17,24 @@ fn order() -> &'static [Work] {
         let mut scheduler = UpdateScheduler::new();
         scheduler.register(
             Session,
-            &[Search, Find, Outline, Analysis, Syntax, LoadingFind],
+            &[
+                Search,
+                SearchPreview,
+                Find,
+                FindSelection,
+                Outline,
+                Analysis,
+                Syntax,
+                LoadingFind,
+            ],
         );
         scheduler.register(Syntax, &[Analysis]);
         scheduler.register(Analysis, &[Search]);
         scheduler.register(Outline, &[Search]);
         scheduler.register(LoadingFind, &[Find]);
         scheduler.register(Find, &[Search]);
+        scheduler.register(FindSelection, &[Find]);
+        scheduler.register(SearchPreview, &[Search]);
         scheduler.register(Search, &[Files]);
         scheduler.register(Files, &[]);
         scheduler
@@ -91,7 +102,13 @@ pub(super) fn drain(app: &mut App) -> Task<Message> {
                 }
                 .resume(),
             ),
-            Work::Find => search::refresh_matches(&mut app.find, &app.workspace),
+            Work::Find => search::refresh_matches(
+                &mut app.find,
+                &app.workspace,
+                app.search_dialog.result_settings.normalized().result_limit,
+            ),
+            Work::FindSelection => search::synchronize_selection(&mut app.find, &app.workspace),
+            Work::SearchPreview => tasks.push(app.refresh_workspace_search_preview()),
             Work::LoadingFind => tasks.push(search::schedule_loading_find(
                 &app.find,
                 &mut app.loading_find_scheduled,

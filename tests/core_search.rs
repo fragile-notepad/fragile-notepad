@@ -354,3 +354,132 @@ fn prepared_extended_search_expands_query_and_replacement_escapes() {
         "alpha\tbeta"
     );
 }
+
+#[test]
+fn zero_width_regex_matches_include_unicode_boundaries_and_empty_documents() {
+    let options = SearchOptions {
+        mode: SearchMode::Regex,
+        case_sensitive: true,
+        whole_word: false,
+    };
+    let search = PreparedSearch::new(r"(?m)^|$", options).unwrap().unwrap();
+    assert_eq!(
+        search.matches("é\nβ"),
+        vec![
+            TextMatch::new(0, 0),
+            TextMatch::new(2, 2),
+            TextMatch::new(3, 3),
+            TextMatch::new(5, 5),
+        ]
+    );
+    assert_eq!(
+        search.matches_in_chunks(["é", "\n", "β"]),
+        search.matches("é\nβ")
+    );
+    assert_eq!(search.matches(""), vec![TextMatch::new(0, 0)]);
+}
+
+#[test]
+fn find_state_regex_replacements_expand_captures_and_insert_at_anchors() {
+    let mut find = FindState::with_query(r"(?m)^(\w+)");
+    find.set_mode(SearchMode::Regex);
+    find.set_replacement("<$1>");
+    let (replaced, count) = find.replace_all("café\nβeta");
+    assert_eq!((replaced.as_str(), count), ("<café>\n<βeta>", 2));
+
+    find.set_query(r"(?m)^");
+    find.set_replacement("> ");
+    let (replaced, count) = find.replace_all("café\nβeta");
+    assert_eq!((replaced.as_str(), count), ("> café\n> βeta", 2));
+}
+
+#[test]
+fn find_state_reports_regex_errors_and_recovers_after_query_edits() {
+    let mut find = FindState::with_query("[");
+    find.set_mode(SearchMode::Regex);
+    find.refresh_matches("alpha");
+    assert!(find.error.is_some());
+    assert!(find.matches.is_empty());
+    find.set_query("a");
+    find.refresh_matches("alpha");
+    assert!(find.error.is_none());
+    assert_eq!(find.matches.len(), 2);
+}
+
+#[test]
+fn find_state_navigation_can_stop_at_document_boundaries() {
+    let mut find = FindState::with_query("a");
+    find.wrap_around = false;
+    find.refresh_matches("a a");
+    assert_eq!(find.previous(), None);
+    assert_eq!(find.next(), Some(TextMatch::new(2, 3)));
+    assert_eq!(find.next(), None);
+    assert_eq!(find.current(), Some(TextMatch::new(2, 3)));
+}
+
+#[test]
+fn multiline_regex_treats_crlf_as_one_editor_line_boundary() {
+    let options = SearchOptions {
+        mode: SearchMode::Regex,
+        case_sensitive: true,
+        whole_word: false,
+    };
+    let line = PreparedSearch::new(r"(?m)^café$", options)
+        .unwrap()
+        .unwrap();
+    assert_eq!(line.matches("café\r\nnext"), vec![TextMatch::new(0, 5)]);
+    let ends = PreparedSearch::new(r"(?m)$", options).unwrap().unwrap();
+    assert_eq!(
+        ends.matches("café\r\nnext"),
+        vec![TextMatch::new(5, 5), TextMatch::new(11, 11)]
+    );
+}
+
+#[test]
+fn match_visitors_can_stop_after_unicode_matches_across_chunks() {
+    for mode in [SearchMode::Normal, SearchMode::Regex] {
+        let search = PreparedSearch::new(
+            "é",
+            SearchOptions {
+                mode,
+                case_sensitive: true,
+                whole_word: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let mut visited = Vec::new();
+        let stopped = search.try_for_each_match_in_chunks(["x", "éé ", "é tail"], |found| {
+            visited.push(found);
+            std::ops::ControlFlow::Break("enough")
+        });
+        assert_eq!(stopped, std::ops::ControlFlow::Break("enough"));
+        assert_eq!(visited, vec![TextMatch::new(1, 3)]);
+    }
+
+    let consumed = std::cell::Cell::new(0);
+    let chunks = ["xé ", "unvisited tail"]
+        .into_iter()
+        .inspect(|_| consumed.set(consumed.get() + 1));
+    let search = PreparedSearch::new("é", SearchOptions::normal(true, false))
+        .unwrap()
+        .unwrap();
+    let _ = search.try_for_each_match_in_chunks(chunks, |_| std::ops::ControlFlow::Break(()));
+    assert_eq!(consumed.get(), 1);
+}
+
+#[test]
+fn limited_find_state_reports_only_confirmed_overflow_and_replaces_all_matches() {
+    let mut find = FindState::with_query("a");
+    find.match_limit = Some(500);
+    find.refresh_matches(&"a".repeat(500));
+    assert_eq!(find.matches.len(), 500);
+    assert!(!find.matches_limited);
+    find.refresh_matches(&"a".repeat(501));
+    assert_eq!(find.matches.len(), 500);
+    assert!(find.matches_limited);
+    find.set_replacement("b");
+    let (replaced, count) = find.replace_all(&"a".repeat(501));
+    assert_eq!(replaced, "b".repeat(501));
+    assert_eq!(count, 501);
+}

@@ -125,29 +125,6 @@ impl App {
         iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
     }
 
-    pub(super) fn replace_active_document_range(
-        &mut self,
-        start: EditorPosition,
-        end: EditorPosition,
-        replacement: String,
-    ) -> bool {
-        let Some(document) = self.workspace.active_document_mut() else {
-            return false;
-        };
-        if !document.has_complete_text_index() {
-            self.file_status = Some(String::from("Finish loading before editing."));
-            return false;
-        }
-
-        document.set_main_selection(EditorSelection::new(start, end));
-        replace_selection(
-            document,
-            &replacement,
-            false,
-            self.settings.indentation.width() as usize,
-        )
-    }
-
     fn cached_outline_entries(&self, document_id: DocumentId) -> Option<&[FunctionEntry]> {
         let document = self.workspace.document(document_id)?;
         self.outline_parsing.functions_for(document)

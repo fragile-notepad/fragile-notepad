@@ -511,3 +511,591 @@ fn advanced_find_next_wraps_when_enabled() {
         EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 5))
     );
 }
+
+#[test]
+fn inline_navigation_starts_at_the_caret_and_follows_result_selection() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "one one one",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged("one".into()));
+    let _ = app.update(Message::FindNext);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor
+            .column,
+        3
+    );
+    let _ = app.update(Message::AdvancedFindAllCurrentRun);
+    let document_id = app.workspace.active_document_id();
+    let selection = app.search_dialog.results[1].selection;
+    let _ = app.update(Message::AdvancedSearchResultSelected(
+        document_id,
+        selection,
+    ));
+    assert_eq!(app.find.current_match, Some(1));
+    assert_eq!(app.search_dialog.selected_result, Some(1));
+    let _ = app.update(Message::FindNext);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor
+            .column,
+        11
+    );
+}
+
+#[test]
+fn zero_width_regex_navigation_advances_in_both_directions() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "é\nβ\nγ",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::AdvancedSearchQueryChanged(r"(?m)^".into()));
+    let _ = app.update(Message::AdvancedSearchModeSelected(
+        crate::core::SearchMode::Regex,
+    ));
+    for line in [0, 1, 2, 0] {
+        let _ = app.update(Message::AdvancedFindNextRun);
+        assert_eq!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .main_selection()
+                .cursor,
+            EditorPosition::new(line, 0)
+        );
+    }
+    let _ = app.update(Message::AdvancedFindPreviousRun);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor,
+        EditorPosition::new(2, 0)
+    );
+    let _ = app.update(Message::FindPrevious);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor,
+        EditorPosition::new(1, 0)
+    );
+}
+
+#[test]
+fn shared_search_options_survive_reopening_advanced_search() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::AdvancedSearchQueryChanged(r"(cat)".into()));
+    let _ = app.update(Message::AdvancedSearchReplacementChanged("<$1>".into()));
+    let _ = app.update(Message::AdvancedSearchModeSelected(
+        crate::core::SearchMode::Regex,
+    ));
+    let _ = app.update(Message::AdvancedSearchCaseSensitiveToggled(true));
+    let _ = app.update(Message::AdvancedSearchWrapAroundToggled(false));
+    assert_eq!(app.find.mode, crate::core::SearchMode::Regex);
+    assert!(!app.find.wrap_around);
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::Replace,
+    ));
+    assert_eq!(app.search_dialog.mode, crate::core::SearchMode::Regex);
+    assert_eq!(app.search_dialog.query, r"(cat)");
+    assert_eq!(app.search_dialog.replacement, "<$1>");
+    assert!(app.search_dialog.case_sensitive);
+    assert!(!app.search_dialog.wrap_around);
+    let _ = app.update(Message::FindWholeWordToggled(true));
+    assert!(app.search_dialog.whole_word);
+}
+
+#[test]
+fn replacement_uses_the_match_near_the_caret_and_selects_the_next_match() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "cat cat cat",
+        EditorSelection::new(EditorPosition::new(0, 4), EditorPosition::new(0, 4)),
+    );
+    let _ = app.update(Message::FindQueryChanged("cat".into()));
+    let _ = app.update(Message::FindReplacementChanged("cat!".into()));
+    let _ = app.update(Message::ReplaceCurrent);
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "cat cat! cat");
+    assert_eq!(document.main_selection().range().start.column, 9);
+    assert_eq!(document.main_selection().range().end.column, 12);
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        app.workspace.active_document().unwrap().text(),
+        "cat cat cat"
+    );
+}
+
+#[test]
+fn inline_regex_replace_all_inserts_at_anchors_as_one_undo_action() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "é\nβ",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged(r"(?m)^".into()));
+    let _ = app.update(Message::FindModeSelected(crate::core::SearchMode::Regex));
+    let _ = app.update(Message::FindReplacementChanged("> ".into()));
+    let _ = app.update(Message::ReplaceAll);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "> é\n> β");
+    let _ = app.update(Message::Undo);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "é\nβ");
+}
+
+#[test]
+fn old_preview_generations_cannot_overwrite_newer_queries_or_commands() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "one two",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::AdvancedSearchQueryChanged("one".into()));
+    let old_generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchQueryChanged("two".into()));
+    let new_generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(old_generation));
+    assert!(app.search_dialog.results.is_empty());
+    let _ = app.update(Message::AdvancedSearchPreviewDue(new_generation));
+    assert_eq!(app.search_dialog.results.len(), 1);
+    assert_eq!(
+        app.search_dialog.results[0].selection.range().start.column,
+        4
+    );
+    let _ = app.update(Message::AdvancedFindNextRun);
+    let status = app.search_dialog.status.clone();
+    let _ = app.update(Message::AdvancedSearchPreviewDue(new_generation));
+    assert_eq!(app.search_dialog.status, status);
+}
+
+#[test]
+fn document_edits_invalidate_result_rows_before_a_debounced_refresh() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged("needle".into()));
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::Find,
+    ));
+    assert_eq!(app.search_dialog.results.len(), 1);
+    set_active_document_text(
+        &mut app,
+        "gone needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::None);
+    assert!(app.search_dialog.results.is_empty());
+    let generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+    assert_eq!(
+        app.search_dialog.results[0].selection.range().start.column,
+        5
+    );
+}
+
+#[test]
+fn closing_a_searched_document_invalidates_open_document_results() {
+    let (mut app, _) = App::new();
+    let first = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let second = app.workspace.insert_loaded_file("second.txt", "needle");
+    let _ = app.update(Message::FindQueryChanged("needle".into()));
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::FindInFiles,
+    ));
+    assert_eq!(app.search_dialog.results.len(), 2);
+    app.workspace.close(second);
+    let _ = app.update(Message::None);
+    assert!(app.search_dialog.results.is_empty());
+    let generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+    assert_eq!(app.search_dialog.results.len(), 1);
+    assert_eq!(app.search_dialog.results[0].document_id, first);
+}
+
+#[test]
+fn fresh_replacement_and_count_status_survive_workspace_reactions() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "old old",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged("old".into()));
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::Replace,
+    ));
+    let _ = app.update(Message::AdvancedSearchReplacementChanged("new".into()));
+    let _ = app.update(Message::AdvancedReplaceAllCurrentRun);
+    assert_eq!(app.search_dialog.status, "Replaced 2 matches");
+    let _ = app.update(Message::None);
+    assert_eq!(app.search_dialog.status, "Replaced 2 matches");
+    let _ = app.update(Message::AdvancedSearchQueryChanged("new".into()));
+    let _ = app.update(Message::AdvancedCountRun);
+    assert_eq!(app.search_dialog.status, "2 matches");
+    assert!(app.search_dialog.results.is_empty());
+    let _ = app.update(Message::None);
+    assert_eq!(app.search_dialog.status, "2 matches");
+}
+
+#[test]
+fn advanced_navigation_moves_between_open_documents_and_honors_wrap() {
+    let (mut app, _) = App::new();
+    let first = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let second = app.workspace.insert_loaded_file("second.txt", "x needle");
+    app.workspace.select(first);
+    let _ = app.update(Message::FindQueryChanged("needle".into()));
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::FindInFiles,
+    ));
+    let _ = app.update(Message::AdvancedFindNextRun);
+    assert_eq!(app.workspace.active_document_id(), first);
+    let _ = app.update(Message::AdvancedFindNextRun);
+    assert_eq!(app.workspace.active_document_id(), second);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .range()
+            .start
+            .column,
+        2
+    );
+    let _ = app.update(Message::AdvancedSearchWrapAroundToggled(false));
+    let _ = app.update(Message::AdvancedFindNextRun);
+    assert_eq!(app.workspace.active_document_id(), second);
+    let _ = app.update(Message::AdvancedFindPreviousRun);
+    assert_eq!(app.workspace.active_document_id(), first);
+    let _ = app.update(Message::AdvancedSearchWrapAroundToggled(true));
+    let _ = app.update(Message::AdvancedFindPreviousRun);
+    assert_eq!(app.workspace.active_document_id(), second);
+}
+
+#[test]
+fn replacement_edits_preserve_the_debounced_query_preview() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::AdvancedSearchQueryChanged("needle".into()));
+    let generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchReplacementChanged("new".into()));
+    let _ = app.update(Message::AdvancedSearchWrapAroundToggled(false));
+    let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+    assert_eq!(app.search_dialog.results.len(), 1);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "needle");
+}
+
+#[test]
+fn unchanged_replacements_still_advance_without_an_undo_edit() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "cat cat",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 3)),
+    );
+    let _ = app.update(Message::FindQueryChanged("cat".into()));
+    let _ = app.update(Message::FindReplacementChanged("cat".into()));
+    let revision = app.workspace.active_document().unwrap().revision();
+    let _ = app.update(Message::ReplaceCurrent);
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.main_selection().range().start.column, 4);
+    assert_eq!(document.revision(), revision);
+}
+
+#[test]
+fn manual_caret_motion_updates_the_counter_and_resets_zero_width_navigation() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "a\nb",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged(r"(?m)^".into()));
+    let _ = app.update(Message::FindModeSelected(crate::core::SearchMode::Regex));
+    let _ = app.update(Message::FindNext);
+    assert_eq!(app.find.current_match, Some(0));
+    app.workspace
+        .active_document_mut()
+        .unwrap()
+        .set_main_selection(EditorSelection::new(
+            EditorPosition::new(0, 1),
+            EditorPosition::new(0, 1),
+        ));
+    let _ = app.update(Message::None);
+    assert_eq!(app.find.current_match, None);
+    app.workspace
+        .active_document_mut()
+        .unwrap()
+        .set_main_selection(EditorSelection::new(
+            EditorPosition::new(0, 0),
+            EditorPosition::new(0, 0),
+        ));
+    let _ = app.update(Message::None);
+    let _ = app.update(Message::FindNext);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor
+            .line,
+        0
+    );
+    let second = app.workspace.insert_loaded_file("other.txt", "x\ny");
+    app.workspace.select(second);
+    let _ = app.update(Message::None);
+    let _ = app.update(Message::FindNext);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor
+            .line,
+        0
+    );
+}
+
+#[test]
+fn replacement_count_excludes_matches_inside_a_paired_line_ending() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "foo\r\nfoo",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::AdvancedSearchQueryChanged(r"foo|\r".into()));
+    let _ = app.update(Message::AdvancedSearchModeSelected(
+        crate::core::SearchMode::Regex,
+    ));
+    let _ = app.update(Message::AdvancedSearchReplacementChanged("bar".into()));
+    let _ = app.update(Message::AdvancedReplaceAllCurrentRun);
+    assert_eq!(
+        app.workspace.active_document().unwrap().text(),
+        "bar\r\nbar"
+    );
+    assert_eq!(app.search_dialog.status, "Replaced 2 matches");
+}
+
+#[test]
+fn live_preview_reports_searching_then_results_and_preserves_empty_or_error_status() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "one two two",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::AdvancedSearchQueryChanged("one".into()));
+    let old_generation = app.search_dialog.preview_generation;
+    assert_eq!(app.search_dialog.status, "Searching…");
+    let _ = app.update(Message::AdvancedSearchQueryChanged("two".into()));
+    let current_generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(old_generation));
+    assert_eq!(app.search_dialog.status, "Searching…");
+    assert!(app.search_dialog.results.is_empty());
+    let _ = app.update(Message::AdvancedSearchPreviewDue(current_generation));
+    assert_eq!(app.search_dialog.status, "2 matches");
+    assert_eq!(app.search_dialog.match_count, 2);
+
+    let _ = app.update(Message::AdvancedSearchQueryChanged(String::new()));
+    assert_eq!(app.search_dialog.status, "No query");
+    let _ = app.update(Message::AdvancedSearchPreviewDue(current_generation));
+    assert_eq!(app.search_dialog.status, "No query");
+
+    let _ = app.update(Message::AdvancedSearchModeSelected(
+        crate::core::SearchMode::Regex,
+    ));
+    let _ = app.update(Message::AdvancedSearchQueryChanged("[".into()));
+    let error = app.search_dialog.status.clone();
+    assert!(error.starts_with("Invalid regex:"));
+    let _ = app.update(Message::AdvancedSearchPreviewDue(current_generation));
+    assert_eq!(app.search_dialog.status, error);
+}
+
+#[test]
+fn inline_navigation_and_unchanged_replacement_allow_pending_preview_to_finish() {
+    for command in [
+        Message::FindNext,
+        Message::FindPrevious,
+        Message::ReplaceCurrent,
+        Message::ReplaceAll,
+    ] {
+        let (mut app, _) = App::new();
+        set_active_document_text(
+            &mut app,
+            "needle needle",
+            EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+        );
+        let _ = app.update(Message::ToggleAdvancedSearch(
+            crate::message::AdvancedSearchTab::Find,
+        ));
+        let _ = app.update(Message::AdvancedSearchQueryChanged("needle".into()));
+        let _ = app.update(Message::AdvancedSearchReplacementChanged("needle".into()));
+        let generation = app.search_dialog.preview_generation;
+        assert_eq!(app.search_dialog.status, "Searching…");
+
+        let _ = app.update(command);
+        let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+        assert_eq!(app.search_dialog.status, "2 matches");
+        assert_eq!(app.search_dialog.results.len(), 2);
+        assert_eq!(
+            app.workspace.active_document().unwrap().text(),
+            "needle needle"
+        );
+    }
+}
+
+#[test]
+fn visible_search_applies_changed_limits_and_count_remains_exact() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        &"a".repeat(501),
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged("a".into()));
+    assert_eq!(app.find.matches.len(), 500);
+    assert!(app.find.matches_limited);
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::Find,
+    ));
+    assert_eq!(app.search_dialog.match_count, 500);
+    assert!(app.search_dialog.matches_limited);
+    let _ = app.update(Message::AdvancedResultLimitChanged("3".into()));
+    assert_eq!(app.find.matches.len(), 3);
+    assert!(app.search_dialog.results.is_empty());
+    let generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+    assert_eq!(app.search_dialog.results.len(), 3);
+    assert_eq!(app.search_dialog.status, "3+ matches");
+
+    let _ = app.update(Message::AdvancedCountRun);
+    assert_eq!(app.search_dialog.match_count, 501);
+    assert!(!app.search_dialog.matches_limited);
+    assert_eq!(
+        app.search_dialog
+            .count_summary
+            .as_ref()
+            .unwrap()
+            .total_matches,
+        501
+    );
+    let _ = app.update(Message::AdvancedResultLimitChanged("2".into()));
+    assert_eq!(app.find.matches.len(), 2);
+    assert_eq!(
+        app.search_dialog
+            .count_summary
+            .as_ref()
+            .unwrap()
+            .total_matches,
+        501
+    );
+    assert_eq!(app.search_dialog.status, "501 matches");
+    let _ = app.update(Message::AdvancedSearchRun);
+    assert!(app.search_dialog.count_summary.is_none());
+    assert_eq!(app.search_dialog.results.len(), 2);
+
+    let _ = app.update(Message::FindReplacementChanged("b".into()));
+    let _ = app.update(Message::ReplaceAll);
+    assert_eq!(
+        app.workspace.active_document().unwrap().text(),
+        "b".repeat(501)
+    );
+}
+
+#[test]
+fn pending_find_uses_latest_limit_while_count_and_replacement_remain_unbounded() {
+    for operation in 0..3 {
+        let (mut app, _) = App::new();
+        let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+        app.search_dialog.query = "a".into();
+        app.search_dialog.replacement = "aa".into();
+        app.search_dialog.active_tab = crate::message::AdvancedSearchTab::FindInFiles;
+        let _ = app.update(match operation {
+            0 => Message::AdvancedFindAllOpenRun,
+            1 => Message::AdvancedCountRun,
+            _ => Message::AdvancedReplaceAllOpenRun,
+        });
+        assert!(app.pending_search.is_some());
+        let _ = app.update(Message::AdvancedResultLimitChanged("2".into()));
+        finish_search_document(&mut app, disk, generation, "aaaaaa");
+        assert!(app.pending_search.is_none());
+        if operation == 1 {
+            let summary = app.search_dialog.count_summary.as_ref().unwrap();
+            assert_eq!(summary.total_matches, 6);
+            assert_eq!(summary.matched_documents, 1);
+            assert_eq!(summary.per_document.len(), 2);
+            assert!(app.search_dialog.results.is_empty());
+        } else {
+            assert_eq!(app.search_dialog.results.len(), 2);
+            assert!(app.search_dialog.matches_limited);
+            assert!(app.search_dialog.count_summary.is_none());
+        }
+        if operation == 2 {
+            assert_eq!(app.workspace.document(disk).unwrap().text(), "a".repeat(12));
+            assert_eq!(app.search_dialog.status, "Replaced 6 matches");
+        }
+    }
+}
+
+#[test]
+fn capped_results_snapshot_unvisited_documents_without_repeated_refreshes() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        &"a".repeat(501),
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let later = app.workspace.insert_loaded_file("later.txt", "a");
+    let _ = app.update(Message::FindQueryChanged("a".into()));
+    let _ = app.update(Message::ToggleAdvancedSearch(
+        crate::message::AdvancedSearchTab::FindInFiles,
+    ));
+    assert_eq!(app.search_dialog.result_documents.len(), 2);
+    {
+        let document = app.workspace.document_mut(later).unwrap();
+        document.buffer = EditorBuffer::from_text("changed");
+        document.refresh_after_text_change();
+    }
+    let _ = app.update(Message::None);
+    assert!(app.search_dialog.results.is_empty());
+    let generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchPreviewDue(generation));
+    assert_eq!(app.search_dialog.results.len(), 500);
+    assert_eq!(app.search_dialog.result_documents.len(), 2);
+    let _ = app.update(Message::None);
+    assert_eq!(app.search_dialog.preview_generation, generation);
+    assert_eq!(app.search_dialog.results.len(), 500);
+}

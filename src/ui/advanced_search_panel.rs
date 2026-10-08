@@ -1,39 +1,44 @@
+//! A compact search workspace with live, grouped results.
 use iced::widget::{
-    button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
+    button, checkbox, column, container, row, rule, scrollable, space, text, text_input, tooltip,
 };
-use iced::{Center, Element, Fill, Font};
+use iced::{Center, Color, Element, Fill, Font};
 
 use crate::core::SearchMode;
 use crate::message::{AdvancedSearchTab, Message};
-use crate::search_dialog::{SearchDialogState, SearchResult};
-use crate::ui::dropdown::dropdown;
-use crate::ui::{styles, utility};
+use crate::search_dialog::{SearchCountSummary, SearchDialogState, SearchResult};
+use crate::ui::icons::hero::IconTone;
+use crate::ui::icons::search::{self, SearchIcon};
+use crate::ui::{motion, styles, utility};
 
 pub const QUERY_INPUT_ID: &str = "advanced-search-query";
+pub const REPLACEMENT_INPUT_ID: &str = "advanced-search-replacement";
+pub const PANEL_ID: &str = "fragile-notepad-advanced-search-panel";
 
 pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
     let body = column![search_form(dialog), commands(dialog), results(dialog)]
         .spacing(12)
         .height(Fill);
-
     container(
         column![
-            container(navigation(dialog.active_tab)).padding([4, 16]),
+            container(navigation(dialog.active_tab))
+                .padding([12, 16])
+                .width(Fill),
             rule::horizontal(1).style(styles::utility_rule),
             container(body).padding(16).width(Fill).height(Fill),
             rule::horizontal(1).style(styles::utility_rule),
             row![
-                container(text(status_label(dialog)).size(12))
-                    .style(styles::info_muted)
-                    .width(Fill),
+                status_feedback(dialog),
+                utility::description("Esc to close"),
                 action("Close", Message::AdvancedSearchClosed, false, true),
             ]
-            .spacing(16)
+            .spacing(14)
             .align_y(Center)
             .padding([8, 16]),
         ]
         .height(Fill),
     )
+    .id(PANEL_ID)
     .width(Fill)
     .height(Fill)
     .style(styles::settings_panel)
@@ -42,183 +47,264 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
 
 fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
     let open = open_scope(active);
-    let tabs = [
-        ("Find", search_tab(false, open)),
-        ("Replace", search_tab(true, open)),
-    ]
-    .into_iter()
-    .fold(row![].spacing(2), |tabs, (label, tab)| {
-        tabs.push(
-            button(text(label).size(13).font(utility::semibold()))
-                .padding([8, 16])
-                .style(styles::dialog_tab_button(active == tab))
-                .on_press(Message::AdvancedSearchTabSelected(tab)),
-        )
-    });
-
-    container(tabs)
-        .padding(3)
-        .style(styles::dialog_tab_group)
-        .into()
+    container(
+        row![
+            button(text("Find").size(13).font(utility::semibold()))
+                .padding([7, 18])
+                .style(styles::dialog_tab_button(!replace_mode(active)))
+                .on_press(Message::AdvancedSearchTabSelected(search_tab(false, open))),
+            button(text("Replace").size(13).font(utility::semibold()))
+                .padding([7, 18])
+                .style(styles::dialog_tab_button(replace_mode(active)))
+                .on_press(Message::AdvancedSearchTabSelected(search_tab(true, open))),
+        ]
+        .spacing(2),
+    )
+    .padding(3)
+    .style(styles::dialog_tab_group)
+    .into()
 }
 
 fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let open = open_scope(dialog.active_tab);
     let replace = replace_mode(dialog.active_tab);
-    let submit = if open {
-        Message::AdvancedFindAllOpenRun
-    } else {
-        Message::AdvancedFindNextRun
-    };
-    let mut fields = column![field(
-        "Find",
-        text_input("Enter text or a pattern", &dialog.query)
-            .id(QUERY_INPUT_ID)
-            .on_input(Message::AdvancedSearchQueryChanged)
-            .on_submit(submit)
-            .padding([8, 10])
-            .size(14)
-            .width(Fill)
-            .style(styles::input)
-            .into(),
-    )]
-    .spacing(8);
-    if replace {
-        fields = fields.push(field(
-            "Replace with",
-            text_input("Replacement text", &dialog.replacement)
-                .on_input(Message::AdvancedSearchReplacementChanged)
-                .padding([8, 10])
+    let open = open_scope(dialog.active_tab);
+    let enabled = !dialog.query.is_empty() && !has_query_error(dialog);
+    let query = container(
+        row![
+            search::icon(SearchIcon::MagnifyingGlass, 18, IconTone::Muted),
+            text_input("Find text or a pattern…", &dialog.query)
+                .id(QUERY_INPUT_ID)
+                .on_input(Message::AdvancedSearchQueryChanged)
+                .padding([8, 8])
                 .size(14)
                 .width(Fill)
-                .style(styles::input)
-                .into(),
-        ));
-    }
-    let scope = field(
-        "Search in",
-        dropdown(
-            Some(open),
-            &[false, true],
-            |open| {
-                if *open {
-                    "Open documents"
+                .style(styles::search_input),
+            option(
+                "Aa",
+                "Match case",
+                dialog.case_sensitive,
+                Message::AdvancedSearchCaseSensitiveToggled(!dialog.case_sensitive)
+            ),
+            option(
+                "ab",
+                "Match whole words",
+                dialog.whole_word,
+                Message::AdvancedSearchWholeWordToggled(!dialog.whole_word)
+            ),
+            option(
+                r"\n",
+                r"Interpret escapes: \n, \t, \r",
+                dialog.mode == SearchMode::Extended,
+                Message::AdvancedSearchModeSelected(if dialog.mode == SearchMode::Extended {
+                    SearchMode::Normal
                 } else {
-                    "Current document"
-                }
-                .into()
-            },
-            move |open| Message::AdvancedSearchTabSelected(search_tab(replace, open)),
+                    SearchMode::Extended
+                })
+            ),
+            option(
+                ".*",
+                "Use regular expressions",
+                dialog.mode == SearchMode::Regex,
+                Message::AdvancedSearchModeSelected(if dialog.mode == SearchMode::Regex {
+                    SearchMode::Normal
+                } else {
+                    SearchMode::Regex
+                })
+            ),
+            container(rule::vertical(1).style(styles::utility_rule)).height(20),
+            icon_action(
+                SearchIcon::ArrowUp,
+                "Previous match · Shift+Enter",
+                Message::AdvancedFindPreviousRun,
+                enabled
+            ),
+            icon_action(
+                SearchIcon::ArrowDown,
+                "Next match · Enter",
+                Message::AdvancedFindNextRun,
+                enabled
+            ),
+        ]
+        .spacing(3)
+        .align_y(Center),
+    )
+    .padding([3, 9])
+    .width(Fill)
+    .style(styles::search_field);
+
+    // Keeping these widgets mounted preserves the caret during reversible reveals.
+    let replacement = motion::reveal(
+        container(
+            container(
+                row![
+                    search::icon(SearchIcon::Return, 18, IconTone::Muted),
+                    text_input("Replace with…", &dialog.replacement)
+                        .id(REPLACEMENT_INPUT_ID)
+                        .on_input(Message::AdvancedSearchReplacementChanged)
+                        .padding([8, 8])
+                        .size(14)
+                        .width(Fill)
+                        .style(styles::search_input),
+                ]
+                .spacing(3)
+                .align_y(Center),
+            )
+            .padding([3, 9])
+            .width(Fill)
+            .style(styles::search_field),
         )
-        .width(200)
-        .into(),
+        .padding(iced::Padding {
+            top: 8.0,
+            ..Default::default()
+        }),
+        replace,
+        styles::settings_panel_background,
     );
-    if open {
-        let filter = field(
-            "File names",
-            text_input("All · e.g. *.rs;*.txt", &dialog.include_pattern)
-                .on_input(Message::AdvancedSearchIncludeChanged)
-                .on_submit(Message::AdvancedFindAllOpenRun)
-                .padding([8, 10])
-                .size(13)
-                .width(Fill)
-                .style(styles::input)
-                .into(),
-        );
-        fields = fields.push(row![scope, filter].spacing(16).align_y(Center));
-    } else {
-        fields = fields.push(scope);
-    }
-    column![fields, options(dialog)].spacing(10).into()
+
+    let scope = row![
+        scope_button("Current document", !open, search_tab(replace, false)),
+        scope_button("Open documents", open, search_tab(replace, true)),
+        space::horizontal(),
+        checkbox(dialog.wrap_around)
+            .style(styles::checkbox)
+            .label("Wrap around")
+            .text_size(12)
+            .size(14)
+            .on_toggle(Message::AdvancedSearchWrapAroundToggled),
+    ]
+    .spacing(6)
+    .align_y(Center);
+    let filter = motion::reveal(
+        container(
+            row![
+                utility::description("File names"),
+                text_input("All files · e.g. *.rs; *.txt", &dialog.include_pattern)
+                    .on_input(Message::AdvancedSearchIncludeChanged)
+                    .padding([6, 9])
+                    .size(12)
+                    .width(Fill)
+                    .style(styles::input),
+            ]
+            .spacing(12)
+            .align_y(Center),
+        )
+        .padding(iced::Padding {
+            top: 8.0,
+            ..Default::default()
+        }),
+        open,
+        styles::settings_panel_background,
+    );
+    let hint = match dialog.mode {
+        SearchMode::Extended => r"Escapes enabled · \n new line, \t tab, \r carriage return",
+        SearchMode::Regex if replace => {
+            "Regular expressions enabled · Use $1, $2, … for captured groups"
+        }
+        SearchMode::Regex => "Regular expressions enabled",
+        SearchMode::Normal => "",
+    };
+    column![
+        query,
+        replacement,
+        container(column![scope, filter]).padding(iced::Padding {
+            top: 10.0,
+            ..Default::default()
+        }),
+        motion::reveal(
+            container(utility::description(hint)).padding(iced::Padding {
+                top: 6.0,
+                ..Default::default()
+            }),
+            !hint.is_empty(),
+            styles::settings_panel_background
+        ),
+    ]
+    .into()
 }
 
-fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let modes = [
-        (SearchMode::Normal, "Plain text"),
-        (SearchMode::Extended, "Escapes"),
-        (SearchMode::Regex, "Regex"),
-    ]
-    .into_iter()
-    .fold(row![].spacing(4), |row, (mode, label)| {
-        row.push(
-            button(text(label).size(12))
-                .padding([6, 12])
-                .style(styles::settings_category_button(dialog.mode == mode))
-                .on_press(Message::AdvancedSearchModeSelected(mode)),
-        )
-    });
-    let hint = match dialog.mode {
-        SearchMode::Extended => Some(r"Escapes: \n (new line), \t (tab), \r (carriage return)."),
-        SearchMode::Regex if replace_mode(dialog.active_tab) => {
-            Some("Use $1, $2, … for captured groups.")
-        }
-        _ => None,
-    };
-    let mut flags = row![
-        checkbox(dialog.case_sensitive)
-            .style(styles::checkbox)
-            .label("Match case")
-            .text_size(12)
-            .size(16)
-            .on_toggle(Message::AdvancedSearchCaseSensitiveToggled),
-        checkbox(dialog.whole_word)
-            .style(styles::checkbox)
-            .label("Whole words")
-            .text_size(12)
-            .size(16)
-            .on_toggle(Message::AdvancedSearchWholeWordToggled),
-    ]
-    .spacing(18)
-    .align_y(Center);
-    if !open_scope(dialog.active_tab) {
-        flags = flags.push(
-            checkbox(dialog.wrap_around)
-                .style(styles::checkbox)
-                .label("Wrap around")
-                .text_size(12)
-                .size(16)
-                .on_toggle(Message::AdvancedSearchWrapAroundToggled),
-        );
-    }
-    let mut options = column![row![modes, flags].spacing(20).align_y(Center)].spacing(8);
-    if let Some(hint) = hint {
-        options = options.push(utility::description(hint));
-    }
-    options.into()
+fn scope_button(
+    label: &'static str,
+    selected: bool,
+    tab: AdvancedSearchTab,
+) -> Element<'static, Message> {
+    button(text(label).size(12))
+        .padding([6, 10])
+        .style(styles::search_option(selected))
+        .on_press(Message::AdvancedSearchTabSelected(tab))
+        .into()
+}
+
+fn option(
+    label: &'static str,
+    hint: &'static str,
+    active: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    tooltip(
+        button(container(text(label).size(12).font(utility::semibold())).center(28))
+            .width(28)
+            .height(28)
+            .padding(0)
+            .style(styles::search_option(active))
+            .on_press(message),
+        container(text(hint).size(12))
+            .padding([6, 9])
+            .style(styles::utility_card),
+        tooltip::Position::Bottom,
+    )
+    .delay(std::time::Duration::from_millis(450))
+    .into()
+}
+
+fn icon_action(
+    icon: SearchIcon,
+    hint: &'static str,
+    message: Message,
+    enabled: bool,
+) -> Element<'static, Message> {
+    tooltip(
+        button(container(search::icon(icon, 16, IconTone::Text)).center(28))
+            .width(28)
+            .height(28)
+            .padding(0)
+            .style(styles::icon_button)
+            .on_press_maybe(enabled.then_some(message)),
+        container(text(hint).size(12))
+            .padding([6, 9])
+            .style(styles::utility_card),
+        tooltip::Position::Bottom,
+    )
+    .delay(std::time::Duration::from_millis(450))
+    .into()
 }
 
 fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let enabled = !dialog.query.is_empty();
-    let is_open = open_scope(dialog.active_tab);
-    let find_all = if is_open {
+    let enabled = !dialog.query.is_empty() && !has_query_error(dialog);
+    let open = open_scope(dialog.active_tab);
+    let find_all = if open {
         Message::AdvancedFindAllOpenRun
     } else {
         Message::AdvancedFindAllCurrentRun
     };
-    let replace_all = if is_open {
+    let replace_all = if open {
         Message::AdvancedReplaceAllOpenRun
     } else {
         Message::AdvancedReplaceAllCurrentRun
     };
-    let mut actions = row![].spacing(8);
-    if !is_open {
-        actions = actions.push(action(
-            "Find next",
-            Message::AdvancedFindNextRun,
-            true,
-            enabled,
-        ));
-    }
-    actions = actions
-        .push(action(
+    let mut actions = row![
+        action(
             "Find all",
             find_all,
-            is_open,
-            enabled && dialog.parsed_result_settings().is_ok(),
-        ))
-        .push(action("Count", Message::AdvancedCountRun, false, enabled));
+            true,
+            enabled && dialog.parsed_result_settings().is_ok()
+        ),
+        action("Count", Message::AdvancedCountRun, false, enabled),
+    ]
+    .spacing(8)
+    .align_y(Center);
     if replace_mode(dialog.active_tab) {
-        if !is_open {
+        actions = actions.push(space::horizontal());
+        if !open {
             actions = actions.push(action(
                 "Replace",
                 Message::AdvancedReplaceRun,
@@ -227,127 +313,315 @@ fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
             ));
         }
         actions = actions.push(action("Replace all", replace_all, false, enabled));
+    } else {
+        actions = actions
+            .push(space::horizontal())
+            .push(utility::description("Enter next · Ctrl+Enter find all"));
     }
     actions.into()
 }
 
 fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let count = dialog.results.len();
-    let header = row![
-        text("Results").size(14).font(utility::semibold()),
-        utility::badge(dialog.match_count.to_string()),
-        space::horizontal(),
-        action(
-            if dialog.result_options_visible {
-                "Hide result options"
-            } else {
-                "Result options"
-            },
-            Message::AdvancedResultOptionsToggled,
-            false,
-            true,
-        ),
+    let count_summary = dialog
+        .count_summary
+        .as_ref()
+        .filter(|_| !is_searching(dialog));
+    let document_count = dialog
+        .results
+        .iter()
+        .map(|result| result.document_id)
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let mut header = row![
+        text(if count_summary.is_some() {
+            "Full count"
+        } else {
+            "Results"
+        })
+        .size(13)
+        .font(utility::semibold())
     ]
-    .spacing(10)
+    .spacing(8)
     .align_y(Center);
-    let body: Element<'_, Message> = if count == 0 {
-        let label = if dialog.match_count > 0 {
-            "Count complete. Use Find all to view matching locations."
+    if count_summary.is_none() {
+        header = header.push(utility::badge(format!(
+            "{}{}",
+            dialog.match_count,
+            if dialog.matches_limited { "+" } else { "" }
+        )));
+    }
+    if count_summary.is_none() && document_count > 0 {
+        header = header.push(
+            container(
+                text(format!(
+                    "in {document_count} {}",
+                    if document_count == 1 {
+                        "document"
+                    } else {
+                        "documents"
+                    }
+                ))
+                .size(12),
+            )
+            .style(styles::info_muted),
+        );
+    }
+    if dialog.matches_limited && count_summary.is_none() {
+        header = header.push(utility::description("Limit reached"));
+    }
+    header = header.push(space::horizontal()).push(
+        tooltip(
+            button(
+                row![
+                    search::icon(SearchIcon::Adjustments, 15, IconTone::Text),
+                    text("Display").size(12)
+                ]
+                .spacing(6)
+                .align_y(Center),
+            )
+            .padding([5, 8])
+            .style(styles::search_option(dialog.result_options_visible))
+            .on_press(Message::AdvancedResultOptionsToggled),
+            container(text("Search limit and preview length").size(12))
+                .padding([6, 9])
+                .style(styles::utility_card),
+            tooltip::Position::Bottom,
+        )
+        .delay(std::time::Duration::from_millis(450)),
+    );
+
+    let body: Element<'_, Message> = if dialog.results.is_empty() && is_searching(dialog) {
+        space::horizontal().width(Fill).height(Fill).into()
+    } else if let Some(summary) = count_summary {
+        count_results(dialog, summary)
+    } else if dialog.results.is_empty() {
+        let (title, hint) = if has_query_error(dialog) {
+            (
+                "Check your pattern",
+                "Fix the regular expression to continue searching.",
+            )
+        } else if dialog.query.is_empty() {
+            (
+                "Search your documents",
+                "Start typing to preview matching lines.",
+            )
         } else if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches")
         {
-            "No matches"
+            (
+                "No matches found",
+                "Try another query or adjust the search options.",
+            )
         } else {
-            "No results yet"
+            ("Ready to search", "Matching lines will appear here.")
         };
-        container(utility::description(label))
-            .padding(16)
-            .center(Fill)
-            .into()
+        container(
+            column![
+                container(search::icon(
+                    SearchIcon::MagnifyingGlass,
+                    25,
+                    IconTone::Text
+                ))
+                .center(52)
+                .style(styles::search_empty_icon),
+                space::vertical().height(3),
+                text(title).size(15).font(utility::semibold()),
+                utility::description(hint),
+            ]
+            .spacing(8)
+            .align_x(Center),
+        )
+        .padding(16)
+        .center(Fill)
+        .into()
     } else {
         let mut rows = column![].spacing(2);
-        let mut previous = None;
-        for result in &dialog.results {
-            if previous != Some(result.document_id) {
-                rows = rows.push(
-                    container(
-                        text(&result.document_title)
+        let mut index = 0;
+        while index < dialog.results.len() {
+            let first = &dialog.results[index];
+            let end = dialog.results[index..]
+                .iter()
+                .position(|result| result.document_id != first.document_id)
+                .map_or(dialog.results.len(), |offset| index + offset);
+            rows = rows.push(
+                container(
+                    row![
+                        text(&first.document_title)
                             .size(12)
                             .font(utility::semibold())
-                            .wrapping(text::Wrapping::None),
-                    )
-                    .padding([6, 10])
-                    .width(Fill)
-                    .clip(true)
-                    .style(styles::find_status),
-                );
-                previous = Some(result.document_id);
+                            .wrapping(text::Wrapping::None)
+                            .width(Fill),
+                        text(format!(
+                            "{} {}",
+                            end - index,
+                            if end - index == 1 { "match" } else { "matches" }
+                        ))
+                        .size(11),
+                    ]
+                    .spacing(10)
+                    .align_y(Center),
+                )
+                .padding([7, 10])
+                .width(Fill)
+                .clip(true)
+                .style(styles::search_result_group),
+            );
+            for result_index in index..end {
+                rows = rows.push(result_row(
+                    &dialog.results[result_index],
+                    dialog.selected_result == Some(result_index),
+                ));
             }
-            rows = rows.push(result_row(result));
+            index = end;
         }
         scrollable(rows)
+            .id("advanced-search-results")
             .style(styles::scrollable)
-            .spacing(8)
+            .spacing(6)
             .smooth_scroll(true)
             .height(Fill)
             .into()
     };
-    let body = if dialog.result_options_visible {
-        row![
-            container(body).width(Fill).height(Fill),
-            rule::vertical(1).style(styles::utility_rule),
-            scrollable(result_options(dialog))
-                .style(styles::scrollable)
-                .spacing(4)
-                .width(240)
+    container(
+        column![
+            header,
+            motion::reveal(
+                container(result_options(dialog)).padding(iced::Padding {
+                    top: 8.0,
+                    bottom: 8.0,
+                    ..Default::default()
+                }),
+                dialog.result_options_visible,
+                styles::editor_background
+            ),
+            rule::horizontal(1).style(styles::utility_rule),
+            container(body)
+                .padding(iced::Padding {
+                    top: 6.0,
+                    ..Default::default()
+                })
+                .width(Fill)
                 .height(Fill),
         ]
-        .spacing(10)
+        .height(Fill),
+    )
+    .padding(12)
+    .width(Fill)
+    .height(Fill)
+    .style(styles::utility_card)
+    .into()
+}
+
+fn count_results<'a>(
+    dialog: &'a SearchDialogState,
+    summary: &'a SearchCountSummary,
+) -> Element<'a, Message> {
+    let total = text(summary.total_matches.to_string())
+        .size(40)
+        .font(utility::semibold())
+        .style(|theme| text::Style {
+            color: Some(styles::accent_color(theme)),
+        });
+    let documents = summary.per_document.len();
+    let scope = format!(
+        "{documents} {} searched",
+        if documents == 1 {
+            "document"
+        } else {
+            "documents"
+        }
+    );
+    let mut overview = row![
+        column![
+            row![
+                total,
+                text(if summary.total_matches == 1 {
+                    "match"
+                } else {
+                    "matches"
+                })
+                .size(16),
+            ]
+            .spacing(10)
+            .align_y(Center),
+            container(text(scope).size(12)).style(styles::info_muted),
+        ]
+        .spacing(2),
+        space::horizontal(),
+    ]
+    .spacing(12)
+    .align_y(Center);
+    if summary.total_matches > 0 {
+        overview = overview.push(action(
+            "Show matching lines",
+            if open_scope(dialog.active_tab) {
+                Message::AdvancedFindAllOpenRun
+            } else {
+                Message::AdvancedFindAllCurrentRun
+            },
+            true,
+            dialog.parsed_result_settings().is_ok(),
+        ));
+    }
+    let mut rows = column![container(overview).padding([12, 10])].spacing(4);
+    for document in &summary.per_document {
+        rows = rows.push(
+            container(
+                row![
+                    text(&document.title)
+                        .size(12)
+                        .wrapping(text::Wrapping::None)
+                        .width(Fill),
+                    text(document.match_count.to_string())
+                        .size(13)
+                        .font(utility::semibold()),
+                ]
+                .spacing(12)
+                .align_y(Center),
+            )
+            .padding([9, 10])
+            .width(Fill)
+            .clip(true)
+            .style(styles::search_result_group),
+        );
+    }
+    scrollable(rows)
+        .id("advanced-search-count")
+        .style(styles::scrollable)
+        .spacing(6)
+        .smooth_scroll(true)
         .height(Fill)
-        .into()
-    } else {
-        body
-    };
-    container(column![header, body].spacing(6).height(Fill))
-        .padding(10)
-        .height(Fill)
-        .width(Fill)
-        .style(styles::utility_card)
         .into()
 }
 
 fn result_options(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let mut options = column![
-        row![
-            utility::description("Next Find all"),
-            space::horizontal(),
-            button(text("Reset").size(12))
-                .padding([4, 6])
-                .style(styles::command_button)
-                .on_press(Message::AdvancedResultOptionsReset),
-        ]
-        .spacing(6)
-        .align_y(Center),
+    let fields = row![
         result_option_field(
-            "Displayed results",
+            "Search limit",
             &dialog.result_limit_input,
             Message::AdvancedResultLimitChanged
         ),
         result_option_field(
-            "Preview characters",
+            "Preview length",
             &dialog.preview_chars_input,
             Message::AdvancedPreviewCharsChanged
         ),
         result_option_field(
-            "Before match (chars)",
+            "Before match",
             &dialog.context_before_input,
             Message::AdvancedPreviewContextChanged
         ),
+        button(text("Reset").size(12))
+            .padding([6, 12])
+            .style(styles::command_button)
+            .on_press(Message::AdvancedResultOptionsReset),
     ]
-    .spacing(6);
+    .spacing(16)
+    .align_y(iced::Bottom);
+    let mut options = column![fields].spacing(6);
     if let Err(error) = dialog.parsed_result_settings() {
-        options = options.push(utility::description(error));
+        options = options.push(container(text(error).size(12)).style(styles::search_status(true)));
     }
-    container(options).width(Fill).into()
+    options.into()
 }
 
 fn result_option_field<'a>(
@@ -355,59 +629,67 @@ fn result_option_field<'a>(
     value: &'a str,
     on_input: fn(String) -> Message,
 ) -> Element<'a, Message> {
-    row![
-        text(label).size(12).width(Fill),
+    column![
+        utility::description(label),
         text_input("", value)
             .on_input(on_input)
-            .padding([4, 6])
+            .padding([5, 7])
             .size(12)
-            .width(72)
-            .style(styles::input),
+            .width(Fill)
+            .style(styles::input)
     ]
-    .spacing(6)
-    .align_y(Center)
+    .spacing(4)
     .width(Fill)
     .into()
 }
 
-fn result_row(result: &SearchResult) -> Element<'_, Message> {
+fn result_row(result: &SearchResult, selected: bool) -> Element<'_, Message> {
     let start = result.selection.range().start;
+    let range = &result.preview_match;
+    let preview: Element<'_, Message> = if let (Some(before), Some(found), Some(after)) = (
+        result.preview.get(..range.start),
+        result.preview.get(range.clone()),
+        result.preview.get(range.end..),
+    ) {
+        text::Rich::<(), Message>::with_spans([
+            text::Span::new(before),
+            text::Span::new(if found.is_empty() { "│" } else { found })
+                .background(Color::from_rgba8(55, 145, 245, 0.19)),
+            text::Span::new(after),
+        ])
+        .size(12)
+        .font(Font::MONOSPACE)
+        .wrapping(text::Wrapping::None)
+        .into()
+    } else {
+        text(&result.preview)
+            .size(12)
+            .font(Font::MONOSPACE)
+            .wrapping(text::Wrapping::None)
+            .into()
+    };
     button(
         row![
             container(
                 text(format!("{}:{}", start.line + 1, start.column + 1))
-                    .size(12)
+                    .size(11)
                     .font(Font::MONOSPACE)
             )
-            .width(76)
+            .width(72)
             .style(styles::info_muted),
-            container(
-                text(&result.preview)
-                    .size(13)
-                    .font(Font::MONOSPACE)
-                    .wrapping(text::Wrapping::None)
-            )
-            .width(Fill)
-            .clip(true),
+            container(preview).width(Fill).clip(true),
         ]
-        .spacing(12)
+        .spacing(10)
         .align_y(Center),
     )
-    .padding([5, 10])
+    .padding([7, 10])
     .width(Fill)
-    .style(styles::menu_dropdown_item)
+    .style(styles::search_result(selected))
     .on_press(Message::AdvancedSearchResultSelected(
         result.document_id,
         result.selection,
     ))
     .into()
-}
-
-fn field<'a>(label: &'static str, control: Element<'a, Message>) -> Element<'a, Message> {
-    row![text(label).size(13).width(88), control]
-        .spacing(10)
-        .align_y(Center)
-        .into()
 }
 
 fn action<'a>(
@@ -416,8 +698,8 @@ fn action<'a>(
     primary: bool,
     enabled: bool,
 ) -> Element<'a, Message> {
-    button(text(label).size(13))
-        .padding([8, 14])
+    button(text(label).size(12))
+        .padding([7, 12])
         .style(if primary {
             styles::primary_command_button
         } else {
@@ -427,30 +709,81 @@ fn action<'a>(
         .into()
 }
 
+fn has_query_error(dialog: &SearchDialogState) -> bool {
+    dialog.status.starts_with("Invalid regex:")
+}
+fn is_searching(dialog: &SearchDialogState) -> bool {
+    dialog.status.starts_with("Searching")
+        || dialog.status.starts_with("Loading")
+        || dialog.status.starts_with("Updating results")
+}
+fn has_error(dialog: &SearchDialogState) -> bool {
+    has_query_error(dialog)
+        || dialog
+            .parsed_result_settings()
+            .err()
+            .is_some_and(|error| dialog.status == error)
+        || dialog.status.starts_with("Search canceled")
+        || dialog.status == "No document"
+}
+fn status_feedback(dialog: &SearchDialogState) -> Element<'_, Message> {
+    let label = status_label(dialog);
+    let error = has_error(dialog);
+    let searching = is_searching(dialog);
+    let light = if error {
+        motion::StatusLightState::Error
+    } else if searching {
+        motion::StatusLightState::Searching
+    } else if dialog.match_count > 0 || dialog.status.starts_with("Replaced") {
+        motion::StatusLightState::Success
+    } else {
+        motion::StatusLightState::Idle
+    };
+    let compact = if has_query_error(dialog) {
+        label.lines().last().unwrap_or(label)
+    } else {
+        label
+    };
+    tooltip(
+        container(
+            row![
+                motion::status_light(light),
+                text(compact).size(12).wrapping(text::Wrapping::None),
+            ]
+            .spacing(8)
+            .align_y(Center),
+        )
+        .style(styles::search_status(error))
+        .width(Fill)
+        .clip(true),
+        container(text(label).size(12))
+            .padding([8, 10])
+            .max_width(560)
+            .style(styles::utility_card),
+        tooltip::Position::Top,
+    )
+    .delay(std::time::Duration::from_millis(450))
+    .into()
+}
 fn status_label(dialog: &SearchDialogState) -> &str {
-    if let Err(error) = dialog.parsed_result_settings() {
-        error
-    } else if dialog.status == "No query" {
-        "Ready to search"
+    if matches!(dialog.status.as_str(), "No query" | "Ready" | "") {
+        "Idle"
     } else {
         &dialog.status
     }
 }
-
 const fn replace_mode(tab: AdvancedSearchTab) -> bool {
     matches!(
         tab,
         AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles
     )
 }
-
 const fn open_scope(tab: AdvancedSearchTab) -> bool {
     matches!(
         tab,
         AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
     )
 }
-
 const fn search_tab(replace: bool, open: bool) -> AdvancedSearchTab {
     match (replace, open) {
         (false, false) => AdvancedSearchTab::Find,

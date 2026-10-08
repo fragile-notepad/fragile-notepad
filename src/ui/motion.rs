@@ -9,6 +9,7 @@ use iced::{Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vect
 use crate::message::Message;
 
 const ENTRANCE_DURATION: Duration = Duration::from_millis(150);
+const REVEAL_DURATION: Duration = Duration::from_millis(140);
 
 type FadeBackground = fn(&Theme) -> Color;
 
@@ -81,7 +82,359 @@ pub fn fade<'a>(
         fade: Some((progress.clamp(0.0, 1.0), background)),
         external_progress: None,
         interactive,
+        reveal: None,
     })
+}
+
+/// Keep a disclosure mounted while its height and paint settle into place.
+///
+/// Always call this at the same tree position, including while collapsed. Put
+/// spacing inside `content` so it also folds away. Width stays at its natural
+/// size; height eases from zero to the child's intrinsic height. The animation
+/// requests redraws only during a transition and reverses from its current
+/// position when toggled quickly.
+pub fn reveal<'a>(
+    content: impl Into<Element<'a, Message>>,
+    expanded: bool,
+    background: FadeBackground,
+) -> Element<'a, Message> {
+    let mut motion = Motion::entrance(content.into(), 0.0, String::new());
+    motion.reveal = Some((expanded, background));
+    Element::new(motion)
+}
+
+/// The activity represented by the small indicator beside a search status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusLightState {
+    Idle,
+    Searching,
+    Success,
+    Error,
+}
+
+/// One breathing dot that unfurls into a rounded loading arc and folds back.
+///
+/// Animation stays local to the widget, uses timed redraws, and pauses while
+/// its window is unfocused. Rebuilding the surrounding status preserves its
+/// phase and focus state. Changes morph from the current appearance, including
+/// when another change interrupts an unfinished transition.
+pub fn status_light(state: StatusLightState) -> Element<'static, Message> {
+    Element::new(StatusLight(state))
+}
+
+const STATUS_LIGHT_SIZE: f32 = 12.0;
+const STATUS_IDLE_FRAME: Duration = Duration::from_millis(67);
+const STATUS_SEARCH_FRAME: Duration = Duration::from_millis(33);
+const STATUS_TRANSITION: Duration = Duration::from_millis(200);
+
+struct StatusLight(StatusLightState);
+
+struct StatusLightAnimation {
+    state: StatusLightState,
+    focused: bool,
+    elapsed: Duration,
+    last_frame: Option<Instant>,
+    next_frame: Option<Instant>,
+    weights: [f32; 4],
+    from_weights: [f32; 4],
+    transition_elapsed: Duration,
+    transitioning: bool,
+}
+
+impl StatusLightState {
+    fn weights(self) -> [f32; 4] {
+        let mut weights = [0.0; 4];
+        weights[self as usize] = 1.0;
+        weights
+    }
+
+    fn frame_interval(self) -> Option<Duration> {
+        match self {
+            Self::Idle => Some(STATUS_IDLE_FRAME),
+            Self::Searching => Some(STATUS_SEARCH_FRAME),
+            Self::Success | Self::Error => None,
+        }
+    }
+}
+
+impl StatusLightAnimation {
+    fn new(state: StatusLightState) -> Self {
+        Self {
+            state,
+            focused: true,
+            elapsed: Duration::ZERO,
+            last_frame: None,
+            next_frame: None,
+            weights: state.weights(),
+            from_weights: state.weights(),
+            transition_elapsed: Duration::ZERO,
+            transitioning: false,
+        }
+    }
+
+    fn retarget(&mut self, state: StatusLightState) {
+        self.state = state;
+        self.from_weights = self.weights;
+        self.transition_elapsed = Duration::ZERO;
+        self.transitioning = self.weights != state.weights();
+        self.last_frame = None;
+        self.next_frame = None;
+    }
+
+    fn advance(&mut self, elapsed: Duration) {
+        self.elapsed = self.elapsed.saturating_add(elapsed);
+        if !self.transitioning {
+            return;
+        }
+        self.transition_elapsed = self.transition_elapsed.saturating_add(elapsed);
+        let raw =
+            (self.transition_elapsed.as_secs_f32() / STATUS_TRANSITION.as_secs_f32()).min(1.0);
+        let eased = raw * raw * (3.0 - 2.0 * raw);
+        let target = self.state.weights();
+        for (index, weight) in self.weights.iter_mut().enumerate() {
+            *weight = self.from_weights[index] + (target[index] - self.from_weights[index]) * eased;
+        }
+        if raw >= 1.0 {
+            self.weights = target;
+            self.from_weights = target;
+            self.transitioning = false;
+        }
+    }
+
+    fn frame_interval(&self) -> Option<Duration> {
+        if self.transitioning {
+            Some(STATUS_SEARCH_FRAME)
+        } else {
+            self.state.frame_interval()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StatusLightGeometry {
+    centerline_radius: f32,
+    stroke_radius: f32,
+    sweep: f32,
+    head_angle: f32,
+    taper: f32,
+    sample_count: usize,
+    glow_radius: f32,
+    glow_alpha: f32,
+}
+
+impl StatusLightGeometry {
+    fn from_animation(animation: &StatusLightAnimation) -> Self {
+        let [idle, searching, success, error] = animation.weights;
+        // Reduce the periodic phase before converting to f32 so a long-lived
+        // window keeps a smooth spinner instead of losing fractional seconds.
+        let elapsed = animation.elapsed.as_secs_f64();
+        let breath_phase = (elapsed.rem_euclid(2.4) / 2.4) as f32;
+        let spinner_phase = elapsed.rem_euclid(1.0) as f32;
+        let breath = 0.5 - 0.5 * (std::f32::consts::TAU * breath_phase).cos();
+        let centerline_radius = 4.0 * searching;
+        let sweep = (std::f32::consts::TAU * 2.0 / 3.0) * searching;
+        // Dense opaque round stamps form one connected stroke. At zero sweep
+        // there is exactly one stamp; opacity never depends on overlap count.
+        let sample_count = ((centerline_radius * sweep / 0.45).ceil() as usize + 1).clamp(1, 40);
+        Self {
+            centerline_radius,
+            stroke_radius: (2.4 + 0.35 * breath) * idle + 0.9 * searching + 3.0 * (success + error),
+            sweep,
+            head_angle: std::f32::consts::TAU * spinner_phase - std::f32::consts::FRAC_PI_2,
+            taper: 0.12 * searching,
+            sample_count,
+            glow_radius: (4.5 + 0.8 * breath) * idle + 5.0 * (searching + success + error),
+            glow_alpha: (0.12 + 0.1 * breath) * idle + 0.1 * searching + 0.14 * (success + error),
+        }
+    }
+
+    fn sample(self, center: iced::Point, index: usize) -> (iced::Point, f32) {
+        let fraction = if self.sample_count > 1 {
+            index as f32 / (self.sample_count - 1) as f32
+        } else {
+            0.5
+        };
+        let angle = self.head_angle - self.sweep * (1.0 - fraction);
+        (
+            iced::Point::new(
+                center.x + self.centerline_radius * angle.cos(),
+                center.y + self.centerline_radius * angle.sin(),
+            ),
+            self.stroke_radius + self.taper * (2.0 * fraction - 1.0),
+        )
+    }
+}
+
+impl Widget<Message, Theme, Renderer> for StatusLight {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<StatusLightAnimation>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(StatusLightAnimation::new(self.0))
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        let animation = tree.state.downcast_mut::<StatusLightAnimation>();
+        if animation.state != self.0 {
+            animation.retarget(self.0);
+        }
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(
+            Length::Fixed(STATUS_LIGHT_SIZE),
+            Length::Fixed(STATUS_LIGHT_SIZE),
+        )
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.resolve(
+            Length::Fixed(STATUS_LIGHT_SIZE),
+            Length::Fixed(STATUS_LIGHT_SIZE),
+            Size::new(STATUS_LIGHT_SIZE, STATUS_LIGHT_SIZE),
+        ))
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let animation = tree.state.downcast_mut::<StatusLightAnimation>();
+        match event {
+            Event::Window(window::Event::Unfocused) => {
+                animation.focused = false;
+                animation.last_frame = None;
+                animation.next_frame = None;
+                return;
+            }
+            Event::Window(window::Event::Focused) => {
+                animation.focused = true;
+                animation.last_frame = None;
+                animation.next_frame = None;
+            }
+            _ => {}
+        }
+        if !animation.focused
+            || layout
+                .bounds()
+                .intersection(viewport)
+                .is_none_or(|bounds| bounds.width <= 0.0 || bounds.height <= 0.0)
+        {
+            animation.last_frame = None;
+            animation.next_frame = None;
+            return;
+        }
+        if animation.frame_interval().is_none() {
+            return;
+        }
+        let now = if let Event::Window(window::Event::RedrawRequested(now)) = event {
+            if let Some(previous) = animation.last_frame.replace(*now) {
+                animation.advance(now.saturating_duration_since(previous));
+            }
+            *now
+        } else {
+            Instant::now()
+        };
+        let Some(interval) = animation.frame_interval() else {
+            animation.next_frame = None;
+            return;
+        };
+        // Other controls can redraw the window more often. Keep our deadline
+        // instead of pulling it forward or requesting another immediate frame.
+        let next = animation
+            .next_frame
+            .filter(|deadline| *deadline > now)
+            .unwrap_or(now + interval);
+        animation.next_frame = Some(next);
+        shell.request_redraw_at(next);
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let Some(bounds) = layout.bounds().intersection(viewport) else {
+            return;
+        };
+        let animation = tree.state.downcast_ref::<StatusLightAnimation>();
+        let [idle, searching, success, error] = animation.weights;
+        let geometry = StatusLightGeometry::from_animation(animation);
+        let center = layout.bounds().center();
+        let [accent, success_color, error_color] = super::styles::search_light_colors(theme);
+        let activity_color = super::styles::search_activity_color(theme);
+        let mut color = status_blended_color([
+            (accent, idle),
+            (activity_color, searching),
+            (success_color, success),
+            (error_color, error),
+        ])
+        .unwrap_or(accent);
+        // Keep the same luminous core throughout expansion and collapse.
+        // Opaque stamps also avoid alpha accumulation where the arc overlaps.
+        color.a = 1.0;
+        renderer.with_layer(bounds, |renderer| {
+            status_circle(
+                renderer,
+                center,
+                geometry.glow_radius,
+                color.scale_alpha(geometry.glow_alpha),
+            );
+            for index in 0..geometry.sample_count {
+                let (point, radius) = geometry.sample(center, index);
+                status_circle(renderer, point, radius, color);
+            }
+        });
+    }
+}
+
+fn status_blended_color<const N: usize>(colors: [(Color, f32); N]) -> Option<Color> {
+    let mut alpha = 0.0;
+    let mut red = 0.0;
+    let mut green = 0.0;
+    let mut blue = 0.0;
+    for (color, weight) in colors {
+        let contribution = color.a * weight;
+        alpha += contribution;
+        red += color.r * contribution;
+        green += color.g * contribution;
+        blue += color.b * contribution;
+    }
+    (alpha > 0.0).then(|| Color::from_rgba(red / alpha, green / alpha, blue / alpha, alpha))
+}
+
+fn status_circle(renderer: &mut Renderer, center: iced::Point, radius: f32, color: Color) {
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle::new(
+                iced::Point::new(center.x - radius, center.y - radius),
+                Size::new(radius * 2.0, radius * 2.0),
+            ),
+            border: iced::Border {
+                radius: radius.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        color,
+    );
 }
 
 struct Motion<'a> {
@@ -91,6 +444,7 @@ struct Motion<'a> {
     fade: Option<(f32, FadeBackground)>,
     external_progress: Option<f32>,
     interactive: bool,
+    reveal: Option<(bool, FadeBackground)>,
 }
 
 impl<'a> Motion<'a> {
@@ -102,6 +456,7 @@ impl<'a> Motion<'a> {
             fade: None,
             external_progress: None,
             interactive: true,
+            reveal: None,
         }
     }
 }
@@ -110,6 +465,8 @@ struct State {
     key: String,
     started: Option<Instant>,
     progress: f32,
+    reveal_target: bool,
+    reveal_from: f32,
 }
 
 impl Widget<Message, Theme, Renderer> for Motion<'_> {
@@ -122,6 +479,8 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             key: self.key.clone(),
             started: None,
             progress: if self.fade.is_some() { 1.0 } else { 0.0 },
+            reveal_target: self.reveal.is_some_and(|(expanded, _)| expanded),
+            reveal_from: 0.0,
         })
     }
 
@@ -132,11 +491,22 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             state.started = None;
             state.progress = 0.0;
         }
+        if let Some((expanded, _)) = self.reveal
+            && state.reveal_target != expanded
+        {
+            state.reveal_target = expanded;
+            state.reveal_from = state.progress;
+            state.started = None;
+        }
         tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
     fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
+        let mut size = self.content.as_widget().size();
+        if self.reveal.is_some() {
+            size.height = Length::Shrink;
+        }
+        size
     }
 
     fn layout(
@@ -145,6 +515,25 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
+        if self.reveal.is_some() {
+            // Measure the complete child on every frame. Clipping its paint,
+            // rather than compressing its own layout, keeps caret and hit-test
+            // geometry stable throughout the disclosure.
+            let child_limits = layout::Limits::with_compression(
+                Size::new(limits.min().width, 0.0),
+                limits.max(),
+                limits.compression(),
+            );
+            let content =
+                self.content
+                    .as_widget_mut()
+                    .layout(&mut tree.children[0], renderer, &child_limits);
+            let size = Size::new(
+                content.size().width,
+                content.size().height * tree.state.downcast_ref::<State>().progress,
+            );
+            return layout::Node::with_children(size, vec![content]);
+        }
         let remaining = self.external_progress.map_or_else(
             || (1.0 - tree.state.downcast_ref::<State>().progress).powi(3),
             |progress| 1.0 - progress,
@@ -172,7 +561,29 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if self.fade.is_none() && self.external_progress.is_none() {
+        if self.reveal.is_some() {
+            let state = tree.state.downcast_mut::<State>();
+            let target = if state.reveal_target { 1.0 } else { 0.0 };
+            if state.started.is_some() || (state.progress - target).abs() > f32::EPSILON {
+                if let Event::Window(window::Event::RedrawRequested(now)) = event {
+                    let started = *state.started.get_or_insert(*now);
+                    let raw = (now.saturating_duration_since(started).as_secs_f32()
+                        / REVEAL_DURATION.as_secs_f32())
+                    .min(1.0);
+                    let eased = 1.0 - (1.0 - raw).powi(3);
+                    state.progress = state.reveal_from + (target - state.reveal_from) * eased;
+                    if raw >= 1.0 {
+                        state.progress = target;
+                        state.reveal_from = target;
+                        state.started = None;
+                    }
+                    shell.invalidate_layout();
+                }
+                if state.started.is_some() || (state.progress - target).abs() > f32::EPSILON {
+                    shell.request_redraw();
+                }
+            }
+        } else if self.fade.is_none() && self.external_progress.is_none() {
             let state = tree.state.downcast_mut::<State>();
             if state.progress < 1.0 {
                 if let Event::Window(window::Event::RedrawRequested(now)) = event {
@@ -191,9 +602,22 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             }
         }
 
-        if !self.interactive && !matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
+        let interactive = self.interactive && self.reveal.is_none_or(|(expanded, _)| expanded);
+        if self.reveal.is_some_and(|(expanded, _)| !expanded) {
             return;
         }
+        if !interactive && !matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
+            return;
+        }
+
+        let clipped_viewport = self
+            .reveal
+            .map(|_| layout.bounds().intersection(viewport).unwrap_or_default());
+        let cursor = if clipped_viewport.is_some_and(|bounds| !cursor.is_over(bounds)) {
+            mouse::Cursor::Unavailable
+        } else {
+            cursor
+        };
 
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -202,7 +626,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             cursor,
             renderer,
             shell,
-            viewport,
+            clipped_viewport.as_ref().unwrap_or(viewport),
         );
     }
 
@@ -216,17 +640,37 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            layout.child(0),
-            cursor,
-            viewport,
-        );
+        if self.reveal.is_some() {
+            if let Some(bounds) = layout.bounds().intersection(viewport) {
+                renderer.with_layer(bounds, |renderer| {
+                    self.content.as_widget().draw(
+                        &tree.children[0],
+                        renderer,
+                        theme,
+                        style,
+                        layout.child(0),
+                        cursor,
+                        &bounds,
+                    );
+                });
+            }
+        } else {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout.child(0),
+                cursor,
+                viewport,
+            );
+        }
 
-        if let Some((progress, background)) = self.fade
+        let fade = self.fade.or_else(|| {
+            self.reveal
+                .map(|(_, background)| (tree.state.downcast_ref::<State>().progress, background))
+        });
+        if let Some((progress, background)) = fade
             && progress < 1.0
             && let Some(bounds) = layout.bounds().intersection(viewport)
         {
@@ -254,6 +698,17 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         renderer: &Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        if self.reveal.is_some_and(|(expanded, _)| !expanded) {
+            // Collapsed fields retain their tree and editing state, but stay
+            // out of focus traversal and cannot retain an invisible caret.
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout.child(0),
+                renderer,
+                &mut widget::operation::focusable::unfocus::<()>(),
+            );
+            return;
+        }
         self.content.as_widget_mut().operate(
             &mut tree.children[0],
             layout.child(0),
@@ -270,7 +725,11 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        if !self.interactive {
+        if !self.interactive
+            || self
+                .reveal
+                .is_some_and(|(expanded, _)| !expanded || !cursor.is_over(layout.bounds()))
+        {
             return mouse::Interaction::None;
         }
         self.content.as_widget().mouse_interaction(
@@ -290,7 +749,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
-        if !self.interactive {
+        if !self.interactive || self.reveal.is_some_and(|(expanded, _)| !expanded) {
             return None;
         }
         self.content.as_widget_mut().overlay(
@@ -369,6 +828,368 @@ mod tests {
         );
         let redraw = shell.redraw_request();
         (redraw, messages)
+    }
+
+    #[test]
+    fn status_light_schedules_bounded_frames_and_leaves_input_uncaptured() {
+        let renderer = renderer();
+        let start = Instant::now();
+        for (state, interval) in [
+            (StatusLightState::Idle, Some(STATUS_IDLE_FRAME)),
+            (StatusLightState::Searching, Some(STATUS_SEARCH_FRAME)),
+            (StatusLightState::Success, None),
+            (StatusLightState::Error, None),
+        ] {
+            let mut content = status_light(state);
+            let (mut tree, node) = mount(&mut content, &renderer);
+            assert_eq!(node.size(), Size::new(12.0, 12.0));
+            let (request, messages) = dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(start)),
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(
+                request,
+                interval.map_or(window::RedrawRequest::Wait, |frame| {
+                    window::RedrawRequest::At(start + frame)
+                })
+            );
+            assert!(messages.is_empty());
+            if let Some(frame) = interval {
+                let (request, _) = dispatch(
+                    &mut content,
+                    &mut tree,
+                    &node,
+                    &renderer,
+                    Event::Window(window::Event::RedrawRequested(start + frame / 2)),
+                    mouse::Cursor::Unavailable,
+                );
+                assert_eq!(request, window::RedrawRequest::At(start + frame));
+            }
+            for event in [
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Keyboard(iced::keyboard::Event::ModifiersChanged(
+                    iced::keyboard::Modifiers::SHIFT,
+                )),
+            ] {
+                let mut messages = Vec::new();
+                let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
+                content.as_widget_mut().update(
+                    &mut tree,
+                    &event,
+                    Layout::new(&node),
+                    mouse::Cursor::Available(Point::new(6.0, 6.0)),
+                    &renderer,
+                    &mut shell,
+                    &VIEWPORT,
+                );
+                assert!(!shell.is_event_captured());
+                assert!(messages.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn status_light_pauses_unfocused_and_stays_paused_across_state_changes() {
+        let renderer = renderer();
+        let mut content = status_light(StatusLightState::Idle);
+        let (mut tree, node) = mount(&mut content, &renderer);
+        let start = Instant::now();
+        for at in [start, start + Duration::from_millis(1200)] {
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(at)),
+                mouse::Cursor::Unavailable,
+            );
+        }
+        let paused = tree.state.downcast_ref::<StatusLightAnimation>().elapsed;
+        assert_eq!(paused, Duration::from_millis(1200));
+        let (request, _) = dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::Unfocused),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(request, window::RedrawRequest::Wait);
+        let (request, _) = dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                start + Duration::from_secs(5),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(request, window::RedrawRequest::Wait);
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().elapsed,
+            paused
+        );
+        content = status_light(StatusLightState::Searching);
+        tree.diff(content.as_widget_mut());
+        assert!(!tree.state.downcast_ref::<StatusLightAnimation>().focused);
+        let resume = start + Duration::from_secs(6);
+        assert_eq!(
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(resume)),
+                mouse::Cursor::Unavailable,
+            )
+            .0,
+            window::RedrawRequest::Wait
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::Focused),
+            mouse::Cursor::Unavailable,
+        );
+        let (request, _) = dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(resume)),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(
+            request,
+            window::RedrawRequest::At(resume + STATUS_SEARCH_FRAME)
+        );
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().elapsed,
+            paused
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                resume + STATUS_TRANSITION / 2,
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        let blend = tree.state.downcast_ref::<StatusLightAnimation>().weights;
+        let phase = tree.state.downcast_ref::<StatusLightAnimation>().elapsed;
+        let geometry = StatusLightGeometry::from_animation(tree.state.downcast_ref());
+        assert_eq!(blend, [0.5, 0.5, 0.0, 0.0]);
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::Unfocused),
+            mouse::Cursor::Unavailable,
+        );
+        let later = resume + Duration::from_secs(20);
+        assert_eq!(
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(later)),
+                mouse::Cursor::Unavailable,
+            )
+            .0,
+            window::RedrawRequest::Wait
+        );
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().weights,
+            blend
+        );
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().elapsed,
+            phase
+        );
+        assert_eq!(
+            StatusLightGeometry::from_animation(tree.state.downcast_ref()),
+            geometry
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::Focused),
+            mouse::Cursor::Unavailable,
+        );
+        for at in [later, later + STATUS_TRANSITION / 2] {
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(at)),
+                mouse::Cursor::Unavailable,
+            );
+        }
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().weights,
+            StatusLightState::Searching.weights()
+        );
+        content = status_light(StatusLightState::Success);
+        tree.diff(content.as_widget_mut());
+        let finish_start = later + STATUS_TRANSITION / 2;
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(finish_start)),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    finish_start + STATUS_TRANSITION
+                )),
+                mouse::Cursor::Unavailable,
+            )
+            .0,
+            window::RedrawRequest::Wait
+        );
+        assert_eq!(
+            tree.state.downcast_ref::<StatusLightAnimation>().weights,
+            StatusLightState::Success.weights()
+        );
+        let mut shell_messages = Vec::new();
+        let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut shell_messages);
+        content = status_light(StatusLightState::Idle);
+        tree.diff(content.as_widget_mut());
+        content.as_widget_mut().update(
+            &mut tree,
+            &Event::Window(window::Event::RedrawRequested(resume)),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &renderer,
+            &mut shell,
+            &Rectangle::new(Point::new(40.0, 40.0), Size::new(20.0, 20.0)),
+        );
+        assert_eq!(
+            shell.redraw_request(),
+            window::RedrawRequest::Wait,
+            "offscreen indicators must not schedule redraws"
+        );
+    }
+
+    #[test]
+    fn status_light_retargets_from_the_visible_blend_and_finishes_at_rest() {
+        let mut animation = StatusLightAnimation::new(StatusLightState::Idle);
+        animation.advance(Duration::from_millis(600));
+        let phase = animation.elapsed;
+        animation.retarget(StatusLightState::Searching);
+        assert_eq!(
+            animation.elapsed, phase,
+            "state changes must preserve the motion phase"
+        );
+        animation.advance(STATUS_TRANSITION / 2);
+        assert_eq!(animation.weights, [0.5, 0.5, 0.0, 0.0]);
+        let visible = animation.weights;
+        let geometry = StatusLightGeometry::from_animation(&animation);
+        animation.retarget(StatusLightState::Idle);
+        assert_eq!(
+            animation.weights, visible,
+            "reversing must preserve the current appearance"
+        );
+        assert_eq!(
+            StatusLightGeometry::from_animation(&animation),
+            geometry,
+            "reversing must preserve the current shape and angle"
+        );
+        animation.advance(STATUS_TRANSITION / 2);
+        assert_eq!(animation.weights, [0.75, 0.25, 0.0, 0.0]);
+        let visible = animation.weights;
+        animation.retarget(StatusLightState::Error);
+        assert_eq!(animation.weights, visible);
+        animation.advance(STATUS_TRANSITION / 2);
+        assert_eq!(animation.weights, [0.375, 0.125, 0.0, 0.5]);
+        let visible = animation.weights;
+        animation.retarget(StatusLightState::Success);
+        assert_eq!(animation.weights, visible);
+        assert_eq!(animation.frame_interval(), Some(STATUS_SEARCH_FRAME));
+        animation.advance(STATUS_TRANSITION);
+        assert_eq!(animation.weights, StatusLightState::Success.weights());
+        assert!(!animation.transitioning);
+        assert_eq!(animation.frame_interval(), None);
+        animation.retarget(StatusLightState::Error);
+        animation.advance(STATUS_TRANSITION);
+        assert_eq!(animation.weights, StatusLightState::Error.weights());
+        assert_eq!(animation.frame_interval(), None);
+    }
+
+    #[test]
+    fn status_light_geometry_unfurls_one_connected_stroke_inside_its_bounds() {
+        let center = iced::Point::new(6.0, 6.0);
+        let mut animation = StatusLightAnimation::new(StatusLightState::Idle);
+        let dot = StatusLightGeometry::from_animation(&animation);
+        assert_eq!(dot.centerline_radius, 0.0);
+        assert_eq!(dot.sweep, 0.0);
+        assert_eq!(dot.sample_count, 1);
+        assert_eq!(dot.sample(center, 0).0, center);
+        let mut previous_radius = 0.0;
+        let mut previous_stroke = dot.stroke_radius;
+        for progress in [0.0, 0.1, 0.25, 0.5, 0.75, 1.0] {
+            animation.weights = [1.0 - progress, progress, 0.0, 0.0];
+            let geometry = StatusLightGeometry::from_animation(&animation);
+            assert!(geometry.centerline_radius >= previous_radius);
+            assert!(geometry.stroke_radius <= previous_stroke);
+            assert!((1..=40).contains(&geometry.sample_count));
+            assert!(geometry.glow_radius < 6.0);
+            previous_radius = geometry.centerline_radius;
+            previous_stroke = geometry.stroke_radius;
+            let mut previous = None;
+            for index in 0..geometry.sample_count {
+                let (point, radius) = geometry.sample(center, index);
+                assert!(point.x - radius >= 0.0 && point.x + radius <= 12.0);
+                assert!(point.y - radius >= 0.0 && point.y + radius <= 12.0);
+                if let Some((prior, prior_radius)) = previous {
+                    let delta: iced::Vector = point - prior;
+                    assert!(
+                        (delta.x * delta.x + delta.y * delta.y).sqrt() < radius + prior_radius,
+                        "neighboring stamps must join into one continuous stroke"
+                    );
+                }
+                previous = Some((point, radius));
+            }
+        }
+        let spinner = StatusLightGeometry::from_animation(&animation);
+        assert_eq!(spinner.centerline_radius, 4.0);
+        assert_eq!(spinner.stroke_radius, 0.9);
+        assert_eq!(spinner.sweep, std::f32::consts::TAU * 2.0 / 3.0);
+        assert!(spinner.sample(center, 0).1 < spinner.sample(center, spinner.sample_count - 1).1);
+        animation.weights = StatusLightState::Success.weights();
+        let complete = StatusLightGeometry::from_animation(&animation);
+        assert_eq!(complete.sample_count, 1);
+        assert_eq!(complete.sample(center, 0), (center, 3.0));
+        animation.weights = StatusLightState::Searching.weights();
+        animation.elapsed = Duration::from_secs(1_000_000);
+        let angle = StatusLightGeometry::from_animation(&animation).head_angle;
+        animation.elapsed += STATUS_SEARCH_FRAME;
+        let next_angle = StatusLightGeometry::from_animation(&animation).head_angle;
+        assert!(
+            (next_angle - angle - std::f32::consts::TAU * 0.033).abs() < 0.0001,
+            "long-lived windows must preserve fractional rotation phase"
+        );
     }
 
     #[test]
@@ -554,6 +1375,197 @@ mod tests {
             }
             assert_eq!(emitted.len(), usize::from(interactive));
         }
+    }
+
+    #[test]
+    fn disclosure_reverses_from_current_height_and_stops_requesting_frames() {
+        let renderer = renderer();
+        let build = |expanded| {
+            reveal(
+                button(Space::new().width(Fill).height(40))
+                    .padding(0)
+                    .width(Fill)
+                    .on_press(Message::None),
+                expanded,
+                |_| Color::WHITE,
+            )
+        };
+        let mut content = build(false);
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        assert_eq!(node.size().height, 0.0);
+        let start = Instant::now();
+        let frame = |at| Event::Window(window::Event::RedrawRequested(at));
+        assert_eq!(
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                frame(start),
+                mouse::Cursor::Unavailable
+            )
+            .0,
+            window::RedrawRequest::Wait
+        );
+
+        content = build(true);
+        tree.diff(content.as_widget_mut());
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(start),
+            mouse::Cursor::Unavailable,
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(start + REVEAL_DURATION / 2),
+            mouse::Cursor::Unavailable,
+        );
+        node = relayout(&mut content, &mut tree, &renderer);
+        let opening_height = node.size().height;
+        assert!(opening_height > 0.0 && opening_height < 40.0);
+        // The child keeps a 40px layout, but its unrevealed edge is not clickable.
+        let outside = mouse::Cursor::Available(Point::new(10.0, (opening_height + 40.0) / 2.0));
+        for event in [
+            mouse::Event::ButtonPressed(mouse::Button::Left),
+            mouse::Event::ButtonReleased(mouse::Button::Left),
+        ] {
+            assert!(
+                dispatch(
+                    &mut content,
+                    &mut tree,
+                    &node,
+                    &renderer,
+                    Event::Mouse(event),
+                    outside
+                )
+                .1
+                .is_empty()
+            );
+        }
+
+        content = build(false);
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(
+            node.size().height,
+            opening_height,
+            "reversing must not jump"
+        );
+        let close_start = start + REVEAL_DURATION / 2;
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(close_start),
+            mouse::Cursor::Unavailable,
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(close_start + REVEAL_DURATION / 2),
+            mouse::Cursor::Unavailable,
+        );
+        node = relayout(&mut content, &mut tree, &renderer);
+        let closing_height = node.size().height;
+        assert!(closing_height > 0.0 && closing_height < opening_height);
+
+        content = build(true);
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(node.size().height, closing_height);
+        let reopen = close_start + REVEAL_DURATION / 2;
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(reopen),
+            mouse::Cursor::Unavailable,
+        );
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            frame(reopen + REVEAL_DURATION),
+            mouse::Cursor::Unavailable,
+        );
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(node.size().height, 40.0);
+        assert_eq!(
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                frame(reopen + REVEAL_DURATION * 2),
+                mouse::Cursor::Unavailable
+            )
+            .0,
+            window::RedrawRequest::Wait
+        );
+    }
+
+    #[test]
+    fn collapsed_disclosures_exclude_inputs_from_focus_traversal() {
+        let renderer = renderer();
+        let id = widget::Id::new("disclosure-field");
+        let build = |expanded| {
+            reveal(text_input("Replace", "").id(id.clone()), expanded, |_| {
+                Color::WHITE
+            })
+        };
+        let mut content = build(true);
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut focusable::focus::<()>(id.clone()),
+        );
+        content = build(false);
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        let mut count = focusable::count();
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut operation::black_box(&mut count),
+        );
+        assert!(matches!(
+            count.finish(),
+            Outcome::Some(focusable::Count {
+                total: 0,
+                focused: None
+            })
+        ));
+        content = build(true);
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        let mut count = focusable::count();
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut operation::black_box(&mut count),
+        );
+        assert!(matches!(
+            count.finish(),
+            Outcome::Some(focusable::Count {
+                total: 1,
+                focused: None
+            })
+        ));
     }
 
     #[test]

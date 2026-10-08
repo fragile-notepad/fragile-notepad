@@ -36,7 +36,9 @@ impl BusEvent for Event {
 pub(super) enum Work {
     Files,
     Search,
+    SearchPreview,
     Find,
+    FindSelection,
     LoadingFind,
     Outline,
     Analysis,

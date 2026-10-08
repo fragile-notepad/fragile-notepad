@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::ops::Range;
+use std::ops::{ControlFlow, Range};
 
 use regex::{Regex, RegexBuilder};
 
@@ -27,14 +27,45 @@ impl TextMatch {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindState {
     pub query: String,
     pub replacement: String,
     pub case_sensitive: bool,
     pub whole_word: bool,
+    pub mode: SearchMode,
+    pub wrap_around: bool,
+    pub error: Option<SearchError>,
     pub matches: Vec<TextMatch>,
     pub current_match: Option<usize>,
+    /// A match selected by navigation, including a zero-width match at the caret.
+    pub navigation_match: Option<TextMatch>,
+    pub matches_stale: bool,
+    /// Identifies the source buffer for navigation, when used by an editor.
+    pub match_context: Option<u64>,
+    pub match_limit: Option<usize>,
+    pub matches_limited: bool,
+}
+
+impl Default for FindState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            replacement: String::new(),
+            case_sensitive: false,
+            whole_word: false,
+            mode: SearchMode::Normal,
+            wrap_around: true,
+            error: None,
+            matches: Vec::new(),
+            current_match: None,
+            navigation_match: None,
+            matches_stale: false,
+            match_context: None,
+            match_limit: None,
+            matches_limited: false,
+        }
+    }
 }
 
 impl FindState {
@@ -51,8 +82,7 @@ impl FindState {
 
     pub fn set_query(&mut self, query: impl Into<String>) {
         self.query = query.into();
-        self.current_match = None;
-        self.matches.clear();
+        self.clear_matches();
     }
 
     pub fn set_replacement(&mut self, replacement: impl Into<String>) {
@@ -62,50 +92,71 @@ impl FindState {
     pub fn set_case_sensitive(&mut self, case_sensitive: bool) {
         if self.case_sensitive != case_sensitive {
             self.case_sensitive = case_sensitive;
-            self.current_match = None;
-            self.matches.clear();
+            self.clear_matches();
         }
     }
 
     pub fn set_whole_word(&mut self, whole_word: bool) {
         if self.whole_word != whole_word {
             self.whole_word = whole_word;
-            self.current_match = None;
-            self.matches.clear();
+            self.clear_matches();
         }
+    }
+
+    pub fn set_mode(&mut self, mode: SearchMode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.clear_matches();
+        }
+    }
+
+    pub fn options(&self) -> SearchOptions {
+        SearchOptions {
+            case_sensitive: self.case_sensitive,
+            whole_word: self.whole_word,
+            mode: self.mode,
+        }
+    }
+
+    fn clear_matches(&mut self) {
+        self.current_match = None;
+        self.navigation_match = None;
+        self.matches.clear();
+        self.error = None;
+        self.matches_stale = true;
+        self.matches_limited = false;
     }
 
     pub fn refresh_matches(&mut self, text: &str) {
-        if self.query.is_empty() {
-            self.matches.clear();
-            self.current_match = None;
-            return;
-        }
-
-        self.matches = compute_matches_with_options(
-            text,
-            &self.query,
-            SearchOptions::normal(self.case_sensitive, self.whole_word),
-        );
-        self.current_match = match (self.current_match, self.matches.is_empty()) {
-            (_, true) => None,
-            (Some(index), false) => Some(index.min(self.matches.len() - 1)),
-            (None, false) => Some(0),
-        };
+        self.refresh_matches_in_chunks([text]);
     }
 
     pub fn refresh_matches_in_chunks<'a>(&mut self, chunks: impl IntoIterator<Item = &'a str>) {
-        if self.query.is_empty() {
-            self.matches.clear();
-            self.current_match = None;
-            return;
-        }
-
-        self.matches = compute_matches_in_chunks(
-            chunks,
-            &self.query,
-            SearchOptions::normal(self.case_sensitive, self.whole_word),
-        );
+        self.matches_stale = false;
+        self.error = None;
+        self.matches_limited = false;
+        self.matches = match PreparedSearch::new(&self.query, self.options()) {
+            Ok(Some(search)) => {
+                let mut matches = Vec::new();
+                let _ = search.try_for_each_match_in_chunks(chunks, |found| {
+                    if self.match_limit.is_some_and(|limit| matches.len() >= limit) {
+                        self.matches_limited = true;
+                        return ControlFlow::Break(());
+                    }
+                    matches.push(found);
+                    ControlFlow::Continue(())
+                });
+                matches
+            }
+            Ok(None) => Vec::new(),
+            Err(error) => {
+                self.error = Some(error);
+                Vec::new()
+            }
+        };
+        self.navigation_match = self
+            .navigation_match
+            .filter(|found| self.matches.contains(found));
         self.current_match = match (self.current_match, self.matches.is_empty()) {
             (_, true) => None,
             (Some(index), false) => Some(index.min(self.matches.len() - 1)),
@@ -124,10 +175,11 @@ impl FindState {
             return None;
         }
 
-        let next = self
-            .current_match
-            .map(|index| (index + 1) % self.matches.len())
-            .unwrap_or(0);
+        let next = match self.current_match {
+            Some(index) if index + 1 < self.matches.len() => index + 1,
+            Some(_) if !self.wrap_around => return None,
+            Some(_) | None => 0,
+        };
 
         self.current_match = Some(next);
         self.current()
@@ -139,16 +191,12 @@ impl FindState {
             return None;
         }
 
-        let previous = self
-            .current_match
-            .map(|index| {
-                if index == 0 {
-                    self.matches.len() - 1
-                } else {
-                    index - 1
-                }
-            })
-            .unwrap_or(0);
+        let previous = match self.current_match {
+            Some(index) if index > 0 => index - 1,
+            Some(_) if !self.wrap_around => return None,
+            Some(_) => self.matches.len() - 1,
+            None => 0,
+        };
 
         self.current_match = Some(previous);
         self.current()
@@ -156,11 +204,15 @@ impl FindState {
 
     pub fn replace_current(&mut self, text: &str) -> Option<String> {
         let current = self.current()?;
-        let mut replaced = String::with_capacity(text.len() + self.replacement.len());
-
-        replaced.push_str(&text[..current.start]);
-        replaced.push_str(&self.replacement);
-        replaced.push_str(&text[current.end..]);
+        let replacement = replacement_for_match(
+            text,
+            current,
+            &self.query,
+            &self.replacement,
+            self.options(),
+        )
+        .ok()?;
+        let replaced = replace_current(text, current, &replacement)?;
 
         self.refresh_matches(&replaced);
 
@@ -168,15 +220,18 @@ impl FindState {
     }
 
     pub fn replace_all(&mut self, text: &str) -> (String, usize) {
-        let matches = compute_matches_with_options(
-            text,
-            &self.query,
-            SearchOptions::normal(self.case_sensitive, self.whole_word),
-        );
+        let Ok(Some(search)) = PreparedSearch::new(&self.query, self.options()) else {
+            self.refresh_matches(text);
+            return (text.to_owned(), 0);
+        };
+        let matches = search.matches(text);
 
         if matches.is_empty() {
             self.matches.clear();
             self.current_match = None;
+            self.navigation_match = None;
+            self.matches_limited = false;
+            self.matches_stale = false;
             return (text.to_owned(), 0);
         }
 
@@ -185,7 +240,7 @@ impl FindState {
 
         for text_match in &matches {
             replaced.push_str(&text[cursor..text_match.start]);
-            replaced.push_str(&self.replacement);
+            replaced.push_str(&search.replacement_for_match(text, *text_match, &self.replacement));
             cursor = text_match.end;
         }
 
@@ -264,10 +319,6 @@ impl PreparedSearch {
     }
 
     pub fn matches(&self, text: &str) -> Vec<TextMatch> {
-        if text.is_empty() {
-            return Vec::new();
-        }
-
         match &self.matcher {
             PreparedMatcher::Literal(query) => compute_literal_matches(text, query, self.options),
             PreparedMatcher::Regex(regex) => compute_regex_matches(text, regex, self.options),
@@ -287,15 +338,27 @@ impl PreparedSearch {
     pub fn for_each_match_in_chunks<'a>(
         &self,
         chunks: impl IntoIterator<Item = &'a str>,
-        visit: impl FnMut(TextMatch),
+        mut visit: impl FnMut(TextMatch),
     ) {
+        let _ = self.try_for_each_match_in_chunks(chunks, |found| {
+            visit(found);
+            ControlFlow::<()>::Continue(())
+        });
+    }
+
+    /// Stops scanning as soon as the visitor returns `ControlFlow::Break`.
+    pub fn try_for_each_match_in_chunks<'a, B>(
+        &self,
+        chunks: impl IntoIterator<Item = &'a str>,
+        visit: impl FnMut(TextMatch) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
         match &self.matcher {
             PreparedMatcher::Literal(query) => {
-                visit_literal_matches_in_chunks(chunks, query, self.options, visit);
+                visit_literal_matches_in_chunks(chunks, query, self.options, visit)
             }
             PreparedMatcher::Regex(regex) => {
                 let text = chunks.into_iter().collect::<String>();
-                visit_regex_matches(&text, regex, self.options, visit);
+                visit_regex_matches(&text, regex, self.options, visit)
             }
         }
     }
@@ -373,18 +436,21 @@ fn compute_literal_matches_in_chunks<'a>(
     options: SearchOptions,
 ) -> Vec<TextMatch> {
     let mut matches = Vec::new();
-    visit_literal_matches_in_chunks(chunks, query, options, |found| matches.push(found));
+    let _ = visit_literal_matches_in_chunks(chunks, query, options, |found| {
+        matches.push(found);
+        ControlFlow::<()>::Continue(())
+    });
     matches
 }
 
-fn visit_literal_matches_in_chunks<'a>(
+fn visit_literal_matches_in_chunks<'a, B>(
     chunks: impl IntoIterator<Item = &'a str>,
     query: &str,
     options: SearchOptions,
-    mut visit: impl FnMut(TextMatch),
-) {
+    mut visit: impl FnMut(TextMatch) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     if query.is_empty() {
-        return;
+        return ControlFlow::Continue(());
     }
 
     // Keep a single scan cursor across chunks, plus both word-boundary neighbors.
@@ -430,30 +496,33 @@ fn visit_literal_matches_in_chunks<'a>(
             before = Some(ch);
         }
         if accepted {
-            visit(TextMatch::new(start, absolute_offset));
+            visit(TextMatch::new(start, absolute_offset))?;
         }
     }
+    ControlFlow::Continue(())
 }
 
 fn compute_regex_matches(text: &str, regex: &Regex, options: SearchOptions) -> Vec<TextMatch> {
     let mut matches = Vec::new();
-    visit_regex_matches(text, regex, options, |found| matches.push(found));
+    let _ = visit_regex_matches(text, regex, options, |found| {
+        matches.push(found);
+        ControlFlow::<()>::Continue(())
+    });
     matches
 }
 
-fn visit_regex_matches(
+fn visit_regex_matches<B>(
     text: &str,
     regex: &Regex,
     options: SearchOptions,
-    mut visit: impl FnMut(TextMatch),
-) {
+    mut visit: impl FnMut(TextMatch) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     for found in regex.find_iter(text) {
-        if !found.is_empty()
-            && (!options.whole_word || is_whole_word_match(text, found.start(), found.end()))
-        {
-            visit(TextMatch::new(found.start(), found.end()));
+        if !options.whole_word || is_whole_word_match(text, found.start(), found.end()) {
+            visit(TextMatch::new(found.start(), found.end()))?;
         }
     }
+    ControlFlow::Continue(())
 }
 
 pub fn replacement_for_match(
@@ -471,6 +540,8 @@ pub fn replacement_for_match(
 fn build_regex(query: &str, options: SearchOptions) -> Result<Regex, SearchError> {
     RegexBuilder::new(query)
         .case_insensitive(!options.case_sensitive)
+        // Native Windows line endings are one boundary in the editor too.
+        .crlf(true)
         .build()
         .map_err(|error| SearchError::InvalidRegex(error.to_string()))
 }
@@ -529,8 +600,7 @@ pub fn replace_all(
         replacement: replacement.to_owned(),
         case_sensitive,
         whole_word: false,
-        matches: Vec::new(),
-        current_match: None,
+        ..FindState::default()
     };
 
     state.replace_all(text)

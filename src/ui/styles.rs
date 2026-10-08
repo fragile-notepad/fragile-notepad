@@ -6,6 +6,20 @@ pub fn accent_color(theme: &Theme) -> Color {
     VisualPalette::from_theme(theme).accent
 }
 
+pub(super) fn search_light_colors(theme: &Theme) -> [Color; 3] {
+    let palette = VisualPalette::from_theme(theme);
+    [palette.accent, palette.success, palette.danger]
+}
+
+pub(super) fn search_activity_color(theme: &Theme) -> Color {
+    let palette = VisualPalette::from_theme(theme);
+    if palette.is_dark {
+        Color::from_rgb8(80, 225, 225)
+    } else {
+        palette.accent
+    }
+}
+
 pub fn checkbox(
     theme: &Theme,
     status: iced::widget::checkbox::Status,
@@ -766,6 +780,132 @@ pub fn find_status(theme: &Theme) -> container::Style {
         text_color: Some(palette.muted_text),
         border: border(1.0, palette.border_soft, CONTROL_RADIUS),
         ..container::Style::default()
+    }
+}
+
+/// Compact search controls share their surface with the query field.
+pub fn search_field(theme: &Theme) -> container::Style {
+    let p = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(p.surface.into()),
+        text_color: Some(p.text),
+        border: border(1.0, p.border, 7.0),
+        ..Default::default()
+    }
+}
+
+pub fn search_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let mut style = input(theme, status);
+    style.border = if matches!(status, text_input::Status::Focused { .. }) {
+        border(1.0, VisualPalette::from_theme(theme).accent, 4.0)
+    } else {
+        border(0.0, Color::TRANSPARENT, 4.0)
+    };
+    style
+}
+
+pub fn search_option(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = VisualPalette::from_theme(theme);
+        let disabled = matches!(status, button::Status::Disabled);
+        button::Style {
+            background: Some(
+                if active && !disabled {
+                    p.accent_soft
+                } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    p.surface_high
+                } else {
+                    Color::TRANSPARENT
+                }
+                .into(),
+            ),
+            text_color: if disabled {
+                p.faint_text
+            } else if active {
+                p.accent
+            } else {
+                p.muted_text
+            },
+            border: border(
+                1.0,
+                if active && !disabled {
+                    p.accent.scale_alpha(0.3)
+                } else {
+                    Color::TRANSPARENT
+                },
+                4.0,
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+pub fn search_status(error: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let p = VisualPalette::from_theme(theme);
+        container::Style {
+            text_color: Some(if error { p.danger } else { p.text }),
+            ..Default::default()
+        }
+    }
+}
+
+pub fn search_bar(theme: &Theme) -> container::Style {
+    let p = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(p.chrome_high.into()),
+        text_color: Some(p.text),
+        border: border(1.0, p.border_soft, 8.0),
+        ..Default::default()
+    }
+}
+
+pub fn search_result(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = VisualPalette::from_theme(theme);
+        button::Style {
+            background: Some(
+                if selected {
+                    p.accent_soft
+                } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    p.surface_high
+                } else {
+                    Color::TRANSPARENT
+                }
+                .into(),
+            ),
+            text_color: p.text,
+            border: border(
+                1.0,
+                if selected {
+                    p.accent.scale_alpha(0.3)
+                } else {
+                    Color::TRANSPARENT
+                },
+                4.0,
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+pub fn search_result_group(theme: &Theme) -> container::Style {
+    let p = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(p.surface_low.into()),
+        text_color: Some(p.muted_text),
+        border: border(0.0, Color::TRANSPARENT, 4.0),
+        ..Default::default()
+    }
+}
+
+pub fn search_empty_icon(theme: &Theme) -> container::Style {
+    let p = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(p.accent_soft.into()),
+        text_color: Some(p.accent),
+        border: border(0.0, Color::TRANSPARENT, 12.0),
+        ..Default::default()
     }
 }
 

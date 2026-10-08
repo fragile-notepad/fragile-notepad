@@ -97,6 +97,24 @@ impl EditorBuffer {
         max_chars: usize,
         context_before: usize,
     ) -> Option<String> {
+        self.line_excerpt_with_match(
+            EditorRange::new(position, position),
+            max_chars,
+            context_before,
+        )
+        .map(|(excerpt, _)| excerpt)
+    }
+
+    /// Copies bounded context and returns the match's UTF-8 byte range inside it.
+    /// Multiline matches are clipped to the first line of the preview.
+    pub fn line_excerpt_with_match(
+        &self,
+        range: EditorRange,
+        max_chars: usize,
+        context_before: usize,
+    ) -> Option<(String, std::ops::Range<usize>)> {
+        let range = range.normalized();
+        let position = range.start;
         let line_byte_start = *self.line_starts.get(position.line)?;
         let line_start = self.byte_to_char_boundary(line_byte_start)?;
         let line_end = self.line_content_end_char(position.line, line_start);
@@ -112,11 +130,17 @@ impl EditorBuffer {
         if start > line_start {
             excerpt.push('…');
         }
+        let match_start = excerpt.len() + self.rope.slice(start..center).len_bytes();
+        let match_end_char = self
+            .char_offset_clamped(self.clamp_position(range.end))
+            .min(end)
+            .max(center);
+        let match_end = match_start + self.rope.slice(center..match_end_char).len_bytes();
         excerpt.extend(self.rope.slice(start..end).chars());
         if end < line_end {
             excerpt.push('…');
         }
-        Some(excerpt)
+        Some((excerpt, match_start..match_end))
     }
 
     pub fn replace_range(&mut self, range: EditorRange, replacement: &str) -> EditDelta {

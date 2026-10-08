@@ -8,6 +8,10 @@ use tokio::io::AsyncWriteExt;
 #[path = "atomic_write/linux.rs"]
 mod linux;
 
+#[cfg(target_os = "macos")]
+#[path = "atomic_write/macos.rs"]
+mod macos;
+
 #[cfg(windows)]
 use std::ffi::OsStr;
 #[cfg(windows)]
@@ -76,27 +80,36 @@ where
     }
     let mut file = options.open(&temp_path).await?;
     let write_result = async {
+        #[cfg(target_os = "macos")]
+        if _private || permissions.is_some() {
+            // macOS ACL grants are independent of the 0600 mode. Remove any
+            // inherited grants before placing contents in the staged file.
+            macos::restrict_staged_file(&file).await?;
+        }
         #[cfg(windows)]
         copy_windows_permissions(path, &temp_path)?;
         file.write_all(contents).await?;
-        #[cfg(all(unix, not(target_os = "linux")))]
+        #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
         if let Some(permissions) = permissions {
             // Apply after writing (which can clear mode bits), before syncing
             // and publishing the replacement. New files retain the usual umask.
             file.set_permissions(permissions).await?;
         }
         file.sync_all().await?;
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         drop(file);
 
         // Check after staging and syncing, immediately before publishing.
         before_replace(path.to_owned()).await?;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             if !_private {
                 // Read the current metadata after the conflict check. Refuse
                 // publication if ownership, ACLs or attributes cannot be kept.
+                #[cfg(target_os = "linux")]
                 linux::copy_metadata(path, &file).await?;
+                #[cfg(target_os = "macos")]
+                macos::copy_metadata(path, &file).await?;
                 file.sync_all().await?;
             }
             drop(file);

@@ -138,14 +138,9 @@ async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
 fn copy_windows_permissions(path: &Path, temp_path: &Path) -> io::Result<()> {
     use std::ptr;
     use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, LocalFree};
-    use windows_sys::Win32::Security::Authorization::{
-        GetNamedSecurityInfoW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
-    };
-    use windows_sys::Win32::Security::{
-        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    };
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, SetFileSecurityW};
 
-    let mut dacl = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
     let original = wide_null(path.as_os_str());
     let error = unsafe {
@@ -155,7 +150,7 @@ fn copy_windows_permissions(path: &Path, temp_path: &Path) -> io::Result<()> {
             DACL_SECURITY_INFORMATION,
             ptr::null_mut(),
             ptr::null_mut(),
-            &mut dacl,
+            ptr::null_mut(),
             ptr::null_mut(),
             &mut descriptor,
         )
@@ -166,27 +161,21 @@ fn copy_windows_permissions(path: &Path, temp_path: &Path) -> io::Result<()> {
     if error != 0 {
         return Err(io::Error::from_raw_os_error(error as i32));
     }
-    // Restrict the empty temporary file before any original contents reach it.
-    // Protect the copied DACL from the directory's potentially broader rules.
+    // Apply the complete DACL descriptor before writing contents. Unlike
+    // SetNamedSecurityInfoW, this retains the inheritance control bits and does
+    // not merge directory rules or convert legacy inherited ACEs to explicit ones.
     let temporary = wide_null(temp_path.as_os_str());
-    let error = unsafe {
-        SetNamedSecurityInfoW(
-            temporary.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            dacl,
-            ptr::null(),
-        )
+    let error =
+        unsafe { SetFileSecurityW(temporary.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) };
+    let result = if error == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     };
     unsafe {
         LocalFree(descriptor);
     }
-    if error != 0 {
-        return Err(io::Error::from_raw_os_error(error as i32));
-    }
-    Ok(())
+    result
 }
 
 #[cfg(not(windows))]
@@ -271,15 +260,24 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn windows_dacl(path: &Path) -> String {
+    #[derive(Debug, PartialEq, Eq)]
+    struct WindowsPermissions {
+        dacl_present: bool,
+        dacl_protected: bool,
+        entries: Option<Vec<Vec<u8>>>,
+    }
+
+    #[cfg(windows)]
+    fn windows_permissions(path: &Path) -> WindowsPermissions {
         use std::ptr;
         use windows_sys::Win32::Foundation::LocalFree;
-        use windows_sys::Win32::Security::Authorization::{
-            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
-            SE_FILE_OBJECT,
+        use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows_sys::Win32::Security::{
+            ACE_HEADER, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl,
+            SE_DACL_PRESENT, SE_DACL_PROTECTED,
         };
-        use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
 
+        let mut dacl = ptr::null_mut();
         let mut descriptor = ptr::null_mut();
         assert_eq!(
             unsafe {
@@ -289,35 +287,65 @@ mod tests {
                     DACL_SECURITY_INFORMATION,
                     ptr::null_mut(),
                     ptr::null_mut(),
-                    ptr::null_mut(),
+                    &mut dacl,
                     ptr::null_mut(),
                     &mut descriptor,
                 )
             },
             0
         );
-        let mut text = ptr::null_mut();
-        let mut length = 0;
+        let mut control = 0;
+        let mut revision = 0;
         assert_ne!(
-            unsafe {
-                ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                    descriptor,
-                    1,
-                    DACL_SECURITY_INFORMATION,
-                    &mut text,
-                    &mut length,
-                )
-            },
+            unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) },
             0
         );
-        let result = String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(text, length.saturating_sub(1) as usize)
+        // Compare the access rules themselves, including their order, masks,
+        // SIDs and inherited flags. A null DACL differs from an empty DACL.
+        // ReplaceFileW may update automatic-inheritance bookkeeping without
+        // changing any of these permissions.
+        let entries = (!dacl.is_null()).then(|| {
+            (0..unsafe { (*dacl).AceCount })
+                .map(|index| {
+                    let mut ace = ptr::null_mut();
+                    assert_ne!(unsafe { GetAce(dacl, u32::from(index), &mut ace) }, 0);
+                    let size = unsafe { (*ace.cast::<ACE_HEADER>()).AceSize };
+                    unsafe { std::slice::from_raw_parts(ace.cast::<u8>(), usize::from(size)) }
+                        .to_vec()
+                })
+                .collect()
         });
+        let result = WindowsPermissions {
+            dacl_present: control & SE_DACL_PRESENT != 0,
+            dacl_protected: control & SE_DACL_PROTECTED != 0,
+            entries,
+        };
         unsafe {
-            LocalFree(text.cast());
             LocalFree(descriptor);
         }
         result
+    }
+
+    #[cfg(windows)]
+    async fn write_and_check_windows_permissions(path: &Path, contents: &[u8]) {
+        let expected = windows_permissions(path);
+        write_with_check(path, contents, |_| async {
+            let temporary = std::fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|candidate| candidate != path)
+                .expect("Staged replacement");
+            assert_eq!(
+                windows_permissions(&temporary),
+                expected,
+                "Staged permissions"
+            );
+            Ok::<(), io::Error>(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(windows_permissions(path), expected, "Published permissions");
+        assert_eq!(std::fs::read(path).unwrap(), contents);
     }
 
     #[cfg(windows)]
@@ -338,9 +366,7 @@ mod tests {
         let path = directory.0.join("document.txt");
         std::fs::write(&path, b"original").unwrap();
         run(async {
-            let inherited = windows_dacl(&path);
-            write(&path, b"updated").await.unwrap();
-            assert_eq!(windows_dacl(&path), inherited);
+            write_and_check_windows_permissions(&path, b"updated").await;
 
             let sddl = wide_null(OsStr::new("D:P(A;;FA;;;OW)"));
             let mut descriptor = ptr::null_mut();
@@ -382,10 +408,62 @@ mod tests {
                 LocalFree(descriptor);
             }
 
-            let restricted = windows_dacl(&path);
-            write(&path, b"private update").await.unwrap();
-            assert_eq!(windows_dacl(&path), restricted);
-            assert_eq!(std::fs::read(&path).unwrap(), b"private update");
+            write_and_check_windows_permissions(&path, b"private update").await;
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_windows_legacy_inherited_permissions_survive_save() {
+        use std::ptr;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, SE_DACL_AUTO_INHERIT_REQ, SE_DACL_AUTO_INHERITED,
+            SetFileSecurityW, SetSecurityDescriptorControl,
+        };
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        std::fs::write(&path, b"original").unwrap();
+        let name = wide_null(path.as_os_str());
+        let mut descriptor = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                GetNamedSecurityInfoW(
+                    name.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &mut descriptor,
+                )
+            },
+            0
+        );
+        assert_ne!(
+            unsafe {
+                SetSecurityDescriptorControl(
+                    descriptor,
+                    SE_DACL_AUTO_INHERITED | SE_DACL_AUTO_INHERIT_REQ,
+                    0,
+                )
+            },
+            0
+        );
+        // Hosted runners can expose inherited ACEs without the modern automatic
+        // inheritance control bit. Use the legacy API to recreate that state.
+        assert_ne!(
+            unsafe { SetFileSecurityW(name.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) },
+            0
+        );
+        unsafe {
+            LocalFree(descriptor);
+        }
+        run(async {
+            write_and_check_windows_permissions(&path, b"updated").await;
         });
     }
 

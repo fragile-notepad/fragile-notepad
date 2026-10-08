@@ -205,6 +205,10 @@ impl App {
             }
             FileMessage::EncodingSelected(encoding) => {
                 self.menu.close();
+                self.reopen_active_with_encoding(encoding)
+            }
+            FileMessage::EncodingConverted(encoding) => {
+                self.menu.close();
                 if let Some(document) = self.workspace.active_document_mut() {
                     if !document.has_complete_text_index() {
                         self.file_status =

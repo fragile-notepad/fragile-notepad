@@ -136,7 +136,7 @@ impl TextEncoding {
         }
     }
 
-    fn encoding_rs(self) -> Option<&'static encoding_rs::Encoding> {
+    pub(crate) fn encoding_rs(self) -> Option<&'static encoding_rs::Encoding> {
         match self {
             Self::Utf8 | Self::Utf8Bom => Some(encoding_rs::UTF_8),
             Self::Utf16BeBom | Self::Utf16LeBom => None,
@@ -193,7 +193,7 @@ impl TextEncoding {
         }
     }
 
-    fn oem_code_page(self) -> Option<encoding_rs::oem::OemCodePage> {
+    pub(crate) fn oem_code_page(self) -> Option<encoding_rs::oem::OemCodePage> {
         use encoding_rs::oem::OemCodePage;
 
         match self {

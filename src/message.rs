@@ -195,6 +195,7 @@ message_catalog! {
         FileCopySaved(arg0: SaveRequest, arg1: FileSaveResult) => Defer,
         ReloadFromDisk => Reject,
         EncodingSelected(arg0: TextEncoding) => Reject,
+        EncodingConverted(arg0: TextEncoding) => Reject,
         CloseFile => Reject,
         CloseAllFiles => Reject,
         CloseAllButActiveFile => Reject,

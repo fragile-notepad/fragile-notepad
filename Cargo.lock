@@ -1004,6 +1004,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "iced",
+ "iced_runtime",
  "iced_wgpu",
  "libc",
  "regex",

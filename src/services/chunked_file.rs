@@ -43,6 +43,13 @@ impl Read for HashedFile {
 }
 
 pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoadEvent> {
+    load_file_chunks_with_encoding(request, None)
+}
+
+pub fn load_file_chunks_with_encoding(
+    request: FileLoadRequest,
+    encoding: Option<TextEncoding>,
+) -> impl Stream<Item = FileLoadEvent> {
     let (sender, receiver) = mpsc::channel(8);
     let start = stream::once(async move {
         static LOAD_SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
@@ -58,7 +65,7 @@ pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoad
         }
         std::thread::spawn(move || {
             let _permit = permit;
-            load_file_on_thread(request, sender);
+            load_file_on_thread(request, sender, encoding);
         });
         None::<FileLoadEvent>
     })
@@ -66,7 +73,11 @@ pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoad
     stream::select(receiver, start)
 }
 
-fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLoadEvent>) {
+fn load_file_on_thread(
+    request: FileLoadRequest,
+    mut sender: mpsc::Sender<FileLoadEvent>,
+    encoding_override: Option<TextEncoding>,
+) {
     if sender.is_closed() {
         return;
     }
@@ -102,7 +113,7 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
                 document_id: request.document_id,
                 generation: request.generation,
                 path: request.path,
-                encoding: TextEncoding::Utf8,
+                encoding: encoding_override.unwrap_or(TextEncoding::Utf8),
                 had_errors: false,
                 fallback_contents: None,
                 bytes_read: 0,
@@ -130,136 +141,115 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
         }
         first_read.push(byte[0]);
     }
-    let encoding = detect_initial_encoding(&first_read);
-
-    match encoding {
-        TextEncoding::Utf8 | TextEncoding::Utf8Bom => {
-            load_utf8_chunks(request, sender, file, first_read, encoding, total_bytes);
-        }
-        TextEncoding::Utf16BeBom | TextEncoding::Utf16LeBom => {
-            load_utf16_chunks(request, sender, file, first_read, encoding, total_bytes);
-        }
-        _ => {
-            load_windows_1252_chunks(request, sender, file, first_read, total_bytes, false, false);
-        }
-    }
-}
-
-fn load_utf8_chunks(
-    request: FileLoadRequest,
-    mut sender: mpsc::Sender<FileLoadEvent>,
-    mut file: HashedFile,
-    first_read: Vec<u8>,
-    encoding: TextEncoding,
-    total_bytes: Option<u64>,
-) {
-    let chunk_size = request.chunk_size.max(1);
-    let mut buffer = vec![0; chunk_size];
-    let mut bytes_read = first_read.len() as u64;
-    let mut decoder = encoding_rs::UTF_8.new_decoder_without_bom_handling();
-    let mut pending = strip_initial_bom(&first_read, encoding);
-    let mut had_errors = false;
-
-    loop {
-        if sender.is_closed() {
-            return;
-        }
-        if send_decoded_chunk(
-            &mut sender,
-            &request,
-            &mut decoder,
-            pending,
-            false,
-            bytes_read,
-            total_bytes,
-            false,
-        ) {
-            had_errors = true;
-            if encoding != TextEncoding::Utf8Bom {
-                load_legacy_from_start(request, sender, total_bytes, had_errors);
-                return;
-            }
-        }
-
-        let read = match file.read(&mut buffer) {
-            Ok(read) => read,
-            Err(error) => {
-                send_failure(&mut sender, request, FileError::Io(error.kind()));
-                return;
-            }
-        };
-
-        if read == 0 {
-            break;
-        }
-
-        pending = &buffer[..read];
-        bytes_read += read as u64;
-    }
-
-    if send_decoded_chunk(
-        &mut sender,
-        &request,
-        &mut decoder,
-        &[],
-        true,
-        bytes_read,
+    let encoding = encoding_override.unwrap_or_else(|| detect_initial_encoding(&first_read));
+    load_text_chunks(
+        request,
+        sender,
+        file,
+        first_read,
         total_bytes,
-        false,
-    ) {
-        had_errors = true;
-        if encoding != TextEncoding::Utf8Bom {
-            load_legacy_from_start(request, sender, total_bytes, had_errors);
-            return;
-        }
-    }
-
-    send_terminal(
-        &mut sender,
-        FileLoadEvent::Finished(Ok(FileLoadFinished {
-            disk_revision: file.revision(),
-            document_id: request.document_id,
-            generation: request.generation,
-            path: request.path,
+        DecodingOptions {
             encoding,
-            had_errors,
-            fallback_contents: None,
-            bytes_read,
-            total_bytes,
-        })),
+            allow_legacy_fallback: encoding_override.is_none() && encoding == TextEncoding::Utf8,
+            had_errors: false,
+            reset_first_chunk: false,
+        },
     );
 }
 
-fn load_utf16_chunks(
+struct DecodingOptions {
+    encoding: TextEncoding,
+    allow_legacy_fallback: bool,
+    had_errors: bool,
+    reset_first_chunk: bool,
+}
+
+enum ChunkDecoder {
+    EncodingRs(encoding_rs::Decoder),
+    Utf16(Utf16ChunkDecoder),
+    Latin1,
+    Oem(encoding_rs::oem::OemCodePage),
+}
+
+impl ChunkDecoder {
+    fn new(encoding: TextEncoding) -> Self {
+        match encoding {
+            TextEncoding::Utf16BeBom | TextEncoding::Utf16LeBom => {
+                Self::Utf16(Utf16ChunkDecoder::new(encoding == TextEncoding::Utf16BeBom))
+            }
+            TextEncoding::Iso8859_1 => Self::Latin1,
+            other => {
+                if let Some(code_page) = other.oem_code_page() {
+                    Self::Oem(code_page)
+                } else {
+                    Self::EncodingRs(
+                        other
+                            .encoding_rs()
+                            .expect("supported text encoding")
+                            .new_decoder_without_bom_handling(),
+                    )
+                }
+            }
+        }
+    }
+
+    fn decode(&mut self, bytes: &[u8], last: bool) -> (String, bool) {
+        match self {
+            Self::EncodingRs(decoder) => {
+                let max_output = decoder
+                    .max_utf8_buffer_length(bytes.len())
+                    .unwrap_or(bytes.len().saturating_mul(3).saturating_add(16));
+                let mut output = String::with_capacity(max_output);
+                let (_, _, malformed) = decoder.decode_to_string(bytes, &mut output, last);
+                (output, malformed)
+            }
+            Self::Utf16(decoder) => (decoder.decode(bytes, last), decoder.had_errors()),
+            Self::Latin1 => (bytes.iter().copied().map(char::from).collect(), false),
+            Self::Oem(code_page) => (encoding_rs::oem::decode_oem(bytes, *code_page), false),
+        }
+    }
+}
+
+fn load_text_chunks(
     request: FileLoadRequest,
     mut sender: mpsc::Sender<FileLoadEvent>,
     mut file: HashedFile,
     first_read: Vec<u8>,
-    encoding: TextEncoding,
     total_bytes: Option<u64>,
+    options: DecodingOptions,
 ) {
-    let chunk_size = request.chunk_size.max(1);
-    let mut buffer = vec![0; chunk_size];
+    let mut buffer = vec![0; request.chunk_size.max(1)];
     let mut bytes_read = first_read.len() as u64;
-    let mut decoder = Utf16ChunkDecoder::new(encoding == TextEncoding::Utf16BeBom);
-    let mut pending = strip_initial_utf16_bom(&first_read, encoding);
+    let mut decoder = ChunkDecoder::new(options.encoding);
+    let mut pending = strip_initial_bom(&first_read, options.encoding);
+    let mut had_errors = options.had_errors;
+    let mut reset_next_chunk = options.reset_first_chunk;
+    let mut last = false;
 
     loop {
         if sender.is_closed() {
             return;
         }
-        let output = decoder.decode(pending, false);
-        if !output.is_empty() {
+        let (output, malformed) = decoder.decode(pending, last);
+        had_errors |= malformed;
+        if malformed && options.allow_legacy_fallback {
+            load_legacy_from_start(request, sender, total_bytes);
+            return;
+        }
+        if !output.is_empty() || reset_next_chunk {
             send_chunk(
                 &mut sender,
                 &request,
                 output,
                 bytes_read,
                 total_bytes,
-                false,
+                reset_next_chunk,
             );
+            reset_next_chunk = false;
         }
-
+        if last {
+            break;
+        }
         let read = match file.read(&mut buffer) {
             Ok(read) => read,
             Err(error) => {
@@ -267,27 +257,10 @@ fn load_utf16_chunks(
                 return;
             }
         };
-
-        if read == 0 {
-            break;
-        }
-
         pending = &buffer[..read];
         bytes_read += read as u64;
+        last = read == 0;
     }
-
-    let output = decoder.decode(&[], true);
-    if !output.is_empty() {
-        send_chunk(
-            &mut sender,
-            &request,
-            output,
-            bytes_read,
-            total_bytes,
-            false,
-        );
-    }
-
     send_terminal(
         &mut sender,
         FileLoadEvent::Finished(Ok(FileLoadFinished {
@@ -295,8 +268,8 @@ fn load_utf16_chunks(
             document_id: request.document_id,
             generation: request.generation,
             path: request.path,
-            encoding,
-            had_errors: decoder.had_errors(),
+            encoding: options.encoding,
+            had_errors,
             fallback_contents: None,
             bytes_read,
             total_bytes,
@@ -306,108 +279,28 @@ fn load_utf16_chunks(
 
 fn load_legacy_from_start(
     request: FileLoadRequest,
-    sender: mpsc::Sender<FileLoadEvent>,
+    mut sender: mpsc::Sender<FileLoadEvent>,
     total_bytes: Option<u64>,
-    had_errors: bool,
 ) {
     let file = match HashedFile::open(&request.path) {
         Ok(file) => file,
         Err(error) => {
-            let mut sender = sender;
             send_failure(&mut sender, request, FileError::Io(error.kind()));
             return;
         }
     };
-
-    load_windows_1252_chunks(
+    load_text_chunks(
         request,
         sender,
         file,
         Vec::new(),
         total_bytes,
-        had_errors,
-        true,
-    );
-}
-
-fn load_windows_1252_chunks(
-    request: FileLoadRequest,
-    mut sender: mpsc::Sender<FileLoadEvent>,
-    mut file: HashedFile,
-    first_read: Vec<u8>,
-    total_bytes: Option<u64>,
-    forced_had_errors: bool,
-    reset_first_chunk: bool,
-) {
-    let chunk_size = request.chunk_size.max(1);
-    let mut buffer = vec![0; chunk_size];
-    let mut bytes_read = first_read.len() as u64;
-    let mut decoder = encoding_rs::WINDOWS_1252.new_decoder_without_bom_handling();
-    let mut pending = first_read.as_slice();
-    let mut had_errors = forced_had_errors;
-    let mut reset_next_chunk = reset_first_chunk;
-
-    loop {
-        if sender.is_closed() {
-            return;
-        }
-        if !pending.is_empty() {
-            if send_decoded_chunk(
-                &mut sender,
-                &request,
-                &mut decoder,
-                pending,
-                false,
-                bytes_read,
-                total_bytes,
-                reset_next_chunk,
-            ) {
-                had_errors = true;
-            }
-            reset_next_chunk = false;
-        }
-
-        let read = match file.read(&mut buffer) {
-            Ok(read) => read,
-            Err(error) => {
-                send_failure(&mut sender, request, FileError::Io(error.kind()));
-                return;
-            }
-        };
-
-        if read == 0 {
-            break;
-        }
-
-        pending = &buffer[..read];
-        bytes_read += read as u64;
-    }
-
-    if send_decoded_chunk(
-        &mut sender,
-        &request,
-        &mut decoder,
-        &[],
-        true,
-        bytes_read,
-        total_bytes,
-        reset_next_chunk,
-    ) {
-        had_errors = true;
-    }
-    send_terminal(
-        &mut sender,
-        FileLoadEvent::Finished(Ok(FileLoadFinished {
-            disk_revision: file.revision(),
-            document_id: request.document_id,
-            generation: request.generation,
-            path: request.path,
+        DecodingOptions {
             encoding: TextEncoding::Windows1252,
-            had_errors,
-            fallback_contents: None,
-            bytes_read,
-            total_bytes,
-        })),
+            allow_legacy_fallback: false,
+            had_errors: true,
+            reset_first_chunk: true,
+        },
     );
 }
 
@@ -424,42 +317,13 @@ fn detect_initial_encoding(bytes: &[u8]) -> TextEncoding {
 }
 
 fn strip_initial_bom(bytes: &[u8], encoding: TextEncoding) -> &[u8] {
-    if encoding == TextEncoding::Utf8Bom {
-        bytes.get(UTF8_BOM_BYTES.len()..).unwrap_or_default()
-    } else {
-        bytes
-    }
-}
-
-fn strip_initial_utf16_bom(bytes: &[u8], encoding: TextEncoding) -> &[u8] {
-    match encoding {
-        TextEncoding::Utf16BeBom => bytes.get(UTF16BE_BOM_BYTES.len()..).unwrap_or_default(),
-        TextEncoding::Utf16LeBom => bytes.get(UTF16LE_BOM_BYTES.len()..).unwrap_or_default(),
-        _ => bytes,
-    }
-}
-
-fn send_decoded_chunk(
-    sender: &mut mpsc::Sender<FileLoadEvent>,
-    request: &FileLoadRequest,
-    decoder: &mut encoding_rs::Decoder,
-    bytes: &[u8],
-    last: bool,
-    bytes_read: u64,
-    total_bytes: Option<u64>,
-    reset: bool,
-) -> bool {
-    let max_output = decoder
-        .max_utf8_buffer_length(bytes.len())
-        .unwrap_or(bytes.len().saturating_mul(3).saturating_add(16));
-    let mut output = String::with_capacity(max_output);
-    let (_, _, malformed) = decoder.decode_to_string(bytes, &mut output, last);
-
-    if !output.is_empty() || reset {
-        send_chunk(sender, request, output, bytes_read, total_bytes, reset);
-    }
-
-    malformed
+    let marker = match encoding {
+        TextEncoding::Utf8 | TextEncoding::Utf8Bom => UTF8_BOM_BYTES,
+        TextEncoding::Utf16BeBom => UTF16BE_BOM_BYTES,
+        TextEncoding::Utf16LeBom => UTF16LE_BOM_BYTES,
+        _ => return bytes,
+    };
+    bytes.strip_prefix(marker).unwrap_or(bytes)
 }
 
 struct Utf16ChunkDecoder {

@@ -1,6 +1,117 @@
 use super::test_support::*;
 
 #[test]
+fn encoding_selection_reopens_clean_files_then_conversion_preserves_decoded_text() {
+    use crate::core::{FileRevision, TextEncoding, encode_text};
+    let original = encode_text("あ", TextEncoding::ShiftJis).unwrap();
+    let file = TestFile::new(&original);
+    let mut app = App::new().0;
+    let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        path: file.0.clone(),
+        contents: Arc::new(crate::core::decode_bytes(&original)),
+        disk_revision: FileRevision::from_bytes(&original),
+    })));
+    let id = app.workspace.active_document_id();
+    assert_ne!(app.workspace.active_document().unwrap().text(), "あ");
+    let task = app.update(Message::EncodingSelected(TextEncoding::ShiftJis));
+    assert!(app.files.pending_reloads().contains_key(&id));
+    run_task(&mut app, task);
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "あ");
+    assert_eq!(document.encoding, TextEncoding::ShiftJis);
+    assert!(!document.is_dirty);
+    assert_eq!(document.bytes_for_save().unwrap(), original);
+
+    let task = app.update(Message::ReloadFromDisk);
+    run_task(&mut app, task);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "あ");
+    assert_eq!(
+        app.workspace.active_document().unwrap().encoding,
+        TextEncoding::ShiftJis
+    );
+
+    let _ = app.update(Message::EncodingConverted(TextEncoding::Utf8));
+    let document = app.workspace.active_document().unwrap();
+    assert!(document.is_dirty);
+    assert_eq!(document.text(), "あ");
+    assert_eq!(document.bytes_for_save().unwrap(), "あ".as_bytes());
+}
+
+#[test]
+fn encoding_reopen_guards_unsaved_edits_and_conversion_during_loading() {
+    use crate::core::TextEncoding;
+    let mut app = App::new().0;
+    let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        path: "edited.txt".into(),
+        contents: Arc::new(crate::core::decode_bytes(b"original")),
+        disk_revision: crate::core::FileRevision::from_bytes(b"original"),
+    })));
+    let id = app.workspace.active_document_id();
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("edit".into()),
+    ));
+    let before = app.workspace.active_document().unwrap().text();
+    let _ = app.update(Message::EncodingSelected(TextEncoding::ShiftJis));
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), before);
+    assert!(document.is_dirty);
+    assert_eq!(document.encoding, TextEncoding::Utf8);
+    assert!(app.files.pending_reloads().is_empty());
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Save changes before reloading from disk.")
+    );
+
+    app.workspace.active_document_mut().unwrap().mark_clean();
+    let _ = app.update(Message::EncodingSelected(TextEncoding::ShiftJis));
+    let _ = app.update(Message::EncodingConverted(TextEncoding::Utf16LeBom));
+    assert_eq!(
+        app.workspace.active_document().unwrap().encoding,
+        TextEncoding::Utf8
+    );
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Finish loading before changing encoding.")
+    );
+}
+
+#[test]
+fn failed_encoding_reopen_keeps_previous_encoding_text_and_history() {
+    use crate::core::TextEncoding;
+    let mut app = App::new().0;
+    let id = app.workspace.active_document_id();
+    app.workspace
+        .active_document_mut()
+        .unwrap()
+        .set_path("existing.txt");
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("keep me".into()),
+    ));
+    app.workspace.active_document_mut().unwrap().mark_clean();
+    assert!(app.workspace.active_document().unwrap().can_undo());
+    let _ = app.update(Message::EncodingSelected(TextEncoding::ShiftJis));
+    let generation = app
+        .workspace
+        .active_document()
+        .unwrap()
+        .load_generation()
+        .unwrap();
+    let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+        document_id: id,
+        generation,
+        path: "existing.txt".into(),
+        error: crate::services::types::FileError::Io(std::io::ErrorKind::PermissionDenied),
+    })));
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "keep me");
+    assert_eq!(document.encoding, TextEncoding::Utf8);
+    assert!(document.can_undo());
+    assert!(!document.is_loading_or_indexing());
+}
+
+#[test]
 fn manual_and_auto_save_conflicts_keep_unsaved_changes() {
     use crate::core::FileRevision;
     use crate::services::types::FileError;

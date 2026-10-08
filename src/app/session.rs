@@ -213,12 +213,16 @@ impl App {
             document.complete_streaming_load(generation, crate::core::TextEncoding::Utf8);
             return Task::none();
         };
-        self.start_load_request(FileLoadRequest {
-            document_id: id,
-            generation,
-            path,
-            chunk_size: crate::services::chunked_file::DEFAULT_CHUNK_SIZE,
-        })
+        let encoding = self.session.pending.get(&id).map(|entry| entry.encoding);
+        self.start_load_request_with_encoding(
+            FileLoadRequest {
+                document_id: id,
+                generation,
+                path,
+                chunk_size: crate::services::chunked_file::DEFAULT_CHUNK_SIZE,
+            },
+            encoding,
+        )
     }
 
     pub(super) fn snapshot_session(&self) -> Session {

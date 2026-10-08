@@ -1,7 +1,9 @@
 //! Opening, reloading, and streamed file loading.
 
 use crate::app::App;
-use crate::core::{DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState};
+use crate::core::{
+    DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState, TextEncoding,
+};
 use crate::message::Message;
 use crate::services::chunked_file::{self, DEFAULT_CHUNK_SIZE};
 use crate::services::types::{
@@ -114,6 +116,29 @@ impl App {
     }
 
     pub(super) fn reload_active_from_disk(&mut self) -> Task<Message> {
+        let encoding = self
+            .workspace
+            .active_document()
+            .map(|document| document.encoding);
+        self.reload_active_with_encoding(encoding)
+    }
+
+    pub(super) fn reopen_active_with_encoding(&mut self, encoding: TextEncoding) -> Task<Message> {
+        let Some(document) = self.workspace.active_document_mut() else {
+            return Task::none();
+        };
+        if !document.has_complete_text_index() {
+            self.file_status = Some("Finish loading before changing encoding.".into());
+            return Task::none();
+        }
+        if document.path.is_none() {
+            document.set_encoding(encoding);
+            return Task::none();
+        }
+        self.reload_active_with_encoding(Some(encoding))
+    }
+
+    fn reload_active_with_encoding(&mut self, encoding: Option<TextEncoding>) -> Task<Message> {
         let document_id = self.workspace.active_document_id();
         let Some(document) = self.workspace.document(document_id) else {
             return Task::none();
@@ -134,6 +159,11 @@ impl App {
             return Task::none();
         }
 
+        if self.files.pending_save.is_some() {
+            self.file_status = Some("Finish the current save before reloading.".into());
+            return Task::none();
+        }
+
         let generation = DocumentLoadGeneration::next();
         if let Some(document) = self.workspace.document_mut(document_id) {
             document.load_state = DocumentLoadState::Loading {
@@ -149,12 +179,15 @@ impl App {
         self.files.is_loading = true;
         self.file_status = None;
 
-        self.start_load_request(FileLoadRequest {
-            document_id,
-            generation,
-            path,
-            chunk_size: DEFAULT_CHUNK_SIZE,
-        })
+        self.start_load_request_with_encoding(
+            FileLoadRequest {
+                document_id,
+                generation,
+                path,
+                chunk_size: DEFAULT_CHUNK_SIZE,
+            },
+            encoding,
+        )
     }
 
     pub(super) fn load_progress(&mut self, progress: FileLoadProgress) -> Task<Message> {
@@ -305,9 +338,20 @@ impl App {
     }
 
     pub(in crate::app) fn start_load_request(&mut self, request: FileLoadRequest) -> Task<Message> {
+        self.start_load_request_with_encoding(request, None)
+    }
+
+    pub(in crate::app) fn start_load_request_with_encoding(
+        &mut self,
+        request: FileLoadRequest,
+        encoding: Option<TextEncoding>,
+    ) -> Task<Message> {
         let id = request.document_id;
-        let (task, handle) =
-            Task::run(chunked_file::load_file_chunks(request), Message::from).abortable();
+        let (task, handle) = Task::run(
+            chunked_file::load_file_chunks_with_encoding(request, encoding),
+            Message::from,
+        )
+        .abortable();
         if let Some(previous) = self.files.load_handles.insert(id, handle) {
             previous.abort();
         }

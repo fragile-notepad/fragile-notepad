@@ -14,6 +14,30 @@ fn ready(saved: Session) -> App {
 }
 
 #[test]
+fn clean_legacy_session_documents_restore_using_the_saved_input_encoding() {
+    use crate::app::tests::test_support::{TestFile, run_task};
+    let original = crate::core::encode_text("あ", TextEncoding::ShiftJis).unwrap();
+    let file = TestFile::new(&original);
+    let (mut app, _) = App::new_with_options(StartupOptions::default());
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::SessionLoaded(Ok(Some(Session {
+        documents: vec![SessionDocument {
+            path: Some(file.0.clone()),
+            encoding: TextEncoding::ShiftJis,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))));
+    let task = app.update(Message::StartupReady);
+    run_task(&mut app, task);
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "あ");
+    assert_eq!(document.encoding, TextEncoding::ShiftJis);
+    assert!(!document.is_dirty);
+    assert_eq!(document.bytes_for_save().unwrap(), original);
+}
+
+#[test]
 fn recovered_edits_retain_the_original_disk_revision() {
     let revision = crate::core::FileRevision::from_bytes(b"original disk bytes");
     let saved = SessionDocument {

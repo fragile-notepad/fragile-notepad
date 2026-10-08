@@ -1,5 +1,7 @@
 use fragile_notepad::core::{Document, DocumentId, DocumentLoadGeneration};
-use fragile_notepad::services::chunked_file::{DEFAULT_CHUNK_SIZE, load_file_chunks};
+use fragile_notepad::services::chunked_file::{
+    DEFAULT_CHUNK_SIZE, load_file_chunks, load_file_chunks_with_encoding,
+};
 use fragile_notepad::services::types::{FileLoadEvent, FileLoadRequest};
 use fragile_notepad::ui::status_bar::document_status_label;
 use futures::{StreamExt, pin_mut};
@@ -39,6 +41,80 @@ fn preview_from_chunks(events: &[FileLoadEvent]) -> String {
         preview.push_str(&chunk.text);
     }
     preview
+}
+
+#[test]
+fn selected_encodings_decode_original_bytes_across_multibyte_and_escape_boundaries() {
+    use fragile_notepad::core::{FileRevision, TextEncoding, encode_text};
+    for (encoding, text) in [
+        (TextEncoding::ShiftJis, "あいう hello"),
+        (TextEncoding::Big5, "中文"),
+        (TextEncoding::Gb18030, "你好"),
+        (TextEncoding::EucJp, "日本語"),
+        (TextEncoding::EucKr, "한국어"),
+        (TextEncoding::Iso2022Jp, "日本語abc"),
+        (TextEncoding::Windows1251, "Привет"),
+        (TextEncoding::Iso8859_1, "\u{0080}é"),
+        (TextEncoding::Oem437, "café"),
+        (TextEncoding::Utf16BeBom, "\u{feff}日本語"),
+        (TextEncoding::Utf16LeBom, "\u{feff}日本語"),
+        (TextEncoding::Utf8Bom, "\u{feff}日本語"),
+    ] {
+        let bytes = encode_text(text, encoding).unwrap();
+        let path = temp_file_path("selected-encoding");
+        fs::write(&path, &bytes).unwrap();
+        for chunk_size in [1, 3, DEFAULT_CHUNK_SIZE] {
+            let request = FileLoadRequest {
+                document_id: DocumentId::new(52),
+                generation: DocumentLoadGeneration::next(),
+                path: path.clone(),
+                chunk_size,
+            };
+            let events = futures::executor::block_on(async {
+                let stream = load_file_chunks_with_encoding(request, Some(encoding));
+                pin_mut!(stream);
+                stream.collect::<Vec<_>>().await
+            });
+            assert_eq!(
+                preview_from_chunks(&events),
+                text,
+                "{encoding:?}, chunk size {chunk_size}"
+            );
+            let finished = events
+                .iter()
+                .find_map(|event| match event {
+                    FileLoadEvent::Finished(Ok(finished)) => Some(finished),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(finished.encoding, encoding);
+            assert!(!finished.had_errors);
+            assert_eq!(finished.disk_revision, FileRevision::from_bytes(&bytes));
+        }
+        fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn explicit_utf8_reports_invalid_bytes_without_reinterpreting_them_as_windows_1252() {
+    let path = temp_file_path("explicit-utf8");
+    fs::write(&path, b"a\xffb").unwrap();
+    let events = futures::executor::block_on(async {
+        let stream = load_file_chunks_with_encoding(
+            FileLoadRequest {
+                document_id: DocumentId::new(53),
+                generation: DocumentLoadGeneration::next(),
+                path: path.clone(),
+                chunk_size: 1,
+            },
+            Some(fragile_notepad::core::TextEncoding::Utf8),
+        );
+        pin_mut!(stream);
+        stream.collect::<Vec<_>>().await
+    });
+    assert_eq!(preview_from_chunks(&events), "a\u{fffd}b");
+    assert!(events.iter().any(|event| matches!(event, FileLoadEvent::Finished(Ok(done)) if done.had_errors && done.encoding == fragile_notepad::core::TextEncoding::Utf8)));
+    fs::remove_file(path).unwrap();
 }
 
 #[test]

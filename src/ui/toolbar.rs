@@ -799,23 +799,23 @@ fn encoding_menu_entries() -> Vec<MenuNode> {
         menu::separator(),
         menu::item(
             "Convert to ANSI",
-            Message::EncodingSelected(TextEncoding::Windows1252),
+            Message::EncodingConverted(TextEncoding::Windows1252),
         ),
         menu::item(
             "Convert to UTF-8",
-            Message::EncodingSelected(TextEncoding::Utf8),
+            Message::EncodingConverted(TextEncoding::Utf8),
         ),
         menu::item(
             "Convert to UTF-8-BOM",
-            Message::EncodingSelected(TextEncoding::Utf8Bom),
+            Message::EncodingConverted(TextEncoding::Utf8Bom),
         ),
         menu::item(
             "Convert to UTF-16 BE BOM",
-            Message::EncodingSelected(TextEncoding::Utf16BeBom),
+            Message::EncodingConverted(TextEncoding::Utf16BeBom),
         ),
         menu::item(
             "Convert to UTF-16 LE BOM",
-            Message::EncodingSelected(TextEncoding::Utf16LeBom),
+            Message::EncodingConverted(TextEncoding::Utf16LeBom),
         ),
     ]
 }

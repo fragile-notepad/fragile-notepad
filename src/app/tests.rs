@@ -1,4 +1,4 @@
-mod test_support {
+pub(in crate::app) mod test_support {
     pub(super) use crate::app::windowing::managed::ManagedWindow;
     pub(super) use crate::app::{App, CloseGoal};
     pub(super) use crate::core::DirtyCloseDecision;
@@ -12,6 +12,44 @@ mod test_support {
     };
     pub(super) use std::path::PathBuf;
     pub(super) use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+
+    pub(in crate::app) struct TestFile(pub(in crate::app) PathBuf);
+
+    impl TestFile {
+        pub(in crate::app) fn new(bytes: &[u8]) -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "fragile-app-file-{}-{}.txt",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            std::fs::write(&path, bytes).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    pub(in crate::app) fn run_task(app: &mut App, task: iced::Task<Message>) {
+        use futures::StreamExt;
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                if let Some(mut stream) = iced_runtime::task::into_stream(task) {
+                    while let Some(action) = stream.next().await {
+                        if let iced_runtime::Action::Output(message) = action {
+                            let _ = app.update(message);
+                        }
+                    }
+                }
+            });
+    }
 
     pub(super) fn pending_save_all_ids(app: &App) -> Vec<crate::core::DocumentId> {
         app.files.pending_save_all().iter().copied().collect()

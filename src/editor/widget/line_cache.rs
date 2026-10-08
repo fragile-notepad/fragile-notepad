@@ -52,6 +52,7 @@ struct LineGeometryEntry<Paragraph> {
     tab_width: usize,
     font_version: iced::advanced::graphics::text::Version,
     font_runs: Vec<EditorFontRun>,
+    measure_ascii: bool,
     geometry: LineGeometry<Paragraph>,
 }
 
@@ -100,6 +101,7 @@ where
         language: Option<CjkLanguage>,
         tab_width: usize,
         font_runs: &[EditorFontRun],
+        measure_ascii: bool,
     ) -> usize
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
@@ -120,6 +122,7 @@ where
                 && entry.tab_width == tab_width
                 && entry.font_version == font_version
                 && entry.font_runs == font_runs
+                && entry.measure_ascii == measure_ascii
         });
 
         if !is_hit {
@@ -138,6 +141,7 @@ where
                 tab_width,
                 font_version,
                 font_runs: font_runs.to_vec(),
+                measure_ascii,
                 geometry: LineGeometry::new_with_font_runs(
                     text,
                     metrics,
@@ -145,6 +149,7 @@ where
                     start_visual_column,
                     tab_width,
                     font_runs,
+                    measure_ascii,
                 ),
             });
         }
@@ -216,6 +221,7 @@ where
                 segment.start_column,
                 viewport,
             ),
+            fold_needs_measured_geometry(line, viewport, decorations),
         )
         .byte_column_for_x(x, decorations.settings.indent_width);
 
@@ -307,6 +313,7 @@ where
             start,
             viewport,
         ),
+        fold_needs_measured_geometry(display_position.line, viewport, decorations),
     );
 
     Point::new(
@@ -318,6 +325,20 @@ where
         ),
         row_y(visible_row, layout),
     )
+}
+
+pub(super) fn fold_needs_measured_geometry(
+    line: usize,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+) -> bool {
+    viewport.projection(line).is_some()
+        || decorations
+            .line_decorations
+            .get(line)
+            .is_some_and(|decoration| {
+                decoration.is_fold_collapsed && decoration.fold_delimiter.is_some()
+            })
 }
 
 pub(super) fn measured_caret_x<Paragraph>(
@@ -417,6 +438,7 @@ where
                         context.and_then(|context| context.language_for_line(row.line)),
                         tab_width,
                         &editor_font_runs_for_row(row, context),
+                        !row.projection.is_empty() || row.collapsed_delimiter().is_some(),
                     ),
                 )
             })
@@ -511,6 +533,7 @@ where
             start_visual_column,
             tab_width,
             &editor_font_runs(text, language),
+            false,
         )
     }
 
@@ -521,11 +544,14 @@ where
         start_visual_column: usize,
         tab_width: usize,
         font_runs: &[EditorFontRun],
+        measure_ascii: bool,
     ) -> Self
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
     {
-        if can_use_fast_geometry(text) {
+        // Projected folds need the font's actual advances for their plates and
+        // hit targets; the platform monospace can differ from the column estimate.
+        if !measure_ascii && can_use_fast_geometry(text) {
             return Self::Fast {
                 text: text.to_owned(),
                 character_width: metrics.character_width,
@@ -840,8 +866,8 @@ mod tests {
         let metrics = EditorMetrics::default();
         let mut cache = LineGeometryCache::<()>::default();
         cache.ensure_capacity(2);
-        let first = cache.ensure(0, 0, "first", metrics, &(), None, 4, &[]);
-        let second = cache.ensure(1, 5, "\tend", metrics, &(), None, 4, &[]);
+        let first = cache.ensure(0, 0, "first", metrics, &(), None, 4, &[], false);
+        let second = cache.ensure(1, 5, "\tend", metrics, &(), None, 4, &[], false);
         assert_ne!(first, second);
         assert_eq!(cache.geometry(first).unwrap().x_for_byte_column(5, 4), 40.0);
         assert_eq!(
@@ -849,7 +875,7 @@ mod tests {
             24.0
         );
 
-        cache.ensure(1, 6, "\tend", metrics, &(), None, 4, &[]);
+        cache.ensure(1, 6, "\tend", metrics, &(), None, 4, &[], false);
         assert_eq!(
             cache.geometry(second).unwrap().x_for_byte_column(1, 4),
             16.0
@@ -956,6 +982,7 @@ mod tests {
                         tab_width: 4,
                         font_version: iced::advanced::graphics::text::Version::default(),
                         font_runs: Vec::new(),
+                        measure_ascii: false,
                         geometry: LineGeometry::Fast {
                             text: format!("line {line}"),
                             character_width: EditorMetrics::default().character_width,

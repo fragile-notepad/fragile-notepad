@@ -750,6 +750,7 @@ where
                     segment.start_column,
                     context.viewport,
                 ),
+                true,
             );
             let source_selection = SelectionRange {
                 anchor: EditorPosition::new(position.line, 0),
@@ -805,6 +806,11 @@ where
                 context.cjk_context,
                 position.line,
                 segment.start_column,
+            ),
+            super::line_cache::fold_needs_measured_geometry(
+                position.line,
+                context.viewport,
+                context.decorations,
             ),
         );
         let start_x = measured_virtual_caret_x(

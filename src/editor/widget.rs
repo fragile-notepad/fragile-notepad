@@ -628,6 +628,7 @@ impl<Message> AdvancedEditor<'_, Message> {
                     segment.start_column,
                     self.viewport,
                 ),
+                true,
             );
             for projected in &projection.fragments {
                 if let ProjectionFragment::Placeholder {
@@ -701,6 +702,7 @@ impl<Message> AdvancedEditor<'_, Message> {
                 line,
                 segment.start_column,
             ),
+            delimiter.is_some(),
         );
         let anchor_x = measured_caret_x(
             &line_geometry,

@@ -504,6 +504,7 @@ fn matched_fold_placeholder_clicks_expand_from_the_opener_through_the_closer() {
             row.start_visual_column,
             4,
             &font::editor_font_runs_for_fragment(&row.text, None, row.line, row.start_column),
+            !row.projection.is_empty() || row.collapsed_delimiter().is_some(),
         );
         let anchor_x = measured_caret_x(
             &geometry,
@@ -667,6 +668,7 @@ fn projected_suffix_text_and_each_placeholder_keep_their_source_targets() {
                 row.start_visual_column,
                 fixture.decorations.settings.indent_width,
                 &font::editor_font_runs_for_row(row, None),
+                !row.projection.is_empty(),
             );
             for fragment in &row.projection {
                 if let ProjectionFragment::Placeholder {
@@ -742,12 +744,22 @@ fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
                 None,
             );
             let row = &plan.rows[0];
-            let anchor = super::super::layout::caret_x(
-                &row.text,
-                row.collapsed_indicator_column(),
-                layout,
-                &fixture.decorations,
+            // Compare with the installed font's advance, rather than the
+            // estimated cell width, which differs across platforms.
+            let prefix = &row.text[..row.collapsed_indicator_column()];
+            let measured = crate::editor::wrap_measurement::MeasuredWrapLine::new(
+                prefix,
+                4,
+                row.line,
+                None,
+                crate::editor::wrap_measurement::WrapMeasurement::new(
+                    metrics.character_width,
+                    (metrics.line_height / 1.25).max(8.0),
+                    None,
+                ),
             );
+            let anchor = metrics.text_origin_x(&fixture.decorations)
+                + measured.width(0, prefix.len(), row.start_visual_column);
             let indicator = row.collapsed_indicator_bounds(metrics, anchor).unwrap();
             let mut draw = |caret_visible| {
                 renderer::Renderer::reset(&mut renderer, bounds);

@@ -208,7 +208,6 @@ fn only_parser_matched_terminal_delimiters_replace_source_syntax() {
         ("fn main() {\n    run();\n}", '{'),
         ("fn main() { \t\n    run();\n}", '{'),
         ("let entries = [\n    1,\n];", '['),
-        ("call(\n    value\n);", '('),
     ] {
         let (plan, _) = plan_for(
             source,

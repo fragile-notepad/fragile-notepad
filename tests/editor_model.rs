@@ -1461,6 +1461,43 @@ fn editor_model_shared_fold_header_tracks_the_longest_collapsed_range() {
 }
 
 #[test]
+fn editor_model_parentheses_do_not_fold_but_nested_conditions_and_blocks_do() {
+    for source in [
+        "call(\n    value\n);",
+        "call(first,\n    second,\n);",
+        "call(\n    nested(\n        value\n    )\n);",
+        "call(\n    value",
+        "call(first,\n    second",
+    ] {
+        let buffer = EditorBuffer::from_text(source);
+        let folds = IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+        assert!(
+            folds.ranges().is_empty(),
+            "{source:?}: {:?}",
+            folds.ranges()
+        );
+    }
+    let buffer = EditorBuffer::from_text(
+        "assert!(\n    ready\n        && valid\n        && available,\n    \"message\"\n);\ncall(\n    {\n        work();\n    },\n    [\n        value,\n    ]\n);",
+    );
+    let folds = IndentBraceFoldProvider::for_syntax(4, "rs").compute_fold_model(&buffer);
+    assert!(folds.ranges().contains(&FoldRange::new(1, 3)));
+    assert!(folds.ranges().contains(&FoldRange::new(7, 9)));
+    assert!(folds.ranges().contains(&FoldRange::new(10, 12)));
+    assert!(
+        !folds
+            .ranges()
+            .iter()
+            .any(|range| range.start_line == 0 || range.start_line == 6)
+    );
+    assert!(folds.ranges().iter().all(|range| {
+        folds
+            .delimiter(*range)
+            .is_none_or(|delimiter| delimiter.opening != '(')
+    }));
+}
+
+#[test]
 fn editor_model_decorations_capture_settings_hidden_spans_and_fold_controls() {
     let mut folds = FoldModel::new(vec![FoldRange::new(0, 2)]);
     folds.set_collapsed(FoldRange::new(0, 2), true);

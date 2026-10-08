@@ -88,11 +88,6 @@ fn chained_else_if_comments_and_commas_remain_visible() {
             &[(0, 2)][..],
             "let value = [...]; // keep",
         ),
-        (
-            "call(\n    value\n); // keep\nafter();",
-            &[(0, 2)][..],
-            "call(...); // keep",
-        ),
     ] {
         let (buffer, folds) = collapsed_model(source, ranges);
         let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);

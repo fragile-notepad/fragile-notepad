@@ -231,7 +231,9 @@ impl IndentBraceFoldProvider {
 
     pub fn compute_fold_model(&self, buffer: &EditorBuffer) -> FoldModel {
         let mut ranges = indentation_folds(buffer, self.indent_width());
-        let (brace_ranges, delimiters) = brace_folds(buffer, &self.hints);
+        let (brace_ranges, delimiters, parentheses_headers) = brace_folds(buffer, &self.hints);
+        // Indentation must not recreate folds for multiline argument lists.
+        ranges.retain(|range| !parentheses_headers.contains(&range.start_line));
         ranges.extend(brace_ranges);
         let mut model = FoldModel::new(ranges);
         model.delimiters = delimiters;
@@ -320,9 +322,14 @@ fn finish_indent_candidate(
 fn brace_folds(
     buffer: &EditorBuffer,
     hints: &SyntaxHints,
-) -> (Vec<FoldRange>, HashMap<FoldRange, FoldDelimiter>) {
+) -> (
+    Vec<FoldRange>,
+    HashMap<FoldRange, FoldDelimiter>,
+    HashSet<usize>,
+) {
     let mut ranges = Vec::new();
     let mut delimiters = HashMap::new();
+    let mut parentheses_headers = HashSet::new();
     let mut stack = Vec::new();
     let mut syntax = BraceSyntax::Code;
 
@@ -447,9 +454,14 @@ fn brace_folds(
                         index += ch.len_utf8();
                         continue;
                     };
-                    let (_, start_line, delimiter) = stack.remove(stack_index);
+                    let (opening, start_line, delimiter) = stack.remove(stack_index);
 
                     if line_index > start_line {
+                        if opening == '(' {
+                            parentheses_headers.insert(start_line);
+                            index += ch.len_utf8();
+                            continue;
+                        }
                         let range = FoldRange::new(start_line, line_index);
                         ranges.push(range);
                         if let Some(mut delimiter) = delimiter {
@@ -465,7 +477,13 @@ fn brace_folds(
         }
     }
 
-    (ranges, delimiters)
+    // Keep incomplete calls unfolded while the user is typing, too.
+    parentheses_headers.extend(
+        stack
+            .iter()
+            .filter_map(|(opening, line, _)| (*opening == '(').then_some(*line)),
+    );
+    (ranges, delimiters, parentheses_headers)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

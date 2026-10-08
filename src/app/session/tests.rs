@@ -78,6 +78,93 @@ fn recovered_edits_retain_the_original_disk_revision() {
 }
 
 #[test]
+fn save_all_restores_inactive_recovery_metadata_before_saving() {
+    use crate::app::tests::test_support::{TestFile, run_task};
+    let original = crate::core::encode_text("on disk\r\n", TextEncoding::Utf16LeBom).unwrap();
+    let file = TestFile::new(&original);
+    let mut app = ready(Session {
+        documents: vec![
+            SessionDocument {
+                text: Some("active clean tab".into()),
+                ..Default::default()
+            },
+            SessionDocument {
+                path: Some(file.0.clone()),
+                disk_revision: Some(crate::core::FileRevision::from_bytes(&original)),
+                text: Some("recovered unsaved edits".into()),
+                is_dirty: true,
+                encoding: TextEncoding::Utf16LeBom,
+                line_ending: Some("\r\n".into()),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    let active = app.workspace.active_document_id();
+    let recovered = app.workspace.documents()[1].id;
+    assert!(matches!(
+        app.workspace.document(recovered).unwrap().load_state,
+        DocumentLoadState::Deferred { .. }
+    ));
+
+    let expected =
+        crate::core::encode_text("recovered unsaved edits\r\n", TextEncoding::Utf16LeBom).unwrap();
+    let task = app.update(Message::SaveAllFiles);
+    assert_eq!(
+        app.files.pending_save().unwrap().snapshot.as_slice(),
+        expected.as_slice()
+    );
+    run_task(&mut app, task);
+
+    assert_eq!(std::fs::read(&file.0).unwrap(), expected);
+    assert_eq!(app.workspace.active_document_id(), active);
+    let document = app.workspace.document(recovered).unwrap();
+    assert!(!document.is_dirty);
+    assert_eq!(
+        document.disk_revision,
+        Some(crate::core::FileRevision::from_bytes(&expected))
+    );
+    assert!(app.files.pending_save_all().is_empty());
+    assert!(app.file_status.is_none());
+}
+
+#[test]
+fn save_all_on_inactive_recovery_still_rejects_external_edits() {
+    use crate::app::tests::test_support::{TestFile, run_task};
+    let file = TestFile::new(b"original");
+    let original_revision = crate::core::FileRevision::from_bytes(b"original");
+    let mut app = ready(Session {
+        documents: vec![
+            SessionDocument {
+                text: Some("active clean tab".into()),
+                ..Default::default()
+            },
+            SessionDocument {
+                path: Some(file.0.clone()),
+                disk_revision: Some(original_revision),
+                text: Some("recovered unsaved edits".into()),
+                is_dirty: true,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    let recovered = app.workspace.documents()[1].id;
+    std::fs::write(&file.0, b"external edits").unwrap();
+
+    let task = app.update(Message::SaveAllFiles);
+    run_task(&mut app, task);
+
+    assert_eq!(std::fs::read(&file.0).unwrap(), b"external edits");
+    let document = app.workspace.document(recovered).unwrap();
+    assert_eq!(document.text(), "recovered unsaved edits");
+    assert!(document.is_dirty);
+    assert_eq!(document.disk_revision, Some(original_revision));
+    assert!(app.files.pending_save_all().is_empty());
+    assert!(app.file_status.as_deref().unwrap().contains("file changed"));
+}
+
+#[test]
 fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis() {
     let mut original = ready(Session::default());
     let original_id = original.workspace.active_document_id();

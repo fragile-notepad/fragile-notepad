@@ -25,13 +25,7 @@ pub(super) struct SessionState {
 }
 
 impl SessionState {
-    fn apply_metadata(&mut self, workspace: &mut crate::core::Workspace, id: DocumentId) {
-        let Some(entry) = self.pending.remove(&id) else {
-            return;
-        };
-        let Some(document) = workspace.document_mut(id) else {
-            return;
-        };
+    fn apply_save_metadata(document: &mut Document, entry: &SessionDocument) {
         if entry.text.is_some() {
             document.disk_revision = entry.disk_revision;
             document.encoding = entry.encoding;
@@ -43,6 +37,16 @@ impl SessionState {
                 document.mark_dirty();
             }
         }
+    }
+
+    fn apply_metadata(&mut self, workspace: &mut crate::core::Workspace, id: DocumentId) {
+        let Some(entry) = self.pending.remove(&id) else {
+            return;
+        };
+        let Some(document) = workspace.document_mut(id) else {
+            return;
+        };
+        Self::apply_save_metadata(document, &entry);
         document.restore_syntax(entry.syntax_token, entry.syntax_automatic);
         document.set_main_selection(EditorSelection::new(
             EditorPosition::new(entry.anchor_line, entry.anchor_column),
@@ -206,7 +210,10 @@ impl App {
             let text = entry.text.as_ref().unwrap();
             document.buffer = EditorBuffer::from_text(text.clone());
             document.complete_streaming_load(generation, entry.encoding);
-
+            // Recovery text is ready synchronously. Restore its disk revision
+            // and save metadata before callers such as Save All use the tab.
+            // View metadata still waits for settings and layout reactions.
+            SessionState::apply_save_metadata(document, entry);
             return Task::none();
         }
         let Some(path) = document.path.clone() else {

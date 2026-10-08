@@ -36,6 +36,8 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 - Fractional image bounds through `Image::snap(false)` in both renderers.
 - Rich paragraphs honor `Basic`, `Advanced`, and `Auto` shaping like plain text,
   preserving glyph positions when fold placeholders add color spans.
+- Software rounded quads honor pixel-grid snapping after scaling and translation,
+  keeping fold placeholder backgrounds inside their painted bounds.
 
 Details: [hybrid rendering](../../SEAMLESS_HYBRID_RENDERING.md),
 [Vulkan resources](../../VULKAN_RENDERING.md),

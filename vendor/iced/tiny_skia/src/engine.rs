@@ -95,8 +95,26 @@ impl Engine {
         clip_bounds: Rectangle,
     ) {
         let physical_bounds = quad.bounds * transformation;
+        // Rounded paths must honor the same pixel-grid snapping as solid
+        // rectangles. Keep curves anti-aliased after aligning their bounds.
+        let physical_bounds = if quad.snap {
+            (physical_bounds + Vector::new(0.001, 0.001)).round()
+        } else {
+            physical_bounds
+        };
+        let quad = Quad {
+            bounds: if quad.snap {
+                physical_bounds * transformation.inverse()
+            } else {
+                quad.bounds
+            },
+            ..*quad
+        };
 
-        if !clip_bounds.intersects(&physical_bounds) {
+        if physical_bounds.width <= 0.0
+            || physical_bounds.height <= 0.0
+            || !clip_bounds.intersects(&physical_bounds)
+        {
             if trace::enabled() {
                 trace::event(
                     "tiny_skia_engine_quad_skip",
@@ -1040,6 +1058,73 @@ fn format_rect(rect: Rectangle) -> String {
 #[cfg(test)]
 mod clip_mask_tests {
     use super::*;
+
+    #[test]
+    fn rounded_quads_snap_after_scaling_and_translation() {
+        let mut engine = Engine::new();
+        let mut render = |quad: Quad, transformation| {
+            let mut pixmap = tiny_skia::Pixmap::new(64, 64).unwrap();
+            let mut mask = tiny_skia::Mask::new(64, 64).unwrap();
+            engine.draw_quad(
+                &quad,
+                &Background::Color(Color::BLACK),
+                transformation,
+                &mut pixmap.as_mut(),
+                &mut ClipMask::new(&mut mask),
+                Rectangle::with_size(Size::new(64.0, 64.0)),
+            );
+            pixmap
+        };
+        for (scale, left, top, right, bottom) in [
+            (1.0, 6.0, 5.0, 22.0, 18.0),
+            (1.5, 8.0, 8.0, 33.0, 26.0),
+            (2.0, 11.0, 10.0, 43.0, 34.0),
+        ] {
+            let transformation =
+                Transformation::translate(0.25, 0.75) * Transformation::scale(scale);
+            let quad = Quad {
+                bounds: Rectangle {
+                    x: 5.25,
+                    y: 4.5,
+                    width: 16.25,
+                    height: 12.25,
+                },
+                border: crate::core::Border {
+                    radius: 2.0.into(),
+                    ..crate::core::Border::default()
+                },
+                snap: true,
+                ..Quad::default()
+            };
+            let actual = render(quad, transformation);
+            let fractional = render(
+                Quad {
+                    snap: false,
+                    ..quad
+                },
+                transformation,
+            );
+            let expected = render(
+                Quad {
+                    bounds: Rectangle {
+                        x: left,
+                        y: top,
+                        width: right - left,
+                        height: bottom - top,
+                    },
+                    border: crate::core::Border {
+                        radius: (2.0 * scale).into(),
+                        ..quad.border
+                    },
+                    snap: false,
+                    ..quad
+                },
+                Transformation::IDENTITY,
+            );
+            assert_eq!(actual.data(), expected.data(), "scale={scale}");
+            assert_ne!(actual.data(), fractional.data(), "scale={scale}");
+        }
+    }
 
     #[test]
     fn fractional_hairline_quad_avoids_tiny_skia_aa_assertion() {

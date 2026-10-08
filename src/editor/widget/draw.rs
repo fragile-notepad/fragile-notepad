@@ -331,6 +331,7 @@ pub(super) fn draw_plan<Renderer>(
                                 width: (right - left).max(0.0),
                                 height: metrics.line_height,
                             },
+                            snap: true,
                             border: iced::Border {
                                 radius: 1.0.into(),
                                 ..iced::Border::default()
@@ -755,6 +756,7 @@ fn draw_collapsed_fold_indicator<Renderer>(
     renderer.fill_quad(
         renderer::Quad {
             bounds,
+            snap: true,
             border: iced::Border {
                 radius: 1.0.into(),
                 ..iced::Border::default()

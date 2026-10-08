@@ -100,7 +100,7 @@ impl Session {
             if doc
                 .line_ending
                 .as_deref()
-                .is_some_and(|ending| !matches!(ending, "\n" | "\r\n" | "\r"))
+                .is_some_and(|ending| !matches!(ending, "\n" | "\r\n" | "\n\r" | "\r"))
             {
                 return Err("Invalid session line ending".into());
             }

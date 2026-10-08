@@ -57,6 +57,58 @@ fn consumed_session_timer_resumes_after_failed_exit_and_allows_later_saves() {
 }
 
 #[test]
+fn lfcr_file_sessions_validate_and_restore_unsaved_edits() {
+    use crate::core::Session;
+    use crate::startup::StartupOptions;
+
+    let file = TestFile::new(b"one\n\rtwo");
+    let (mut app, _) = App::new_with_options(StartupOptions::default());
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::SessionLoaded(Ok(None)));
+    let _ = app.update(Message::StartupReady);
+    let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        path: file.0.clone(),
+        contents: Arc::new(crate::core::decode_bytes(b"one\n\rtwo")),
+        disk_revision: crate::core::FileRevision::from_bytes(b"one\n\rtwo"),
+    })));
+    let clean = app.snapshot_session();
+    clean
+        .validate()
+        .expect("a clean LFCR file must be persistable");
+    assert_eq!(
+        clean.documents[clean.active_index].line_ending.as_deref(),
+        Some("\n\r")
+    );
+    assert!(clean.documents[clean.active_index].text.is_none());
+
+    let id = app.workspace.active_document_id();
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("edit ".into()),
+    ));
+    let document = app.workspace.active_document().unwrap();
+    let expected_text = document.text();
+    let expected_bytes = document.bytes_for_save().unwrap();
+    let saved = app.snapshot_session();
+    saved
+        .validate()
+        .expect("unsaved LFCR edits must be persistable");
+    let restored_session: Session =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    restored_session.validate().unwrap();
+
+    let (mut restored, _) = App::new_with_options(StartupOptions::default());
+    let _ = restored.update(Message::SettingsLoaded(Ok(None)));
+    let _ = restored.update(Message::SessionLoaded(Ok(Some(restored_session))));
+    let _ = restored.update(Message::StartupReady);
+    let document = restored.workspace.active_document().unwrap();
+    assert_eq!(document.text(), expected_text);
+    assert!(document.is_dirty);
+    assert_eq!(document.line_ending.unwrap().as_str(), "\n\r");
+    assert_eq!(document.bytes_for_save().unwrap(), expected_bytes);
+}
+
+#[test]
 fn streamed_load_replays_chunks_before_completion_after_failed_exit() {
     let (mut app, _) = App::new();
     let _ = app.update(Message::SettingsLoaded(Ok(None)));

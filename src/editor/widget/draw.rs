@@ -243,9 +243,9 @@ pub(super) fn draw_plan<Renderer>(
                 renderer::Quad {
                     bounds: Rectangle {
                         x: bounds.x + x,
-                        y: bounds.y + selection.y + 1.0,
+                        y: bounds.y + selection.y,
                         width: width.max(1.0),
-                        height: metrics.line_height - 2.0,
+                        height: metrics.line_height,
                     },
                     ..renderer::Quad::default()
                 },

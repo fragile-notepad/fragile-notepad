@@ -51,6 +51,8 @@ async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) ->
     }
     let mut file = options.open(&temp_path).await?;
     let write_result = async {
+        #[cfg(windows)]
+        copy_windows_permissions(path, &temp_path)?;
         file.write_all(contents).await?;
         #[cfg(unix)]
         if let Some(permissions) = permissions {
@@ -74,25 +76,93 @@ async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) ->
 
 #[cfg(windows)]
 async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        MOVEFILE_WRITE_THROUGH, MoveFileExW, ReplaceFileW,
     };
 
     let from = wide_null(temp_path.as_os_str());
     let to = wide_null(path.as_os_str());
+    // Merge the original DACL, named streams, encryption, compression, and
+    // creation time. Do not ignore merge failures or fall back to an overwrite.
     let result = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
+        ReplaceFileW(
             to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            from.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
         )
     };
-
-    if result == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
+    if result != 0 {
+        return Ok(());
     }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() != Some(ERROR_FILE_NOT_FOUND as i32) {
+        return Err(error);
+    }
+    // A new destination has no metadata to preserve. Without REPLACE_EXISTING,
+    // a file created by somebody else in the meantime cannot be overwritten.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_windows_permissions(path: &Path, temp_path: &Path) -> io::Result<()> {
+    use std::ptr;
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        GetNamedSecurityInfoW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    };
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    };
+
+    let mut dacl = ptr::null_mut();
+    let mut descriptor = ptr::null_mut();
+    let original = wide_null(path.as_os_str());
+    let error = unsafe {
+        GetNamedSecurityInfoW(
+            original.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) {
+        return Ok(());
+    }
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    // Restrict the empty temporary file before any original contents reach it.
+    // Protect the copied DACL from the directory's potentially broader rules.
+    let temporary = wide_null(temp_path.as_os_str());
+    let error = unsafe {
+        SetNamedSecurityInfoW(
+            temporary.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            dacl,
+            ptr::null(),
+        )
+    };
+    unsafe {
+        LocalFree(descriptor);
+    }
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -173,6 +243,144 @@ mod tests {
             write(&path, b"updated").await.unwrap();
             assert_eq!(std::fs::read(&path).unwrap(), b"updated");
             assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 1);
+        });
+    }
+
+    #[cfg(windows)]
+    fn windows_dacl(path: &Path) -> String {
+        use std::ptr;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+            SE_FILE_OBJECT,
+        };
+        use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+
+        let mut descriptor = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                GetNamedSecurityInfoW(
+                    wide_null(path.as_os_str()).as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &mut descriptor,
+                )
+            },
+            0
+        );
+        let mut text = ptr::null_mut();
+        let mut length = 0;
+        assert_ne!(
+            unsafe {
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    descriptor,
+                    1,
+                    DACL_SECURITY_INFORMATION,
+                    &mut text,
+                    &mut length,
+                )
+            },
+            0
+        );
+        let result = String::from_utf16_lossy(unsafe {
+            std::slice::from_raw_parts(text, length.saturating_sub(1) as usize)
+        });
+        unsafe {
+            LocalFree(text.cast());
+            LocalFree(descriptor);
+        }
+        result
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_windows_permissions_survive_save() {
+        use std::ptr;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SE_FILE_OBJECT,
+            SetNamedSecurityInfoW,
+        };
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl,
+            PROTECTED_DACL_SECURITY_INFORMATION,
+        };
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        std::fs::write(&path, b"original").unwrap();
+        run(async {
+            let inherited = windows_dacl(&path);
+            write(&path, b"updated").await.unwrap();
+            assert_eq!(windows_dacl(&path), inherited);
+
+            let sddl = wide_null(OsStr::new("D:P(A;;FA;;;OW)"));
+            let mut descriptor = ptr::null_mut();
+            assert_ne!(
+                unsafe {
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                        sddl.as_ptr(),
+                        1,
+                        &mut descriptor,
+                        ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            let mut present = 0;
+            let mut defaulted = 0;
+            let mut dacl = ptr::null_mut();
+            assert_ne!(
+                unsafe {
+                    GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted)
+                },
+                0
+            );
+            assert_eq!(
+                unsafe {
+                    SetNamedSecurityInfoW(
+                        wide_null(path.as_os_str()).as_ptr(),
+                        SE_FILE_OBJECT,
+                        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        dacl,
+                        ptr::null(),
+                    )
+                },
+                0
+            );
+            unsafe {
+                LocalFree(descriptor);
+            }
+
+            let restricted = windows_dacl(&path);
+            write(&path, b"private update").await.unwrap();
+            assert_eq!(windows_dacl(&path), restricted);
+            assert_eq!(std::fs::read(&path).unwrap(), b"private update");
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_windows_streams_and_creation_time_survive_save() {
+        use std::os::windows::fs::MetadataExt;
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        let stream = PathBuf::from(format!("{}:metadata", path.display()));
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::write(&stream, b"application metadata").unwrap();
+        let created = std::fs::metadata(&path).unwrap().creation_time();
+        run(async {
+            write(&path, b"updated").await.unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"updated");
+            assert_eq!(std::fs::read(&stream).unwrap(), b"application metadata");
+            assert_eq!(std::fs::metadata(&path).unwrap().creation_time(), created);
         });
     }
 

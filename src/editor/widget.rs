@@ -32,8 +32,8 @@ use super::render::{
 };
 use super::render::{
     SyntaxLineCache, build_render_plan_for_selection_set_with_cache_and_caret_rows,
-    collapsed_delimiter_indicator_bounds, collapsed_fold_indicator_bounds,
-    fold_delimiter_for_fragment,
+    collapsed_condition_indicator_bounds, collapsed_delimiter_indicator_bounds,
+    collapsed_fold_indicator_bounds, condition_fold_placeholder, fold_delimiter_for_fragment,
 };
 use super::viewport::ViewportModel;
 
@@ -713,6 +713,19 @@ impl<Message> AdvancedEditor<'_, Message> {
                 self.metrics,
                 row_y(visible_row, editor_layout),
                 anchor_x,
+            )
+        } else if condition_fold_placeholder(
+            self.buffer,
+            hidden.first_hidden_line,
+            hidden.last_hidden_line,
+        )
+        .is_some()
+        {
+            collapsed_condition_indicator_bounds(
+                self.metrics,
+                row_y(visible_row, editor_layout),
+                anchor_x,
+                self.decorations.settings.show_end_of_line_markers,
             )
         } else {
             collapsed_fold_indicator_bounds(

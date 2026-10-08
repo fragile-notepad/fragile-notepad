@@ -56,6 +56,37 @@ fn default_layout() -> EditorLayout {
 }
 
 #[test]
+fn collapsed_conditions_keep_the_boolean_operator_in_a_block_sized_placeholder() {
+    for (operator, placeholder) in [("&&", "&&..."), ("||", "||...")] {
+        let source = format!(
+            "assert!(\n    close.x >= 0.0\n        {operator} close.y >= 0.0\n        {operator} close.width > 0.0,\n    \"inside\"\n);"
+        );
+        let range = FoldRange::new(1, 3);
+        let (plan, _) = plan_for_range(
+            &source,
+            range,
+            true,
+            DecorationSettings::default(),
+            default_layout(),
+        );
+        let row = plan.rows.iter().find(|row| row.line == 1).unwrap();
+        assert_eq!(row.text.trim(), "close.x >= 0.0");
+        assert_eq!(
+            row.hidden_lines.unwrap().condition_placeholder,
+            Some(placeholder)
+        );
+        let anchor = 180.0;
+        let bounds = row
+            .collapsed_indicator_bounds(default_layout().metrics, anchor)
+            .unwrap();
+        let block = collapsed_delimiter_indicator_bounds(default_layout().metrics, row.y, anchor);
+        assert_eq!(bounds.size(), block.size());
+        assert!(bounds.x > anchor);
+        assert!(plan.rows.iter().any(|row| row.text.contains("inside")));
+    }
+}
+
+#[test]
 fn collapsed_block_has_one_inline_indicator_and_expanded_block_has_none() {
     for collapsed in [false, true] {
         let layout = default_layout();

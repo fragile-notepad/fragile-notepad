@@ -334,8 +334,13 @@ fn wrapped_local_edits_reflow_the_whole_multi_caret_span() {
         0,
     ));
     assert!(replace_selection(&mut document, "XYZ", false, 4));
-    let expected =
-        crate::editor::ViewportModel::new_wrapped(&document.buffer, &document.folds, 4, 4);
+    let expected = crate::editor::ViewportModel::new_wrapped_with_fold_indicator_columns(
+        &document.buffer,
+        &document.folds,
+        4,
+        4,
+        document.viewport.fold_indicator_columns(),
+    );
     assert_eq!(document.viewport, expected);
     assert_eq!(document.viewport.visible_row_count(), 82);
     assert!(document.undo());

@@ -118,6 +118,13 @@ impl RowRenderPlan {
             .map(|hidden| {
                 if hidden.delimiter.is_some() {
                     collapsed_delimiter_indicator_bounds(metrics, self.y, measured_anchor_x)
+                } else if hidden.condition_placeholder.is_some() {
+                    collapsed_condition_indicator_bounds(
+                        metrics,
+                        self.y,
+                        measured_anchor_x,
+                        self.eol.is_some(),
+                    )
                 } else {
                     collapsed_fold_indicator_bounds(
                         metrics,
@@ -148,6 +155,25 @@ pub struct HiddenLineRenderPlan {
     pub last_hidden_line: usize,
     pub hidden_line_count: usize,
     pub delimiter: Option<FoldDelimiter>,
+    pub condition_placeholder: Option<&'static str>,
+}
+
+pub(crate) fn condition_fold_placeholder(
+    buffer: &EditorBuffer,
+    first: usize,
+    last: usize,
+) -> Option<&'static str> {
+    let continuation = (first..=last)
+        .filter_map(|line| buffer.line(line))
+        .find(|line| !line.trim().is_empty())?;
+    let continuation = continuation.trim_start();
+    if continuation.starts_with("&&") {
+        Some("&&...")
+    } else if continuation.starts_with("||") {
+        Some("||...")
+    } else {
+        None
+    }
 }
 
 pub(crate) fn fold_delimiter_for_fragment(
@@ -340,13 +366,26 @@ pub fn collapsed_delimiter_indicator_bounds(
     }
 }
 
+pub fn collapsed_condition_indicator_bounds(
+    metrics: EditorMetrics,
+    row_y: f32,
+    measured_text_end_x: f32,
+    show_eol_markers: bool,
+) -> Rectangle {
+    let anchor =
+        collapsed_fold_indicator_bounds(metrics, row_y, measured_text_end_x, show_eol_markers);
+    collapsed_delimiter_indicator_bounds(metrics, row_y, anchor.x)
+}
+
 /// Horizontal space needed after a header, excluding any EOL marker.
 pub fn collapsed_fold_indicator_reservation(character_width: f32) -> f32 {
     let (gap, width) = collapsed_fold_indicator_dimensions(character_width);
-    (gap + width).max(
-        collapsed_delimiter_indicator_width(character_width) - character_width
-            + character_width * 0.25,
-    )
+    (gap + width)
+        .max(gap + collapsed_delimiter_indicator_width(character_width))
+        .max(
+            collapsed_delimiter_indicator_width(character_width) - character_width
+                + character_width * 0.25,
+        )
 }
 
 fn collapsed_delimiter_indicator_width(character_width: f32) -> f32 {
@@ -630,6 +669,11 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
             .hidden_line_span(line)
             .filter(|_| segment.is_last && viewport.projection(line).is_none())
             .map(|span| HiddenLineRenderPlan {
+                condition_placeholder: condition_fold_placeholder(
+                    buffer,
+                    span.first_hidden_line,
+                    span.last_hidden_line,
+                ),
                 first_hidden_line: span.first_hidden_line,
                 last_hidden_line: span.last_hidden_line,
                 hidden_line_count: span.hidden_line_count(),

@@ -185,7 +185,7 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
     let mut restored = ready(Session {
         documents: vec![SessionDocument {
             text: Some(format!("{} {{\n  body\n}}\ntail", "x".repeat(96))),
-            first_visible_position: Some((0, 36)),
+            first_visible_position: Some((0, 30)),
             collapsed_folds: vec![(0, 2)],
             ..Default::default()
         }],
@@ -204,7 +204,7 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
     ));
     assert_eq!(
         restored.snapshot_session().documents[0].first_visible_position,
-        Some((0, 36))
+        Some((0, 30))
     );
     let document = restored.workspace.document_mut(id).unwrap();
     let (buffer, request) = document.analysis_request().unwrap();
@@ -218,10 +218,16 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
             .folds
             .is_collapsed(crate::editor::FoldRange::new(0, 2))
     );
-    assert_eq!(document.scroll.first_visible_row, 6);
+    assert_eq!(
+        document.scroll.first_visible_row,
+        document
+            .viewport
+            .position_to_visible_row(EditorPosition::new(0, 30))
+            .unwrap()
+    );
     assert_eq!(
         document.session_top_position(),
-        Some(EditorPosition::new(0, 36))
+        Some(EditorPosition::new(0, 30))
     );
 }
 

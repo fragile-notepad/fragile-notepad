@@ -484,6 +484,8 @@ pub(super) fn draw_plan<Renderer>(
                         indicator,
                         bounds.y + row.y,
                         row.collapsed_delimiter().map(|delimiter| delimiter.opening),
+                        row.hidden_lines
+                            .and_then(|hidden| hidden.condition_placeholder),
                         metrics,
                         style,
                         scroll_text_clip_bounds,
@@ -743,6 +745,7 @@ fn draw_collapsed_fold_indicator<Renderer>(
     bounds: Rectangle,
     row_y: f32,
     opening: Option<char>,
+    condition_placeholder: Option<&str>,
     metrics: EditorMetrics,
     style: EditorStyle,
     clip_bounds: Rectangle,
@@ -761,12 +764,14 @@ fn draw_collapsed_fold_indicator<Renderer>(
         Background::Color(style.fold_control_background),
     );
 
-    if let Some(opening) = opening {
-        let placeholder = match opening {
+    if let Some(placeholder) = opening
+        .map(|opening| match opening {
             '[' => "[...]",
             '(' => "(...)",
             _ => "{...}",
-        };
+        })
+        .or(condition_placeholder)
+    {
         let padding = metrics.character_width * 0.2;
         draw_text(
             renderer,

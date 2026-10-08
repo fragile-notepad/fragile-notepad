@@ -287,7 +287,7 @@ fn wrapped_fragments_render_distinct_geometry_with_software_renderer() {
             viewport.wrap_columns(),
             false,
             false,
-            false,
+            0.0,
             1,
             &mut RichParagraphCache::default(),
             &mut LineGeometryCache::default(),
@@ -542,7 +542,7 @@ fn matched_fold_placeholder_clicks_expand_from_the_opener_through_the_closer() {
 }
 
 #[test]
-fn folding_gutter_hover_redraws_only_on_visibility_changes() {
+fn folding_gutter_hover_schedules_frames_until_fade_settles() {
     for enabled in [true, false] {
         let mut fixture =
             FoldPointerFixture::new("{\nchild\n}", FoldModel::new(vec![FoldRange::new(0, 2)]));
@@ -585,15 +585,20 @@ fn folding_gutter_hover_redraws_only_on_visibility_changes() {
                 &mut shell,
                 &node.bounds(),
             );
-            assert_eq!(
-                shell.redraw_request(),
-                if enabled && changed {
-                    iced::window::RedrawRequest::NextFrame
-                } else {
-                    iced::window::RedrawRequest::Wait
-                },
-                "enabled={enabled}, cursor={cursor:?}"
-            );
+            let fading = tree
+                .state
+                .downcast_ref::<AdvancedEditorState<()>>()
+                .fold_fade
+                .get()
+                .animating(Instant::now());
+            let request = shell.redraw_request();
+            if enabled && changed {
+                assert_eq!(request, iced::window::RedrawRequest::NextFrame);
+            } else if fading {
+                assert!(matches!(request, iced::window::RedrawRequest::At(_)));
+            } else {
+                assert_eq!(request, iced::window::RedrawRequest::Wait);
+            }
             assert!(!shell.is_event_captured());
         }
     }
@@ -757,7 +762,7 @@ fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
                     None,
                     false,
                     caret_visible,
-                    false,
+                    0.0,
                     1,
                     &mut RichParagraphCache::default(),
                     &mut LineGeometryCache::default(),

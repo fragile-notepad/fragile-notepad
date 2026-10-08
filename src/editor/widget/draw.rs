@@ -127,7 +127,7 @@ pub(super) fn draw_plan<Renderer>(
     wrap_guide_column: Option<usize>,
     fast_text: bool,
     caret_visible: bool,
-    fold_controls_hovered: bool,
+    fold_controls_opacity: f32,
     frame_id: u64,
     rich_paragraphs: &mut RichParagraphCache<Renderer::Paragraph>,
     line_geometries: &mut LineGeometryCache<Renderer::Paragraph>,
@@ -294,8 +294,12 @@ pub(super) fn draw_plan<Renderer>(
         let row_y = bounds.y + row.y;
 
         if let Some(fold) = row.fold
-            && (fold.collapsed || fold_controls_hovered)
+            && (fold.collapsed || fold_controls_opacity > 0.0)
         {
+            let mut fold_style = style;
+            if !fold.collapsed {
+                fold_style.fold_controls.a *= fold_controls_opacity;
+            }
             draw_fold_control(
                 renderer,
                 bounds,
@@ -303,7 +307,7 @@ pub(super) fn draw_plan<Renderer>(
                 fold.collapsed,
                 metrics,
                 decorations,
-                style,
+                fold_style,
             );
         }
 

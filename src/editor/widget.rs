@@ -2,9 +2,7 @@ use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Layout, Shell, image as advanced_image, mouse, text};
-#[cfg(test)]
 use iced::time::Duration;
-#[cfg(test)]
 use iced::time::Instant;
 use iced::{Background, Element, Event, Font, Length, Rectangle, Size, Theme, highlighter};
 #[cfg(test)]
@@ -236,7 +234,16 @@ where
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
         let fold_controls_hovered = self.fold_controls_hovered(bounds, cursor);
-        state.fold_controls_hovered.set(fold_controls_hovered);
+        // A first draw can arrive before a pointer event (e.g. a restored view).
+        if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
+            let target = f32::from(fold_controls_hovered);
+            state.fold_fade.set(state::FoldFade {
+                from: target,
+                target,
+                started: Instant::now(),
+            });
+        }
+        let fold_controls_opacity = state.fold_fade.get().opacity(Instant::now());
         let fast_text = is_scroll_fast_frame(state);
         let caret_visible = state.is_caret_visible() && state.text_drag.is_none();
         // Drawing only consumes completed spans. Parser work is scheduled by
@@ -336,7 +343,7 @@ where
                 ),
                 fast_text,
                 caret_visible,
-                fold_controls_hovered,
+                fold_controls_opacity,
                 frame_id,
                 &mut rich_paragraphs,
                 &mut line_geometries,
@@ -442,7 +449,16 @@ where
             .downcast_mut::<AdvancedEditorState<Renderer::Paragraph>>();
         let fold_controls_hovered = self.fold_controls_hovered(layout.bounds(), cursor);
         if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
+            let now = Instant::now();
+            state.fold_fade.set(state::FoldFade {
+                from: state.fold_fade.get().opacity(now),
+                target: f32::from(fold_controls_hovered),
+                started: now,
+            });
             shell.request_redraw();
+        }
+        if state.fold_fade.get().animating(Instant::now()) {
+            shell.request_redraw_at(Instant::now() + Duration::from_millis(16));
         }
         let editor_layout = self.editor_layout(layout.bounds());
         let outcome = if matches!(

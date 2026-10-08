@@ -18,6 +18,7 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) is_focused: bool,
     pub(super) is_window_focused: bool,
     pub(super) fold_controls_hovered: Cell<bool>,
+    pub(super) fold_fade: Cell<FoldFade>,
     pub(super) caret_updated_at: Instant,
     pub(super) caret_now: Cell<Instant>,
     pub(super) drag_anchor: Option<EditorPosition>,
@@ -43,6 +44,11 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             is_focused: false,
             is_window_focused: true,
             fold_controls_hovered: Cell::new(false),
+            fold_fade: Cell::new(FoldFade {
+                from: 0.0,
+                target: 0.0,
+                started: now,
+            }),
             caret_updated_at: now,
             caret_now: Cell::new(now),
             drag_anchor: None,
@@ -59,6 +65,25 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             rich_paragraphs: RefCell::new(RichParagraphCache::default()),
             line_geometries: RefCell::new(LineGeometryCache::default()),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FoldFade {
+    pub from: f32,
+    pub target: f32,
+    pub started: Instant,
+}
+
+impl FoldFade {
+    pub fn opacity(self, now: Instant) -> f32 {
+        let progress = (now.saturating_duration_since(self.started).as_secs_f32() / 0.15).min(1.0);
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        self.from + (self.target - self.from) * eased
+    }
+
+    pub fn animating(self, now: Instant) -> bool {
+        self.from != self.target && now.saturating_duration_since(self.started).as_millis() < 150
     }
 }
 
@@ -168,6 +193,28 @@ pub(super) fn caret_visible_at(
 mod tests {
     use super::*;
     use iced::time::Duration;
+
+    #[test]
+    fn fold_fade_reverses_without_jumping_and_settles() {
+        let now = Instant::now();
+        let fade = FoldFade {
+            from: 0.0,
+            target: 1.0,
+            started: now,
+        };
+        let halfway = now + Duration::from_millis(75);
+        assert_eq!(fade.opacity(now), 0.0);
+        assert_eq!(fade.opacity(halfway), 0.5);
+        let reverse = FoldFade {
+            from: fade.opacity(halfway),
+            target: 0.0,
+            started: halfway,
+        };
+        assert_eq!(reverse.opacity(halfway), 0.5);
+        let end = halfway + Duration::from_millis(150);
+        assert_eq!(reverse.opacity(end), 0.0);
+        assert!(!reverse.animating(end));
+    }
 
     #[test]
     fn text_click_state_detects_same_position_double_click() {

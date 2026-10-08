@@ -100,6 +100,30 @@ where
 
 #[cfg(windows)]
 async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
+    replace_windows_file_with(temp_path, path, replace_windows_file)
+}
+
+#[cfg(windows)]
+fn replace_windows_file_with(
+    temp_path: &Path,
+    path: &Path,
+    replace: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    // Read immediately before publication so a permission edit made while
+    // staging is preserved along with the original file's other metadata.
+    let permissions = WindowsDacl::read(path)?;
+    replace(temp_path, path)?;
+    if let Some(permissions) = permissions {
+        // ReplaceFileW can convert legacy inherited ACEs into explicit entries
+        // and append inherited copies. Apply the original descriptor after its
+        // metadata merge to preserve both the rules and their inheritance.
+        permissions.apply(path)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_windows_file(temp_path: &Path, path: &Path) -> io::Result<()> {
     use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_WRITE_THROUGH, MoveFileExW, ReplaceFileW,
@@ -136,46 +160,67 @@ async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 fn copy_windows_permissions(path: &Path, temp_path: &Path) -> io::Result<()> {
-    use std::ptr;
-    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, LocalFree};
-    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
-    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, SetFileSecurityW};
+    if let Some(permissions) = WindowsDacl::read(path)? {
+        // Restrict the staged file before writing any source contents.
+        permissions.apply(temp_path)?;
+    }
+    Ok(())
+}
 
-    let mut descriptor = ptr::null_mut();
-    let original = wide_null(path.as_os_str());
-    let error = unsafe {
-        GetNamedSecurityInfoW(
-            original.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            ptr::null_mut(),
-            ptr::null_mut(),
-            &mut descriptor,
-        )
-    };
-    if matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) {
-        return Ok(());
+#[cfg(windows)]
+struct WindowsDacl(windows_sys::Win32::Security::PSECURITY_DESCRIPTOR);
+
+#[cfg(windows)]
+impl WindowsDacl {
+    fn read(path: &Path) -> io::Result<Option<Self>> {
+        use std::ptr;
+        use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
+        use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+
+        let mut descriptor = ptr::null_mut();
+        let original = wide_null(path.as_os_str());
+        let error = unsafe {
+            GetNamedSecurityInfoW(
+                original.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) {
+            return Ok(None);
+        }
+        if error != 0 {
+            return Err(io::Error::from_raw_os_error(error as i32));
+        }
+        Ok(Some(Self(descriptor)))
     }
-    if error != 0 {
-        return Err(io::Error::from_raw_os_error(error as i32));
-    }
-    // Apply the complete DACL descriptor before writing contents. Unlike
-    // SetNamedSecurityInfoW, this retains the inheritance control bits and does
-    // not merge directory rules or convert legacy inherited ACEs to explicit ones.
-    let temporary = wide_null(temp_path.as_os_str());
-    let error =
-        unsafe { SetFileSecurityW(temporary.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) };
-    let result = if error == 0 {
-        Err(io::Error::last_os_error())
-    } else {
+
+    fn apply(&self, path: &Path) -> io::Result<()> {
+        use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, SetFileSecurityW};
+
+        // Apply the DACL descriptor without forcing protection or recomputing
+        // inherited entries from the parent directory.
+        let name = wide_null(path.as_os_str());
+        if unsafe { SetFileSecurityW(name.as_ptr(), DACL_SECURITY_INFORMATION, self.0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
         Ok(())
-    };
-    unsafe {
-        LocalFree(descriptor);
     }
-    result
+}
+
+#[cfg(windows)]
+impl Drop for WindowsDacl {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::LocalFree(self.0);
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -346,6 +391,82 @@ mod tests {
         .unwrap();
         assert_eq!(windows_permissions(path), expected, "Published permissions");
         assert_eq!(std::fs::read(path).unwrap(), contents);
+    }
+
+    #[cfg(windows)]
+    fn set_windows_dacl(path: &Path, sddl: &str) {
+        use std::ptr;
+        use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+
+        let mut descriptor = ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    wide_null(OsStr::new(sddl)).as_ptr(),
+                    1,
+                    &mut descriptor,
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
+        WindowsDacl(descriptor).apply(path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_replacement_restores_inherited_entries_after_metadata_merge() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        let temporary = directory.0.join("replacement.tmp");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::write(&temporary, b"updated").unwrap();
+        set_windows_dacl(&path, "D:(A;ID;FA;;;OW)");
+        let expected = windows_permissions(&path);
+        assert!(!expected.dacl_protected);
+        assert_eq!(expected.entries.as_ref().unwrap().len(), 1);
+        copy_windows_permissions(&path, &temporary).unwrap();
+        assert_eq!(windows_permissions(&temporary), expected);
+
+        replace_windows_file_with(&temporary, &path, |temporary, path| {
+            replace_windows_file(temporary, path)?;
+            // Reproduce the hosted runner's result on Windows builds whose
+            // ReplaceFileW does not duplicate these inherited entries itself.
+            set_windows_dacl(path, "D:(A;;FA;;;OW)(A;ID;FA;;;OW)");
+            let merged = windows_permissions(path);
+            assert_eq!(merged.entries.as_ref().unwrap().len(), 2);
+            assert_ne!(merged, expected);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(
+            windows_permissions(&path),
+            expected,
+            "Published permissions"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"updated");
+        assert!(!temporary.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_replacement_preserves_permissions_changed_while_staging() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        std::fs::write(&path, b"original").unwrap();
+        run(async {
+            write_with_check(&path, b"updated", |_| async {
+                set_windows_dacl(&path, "D:P(A;;FA;;;OW)");
+                Ok::<(), io::Error>(())
+            })
+            .await
+            .unwrap();
+        });
+        let published = windows_permissions(&path);
+        assert!(published.dacl_protected);
+        assert_eq!(published.entries.as_ref().unwrap().len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), b"updated");
     }
 
     #[cfg(windows)]

@@ -327,9 +327,9 @@ pub(super) fn draw_plan<Renderer>(
                         renderer::Quad {
                             bounds: Rectangle {
                                 x: bounds.x + left,
-                                y: bounds.y + row.y + metrics.line_height * 0.05,
+                                y: bounds.y + row.y,
                                 width: (right - left).max(0.0),
-                                height: metrics.line_height * 0.9,
+                                height: metrics.line_height,
                             },
                             border: iced::Border {
                                 radius: 1.0.into(),

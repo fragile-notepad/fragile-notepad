@@ -334,9 +334,7 @@ pub fn collapsed_fold_indicator_bounds(
     show_eol_markers: bool,
 ) -> Rectangle {
     let (gap, width) = collapsed_fold_indicator_dimensions(metrics.character_width);
-    let height = (metrics.line_height * 0.75)
-        .max(8.0)
-        .min(metrics.line_height.max(0.0));
+    let height = metrics.line_height.max(0.0);
     let marker_width = if show_eol_markers {
         end_of_line_marker_reservation(metrics.character_width)
     } else {
@@ -345,7 +343,7 @@ pub fn collapsed_fold_indicator_bounds(
 
     Rectangle {
         x: measured_text_end_x + marker_width + gap,
-        y: row_y + (metrics.line_height - height) / 2.0,
+        y: row_y,
         width,
         height,
     }
@@ -357,10 +355,10 @@ pub fn collapsed_delimiter_indicator_bounds(
     row_y: f32,
     measured_opener_x: f32,
 ) -> Rectangle {
-    let height = metrics.line_height * 0.9;
+    let height = metrics.line_height;
     Rectangle {
         x: measured_opener_x,
-        y: row_y + (metrics.line_height - height) / 2.0,
+        y: row_y,
         width: collapsed_delimiter_indicator_width(metrics.character_width),
         height,
     }

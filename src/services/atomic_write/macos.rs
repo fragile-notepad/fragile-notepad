@@ -272,6 +272,12 @@ fn copy_attribute(source: RawFd, destination: RawFd, name: &CStr) -> io::Result<
     if size < 0 {
         return Err(io::Error::last_os_error());
     }
+    if size as u64 > u64::from(u32::MAX) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Resource fork exceeds the supported save offset range",
+        ));
+    }
     // A position-zero write overwrites/extends a fork without truncating it.
     // Clear any staged fork first so a shorter source cannot leave a stale tail.
     if unsafe { libc::fremovexattr(destination, name.as_ptr(), 0) } != 0 {
@@ -332,7 +338,19 @@ fn read_attribute_buffer(
         if size < 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut buffer = vec![0; size as usize];
+        // Darwin permits ordinary attributes much larger than an editor can
+        // safely allocate. Refuse the save without replacing the original.
+        const MAX_ATTRIBUTE_BUFFER: usize = 16 * 1024 * 1024;
+        let size = usize::try_from(size).map_err(io::Error::other)?;
+        if size > MAX_ATTRIBUTE_BUFFER {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File metadata exceeds the 16 MiB save limit",
+            ));
+        }
+        let mut buffer = Vec::new();
+        buffer.try_reserve_exact(size).map_err(io::Error::other)?;
+        buffer.resize(size, 0);
         if buffer.is_empty() {
             return Ok(buffer);
         }

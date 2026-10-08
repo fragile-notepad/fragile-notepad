@@ -180,14 +180,18 @@ jobs:
           python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared \
             --target-os "$font_target_os" --cache-dir target/font-profiles
 
-      - name: Validate release gates
+      - name: Test Windows release gates
         if: runner.os == 'Windows'
+        shell: pwsh
         env:
           # Keep parity checks when an adapter exists; permit headless Windows runners.
           FRAGILE_ALLOW_WGPU_PARITY_SKIP: "1"
-        run: |
-          cargo test
-          cargo check --no-default-features
+        run: cargo test --locked
+
+      - name: Check Windows software-only build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo check --locked --no-default-features
 
       - name: Validate macOS release gates
         if: runner.os == 'macOS'

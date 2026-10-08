@@ -78,14 +78,17 @@ where
         // Do not expose private contents while the replacement is being written.
         options.mode(0o600);
     }
+    #[cfg(target_os = "macos")]
+    let mut file = if _private || permissions.is_some() {
+        // Exclude inherited ACL grants at creation, so nobody can open the
+        // empty replacement and retain access when contents are written.
+        macos::create_restricted_staged_file(&temp_path).await?
+    } else {
+        options.open(&temp_path).await?
+    };
+    #[cfg(not(target_os = "macos"))]
     let mut file = options.open(&temp_path).await?;
     let write_result = async {
-        #[cfg(target_os = "macos")]
-        if _private || permissions.is_some() {
-            // macOS ACL grants are independent of the 0600 mode. Remove any
-            // inherited grants before placing contents in the staged file.
-            macos::restrict_staged_file(&file).await?;
-        }
         #[cfg(windows)]
         copy_windows_permissions(path, &temp_path)?;
         file.write_all(contents).await?;

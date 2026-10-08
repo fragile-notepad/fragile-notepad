@@ -287,7 +287,20 @@ fn copy_attribute(source: RawFd, destination: RawFd, name: &CStr) -> io::Result<
         }
     }
     if size == 0 {
-        return set_attribute(destination, name, &[], 0);
+        set_attribute(destination, name, &[], 0)?;
+        // HFS+ can expose an allocated, empty fork, but a zero-byte write
+        // cannot allocate its replacement. Refuse to silently drop its presence.
+        let copied_size =
+            unsafe { libc::fgetxattr(destination, name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
+        if copied_size < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if copied_size != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "Staged resource fork changed while saving",
+            ));
+        }
     }
     let mut buffer = vec![0; 64 * 1024];
     let mut position = 0_usize;

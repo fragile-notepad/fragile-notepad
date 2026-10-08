@@ -329,9 +329,7 @@ impl App {
         };
         let replacement = search.replacement_for_match(&text, text_match, &self.find.replacement);
         let replacement_end = text_match.start + replacement.len();
-        if self.replace_active_range_with(&text, text_match.start, text_match.end, replacement) {
-            self.refresh_find_matches();
-        }
+        self.replace_active_range_with(&text, text_match.start, text_match.end, replacement);
         self.select_match_after_replacement(replacement_end, text_match.is_empty());
 
         Task::none()
@@ -498,16 +496,7 @@ impl App {
     }
 
     fn advanced_replace_all(&mut self) -> Task<Message> {
-        let scope = if matches!(
-            self.search_dialog.active_tab,
-            AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
-        ) {
-            SearchScope::OpenDocuments
-        } else {
-            SearchScope::Current
-        };
-
-        self.replace_all_in(scope)
+        self.replace_all_in(self.dialog_scope())
     }
 
     fn replace_all_in(&mut self, scope: SearchScope) -> Task<Message> {
@@ -766,7 +755,6 @@ impl App {
         self.search_dialog.preview_generation =
             self.search_dialog.preview_generation.wrapping_add(1);
         self.search_dialog.clear_results();
-        self.search_dialog.status = String::from("Updating results…");
         self.schedule_search_preview()
     }
 

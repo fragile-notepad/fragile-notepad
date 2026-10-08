@@ -216,8 +216,7 @@ fn type_into(
     )
 }
 
-fn snapshot(
-    name: &str,
+fn assert_renders(
     element: &Element<'_, Message>,
     tree: &Tree,
     node: &layout::Node,
@@ -238,16 +237,6 @@ fn snapshot(
     );
     let pixels = renderer.screenshot(size, 1.0, Color::TRANSPARENT);
     assert_eq!(pixels.len(), size.width as usize * size.height as usize * 4);
-    if std::env::var_os("FRAGILE_SEARCH_SNAPSHOTS").is_some() {
-        std::fs::create_dir_all("target/search-review").expect("search review directory");
-        tiny_skia::Pixmap::from_vec(
-            pixels,
-            tiny_skia::IntSize::from_wh(size.width, size.height).unwrap(),
-        )
-        .expect("RGBA search snapshot")
-        .save_png(format!("target/search-review/{name}.png"))
-        .expect("write search snapshot");
-    }
 }
 
 #[test]
@@ -299,8 +288,7 @@ fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
                     replace,
                     "collapsed replacement must stay out of focus traversal"
                 );
-                snapshot(
-                    &format!("advanced-{tab_name}-{theme_name}-display-{display}"),
+                assert_renders(
                     &element,
                     &tree,
                     &node,
@@ -309,17 +297,16 @@ fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
                     &theme,
                 );
                 if tab == AdvancedSearchTab::Find && !display {
-                    for (name, status) in [("idle", "No query"), ("loading", "Searching…")] {
+                    for status in ["No query", "Searching…"] {
                         let mut status_dialog = SearchDialogState::new();
                         status_dialog.status = status.into();
-                        if name == "loading" {
+                        if status == "Searching…" {
                             status_dialog.query = "needle".into();
                         }
                         let mut status_view = advanced_search_panel::view(&status_dialog);
                         let (status_tree, status_node, _) =
                             settle(&mut status_view, &renderer, size);
-                        snapshot(
-                            &format!("advanced-status-{name}-{theme_name}"),
+                        assert_renders(
                             &status_view,
                             &status_tree,
                             &status_node,
@@ -466,7 +453,7 @@ fn count_summary_shows_exact_totals_and_returns_to_matching_lines() {
         Document::from_path(DocumentId::new(912), "none.txt", "No matching text."),
     ];
     let mut renderer = renderer();
-    for (theme_name, theme) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+    for theme in [Theme::Dark, Theme::Light] {
         for open in [false, true] {
             for display in [false, true] {
                 for no_matches in [false, true] {
@@ -489,8 +476,7 @@ fn count_summary_shows_exact_totals_and_returns_to_matching_lines() {
                         let (tree, node, controls) = settle(&mut limited, &renderer, size);
                         visible(controls.label("500+"), Rectangle::with_size(size));
                         visible(controls.label("Limit reached"), Rectangle::with_size(size));
-                        snapshot(
-                            &format!("advanced-limited-{theme_name}-open-{open}"),
+                        assert_renders(
                             &limited,
                             &tree,
                             &node,
@@ -535,10 +521,7 @@ fn count_summary_shows_exact_totals_and_returns_to_matching_lines() {
                                 || matches!(messages.as_slice(), [Message::AdvancedFindAllCurrentRun] if !open)
                         );
                     }
-                    snapshot(
-                        &format!(
-                            "advanced-count-{theme_name}-open-{open}-display-{display}-zero-{no_matches}"
-                        ),
+                    assert_renders(
                         &element,
                         &tree,
                         &node,
@@ -558,13 +541,9 @@ fn status_light_morph_stays_bright_and_inside_its_bounds() {
     const FRAME_COUNT: usize = 83;
     const SCALE: f32 = 8.0;
     const PIXELS: u32 = 96;
-    let exporting = std::env::var_os("FRAGILE_SEARCH_SNAPSHOTS").is_some();
     let viewport = Rectangle::with_size(Size::new(12.0, 12.0));
     let limits = layout::Limits::new(Size::ZERO, viewport.size());
     let mut renderer = renderer();
-    if exporting {
-        std::fs::create_dir_all("target/search-review").expect("search review directory");
-    }
     for (theme_name, theme) in [("dark", Theme::Dark), ("light", Theme::Light)] {
         let mut element = motion::status_light(Idle);
         let mut tree = Tree::empty();
@@ -613,7 +592,7 @@ fn status_light_morph_stays_bright_and_inside_its_bounds() {
             let pixels = renderer.screenshot(Size::new(PIXELS, PIXELS), SCALE, Color::TRANSPARENT);
             assert!(
                 pixels.chunks_exact(4).any(|pixel| pixel[3] >= 250),
-                "{theme_name} frame{frame}: the changing shape must retain a bright core"
+                "{theme_name} frame {frame}: the changing shape must retain a bright core"
             );
             for edge in 0..PIXELS as usize {
                 for index in [
@@ -625,7 +604,7 @@ fn status_light_morph_stays_bright_and_inside_its_bounds() {
                     assert_eq!(
                         pixels[index * 4 + 3],
                         0,
-                        "{theme_name} frame{frame}: geometry must remain inside its12px bounds"
+                        "{theme_name} frame {frame}: geometry must remain inside its 12px bounds"
                     );
                 }
             }
@@ -647,62 +626,9 @@ fn status_light_morph_stays_bright_and_inside_its_bounds() {
                     "{theme_name}: the spinner must use the requested aqua/blue tint"
                 );
             }
-            if exporting {
-                let background = if theme_name == "dark" {
-                    Color::from_rgb8(29, 30, 32)
-                } else {
-                    Color::from_rgb8(247, 247, 247)
-                };
-                let pixels = renderer.screenshot(Size::new(PIXELS, PIXELS), SCALE, background);
-                tiny_skia::Pixmap::from_vec(
-                    pixels,
-                    tiny_skia::IntSize::from_wh(PIXELS, PIXELS).unwrap(),
-                )
-                .expect("RGBA status frame")
-                .save_png(format!(
-                    "target/search-review/status-morph-{theme_name}-{frame}.png"
-                ))
-                .expect("write status frame");
-            }
         }
     }
-    if exporting {
-        std::fs::write(
-            "target/search-review/status-morph.html",
-            STATUS_MORPH_PREVIEW,
-        )
-        .expect("write native animation preview");
-    }
 }
-
-const STATUS_MORPH_PREVIEW: &str = r#"<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Search status motion · native renderer</title>
-<style>
-body{margin:0;background:#111214;color:#e8e9eb;font:15px system-ui,sans-serif;padding:40px}
-main{max-width:760px;margin:auto}h1{font-size:24px;font-weight:600}p{color:#adb0b6;line-height:1.6}
-.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px}.panel{padding:24px;border-radius:12px;background:#1d1e20;border:1px solid #35373c}
-.light{background:#f7f7f7;color:#202123;border-color:#d2d4d8}.large{display:block;width:96px;height:96px;margin:24px auto}
-.status{display:flex;gap:8px;align-items:center;font-size:12px}.native{width:12px;height:12px}.mode{margin:0;font-size:13px;font-weight:600}
-button{background:#30343b;color:inherit;padding:8px 14px;border:1px solid #555961;border-radius:6px;cursor:pointer}
-.controls{display:flex;align-items:center;gap:12px;margin-top:20px}#time{color:#adb0b6;font-variant-numeric:tabular-nums}
-@media(max-width:560px){body{padding:20px}.panels{grid-template-columns:1fr}}
-</style><main><h1>Dot → spinner → dot</h1>
-<p>Frames from the native renderer. The larger view shows the shape; the status row shows its actual 12px size. Includes completion, rapid reversals, and an error.</p>
-<div class="panels"><section class="panel"><h2 class="mode">Dark · aqua</h2><img class="large" id="dark-large" alt="Enlarged dark indicator"><div class="status"><img class="native" id="dark-native" alt=""><span class="label"></span></div></section>
-<section class="panel light"><h2 class="mode">Light · blue</h2><img class="large" id="light-large" alt="Enlarged light indicator"><div class="status"><img class="native" id="light-native" alt=""><span class="label"></span></div></section></div>
-<div class="controls"><button id="pause">Pause</button><button id="step">Next frame</button><span id="time"></span></div>
-</main><script>
-let frame=0,playing=true;
-const label=i=>i<5?'Idle':i<27?'Searching…':i<38?'Matches found':i<41?'Searching…':i<44?'Idle':i<60?'Searching…':i<71?'Pattern error':'Idle';
-const paths=Array.from({length:83},(_,i)=>['dark','light'].map(mode=>`status-morph-${mode}-${i}.png`));
-paths.flat().forEach(src=>{const img=new Image();img.src=src});
-function draw(){['dark','light'].forEach((mode,k)=>['large','native'].forEach(size=>document.getElementById(`${mode}-${size}`).src=paths[frame][k]));document.querySelectorAll('.label').forEach(el=>el.textContent=label(frame));document.getElementById('time').textContent=`${frame*33} ms`}
-function pause(){playing=false;document.getElementById('pause').textContent='Play'}
-document.getElementById('pause').onclick=()=>{playing=!playing;document.getElementById('pause').textContent=playing?'Pause':'Play'};
-document.getElementById('step').onclick=()=>{pause();frame=(frame+1)%83;draw()};
-draw();setInterval(()=>{if(playing){frame=(frame+1)%83;draw()}},33);
-</script></html>"#;
 
 #[test]
 fn inline_search_keeps_controls_visible_at_the_workbench_minimum_width() {
@@ -710,7 +636,7 @@ fn inline_search_keeps_controls_visible_at_the_workbench_minimum_width() {
     find.set_replacement("thread");
     find.refresh_matches("needle and another needle");
     let mut renderer = renderer();
-    for (theme_name, theme) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+    for theme in [Theme::Dark, Theme::Light] {
         for replace in [false, true] {
             let size = Size::new(640.0, if replace { 86.0 } else { 46.0 });
             let viewport = Rectangle::with_size(size);
@@ -721,8 +647,7 @@ fn inline_search_keeps_controls_visible_at_the_workbench_minimum_width() {
             for (_, bounds) in &controls.inputs {
                 visible(*bounds, viewport);
             }
-            snapshot(
-                &format!("inline-{theme_name}-replace-{replace}"),
+            assert_renders(
                 &element,
                 &tree,
                 &node,

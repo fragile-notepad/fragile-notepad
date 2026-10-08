@@ -1,4 +1,4 @@
-//! Short, event-driven transitions for transient UI surfaces.
+//! Event-driven motion for transient surfaces and search activity.
 
 use std::time::{Duration, Instant};
 
@@ -380,16 +380,14 @@ impl Widget<Message, Theme, Renderer> for StatusLight {
         let center = layout.bounds().center();
         let [accent, success_color, error_color] = super::styles::search_light_colors(theme);
         let activity_color = super::styles::search_activity_color(theme);
-        let mut color = status_blended_color([
+        // One opaque tint keeps the core bright and avoids alpha accumulation
+        // where the rounded stroke samples overlap.
+        let color = status_light_color([
             (accent, idle),
             (activity_color, searching),
             (success_color, success),
             (error_color, error),
-        ])
-        .unwrap_or(accent);
-        // Keep the same luminous core throughout expansion and collapse.
-        // Opaque stamps also avoid alpha accumulation where the arc overlaps.
-        color.a = 1.0;
+        ]);
         renderer.with_layer(bounds, |renderer| {
             status_circle(
                 renderer,
@@ -405,19 +403,18 @@ impl Widget<Message, Theme, Renderer> for StatusLight {
     }
 }
 
-fn status_blended_color<const N: usize>(colors: [(Color, f32); N]) -> Option<Color> {
-    let mut alpha = 0.0;
+fn status_light_color(colors: [(Color, f32); 4]) -> Color {
+    let mut weight_sum = 0.0;
     let mut red = 0.0;
     let mut green = 0.0;
     let mut blue = 0.0;
     for (color, weight) in colors {
-        let contribution = color.a * weight;
-        alpha += contribution;
-        red += color.r * contribution;
-        green += color.g * contribution;
-        blue += color.b * contribution;
+        weight_sum += weight;
+        red += color.r * weight;
+        green += color.g * weight;
+        blue += color.b * weight;
     }
-    (alpha > 0.0).then(|| Color::from_rgba(red / alpha, green / alpha, blue / alpha, alpha))
+    Color::from_rgb(red / weight_sum, green / weight_sum, blue / weight_sum)
 }
 
 fn status_circle(renderer: &mut Renderer, center: iced::Point, radius: f32, color: Color) {

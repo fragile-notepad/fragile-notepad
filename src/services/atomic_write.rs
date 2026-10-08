@@ -21,10 +21,12 @@ pub async fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with_check(path, contents, |_| std::future::ready(Ok(()))).await
 }
 
+/// The check must be repeatable: metadata-preserving saves check both before
+/// copying metadata and after the replacement has finished syncing.
 pub async fn write_with_check<E, F>(
     path: &Path,
     contents: &[u8],
-    before_replace: impl FnOnce(PathBuf) -> F,
+    before_replace: impl FnMut(PathBuf) -> F,
 ) -> Result<(), E>
 where
     E: From<io::Error>,
@@ -49,7 +51,7 @@ async fn write_with_permissions<E, F>(
     path: &Path,
     contents: &[u8],
     _private: bool,
-    before_replace: impl FnOnce(PathBuf) -> F,
+    mut before_replace: impl FnMut(PathBuf) -> F,
 ) -> Result<(), E>
 where
     E: From<io::Error>,
@@ -102,7 +104,7 @@ where
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         drop(file);
 
-        // Check after staging and syncing, immediately before publishing.
+        // Refuse stale contents before starting a potentially costly metadata copy.
         before_replace(path.to_owned()).await?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
@@ -116,6 +118,11 @@ where
                 file.sync_all().await?;
             }
             drop(file);
+            if !_private {
+                // Resource forks and attributes can take time to copy. Check
+                // again after that work so concurrent edits are not lost.
+                before_replace(path.to_owned()).await?;
+            }
         }
         replace_file(&temp_path, path).await?;
         Ok(())

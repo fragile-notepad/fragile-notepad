@@ -28,6 +28,7 @@ fn caret(line: usize, column: usize) -> EditorSelection {
 
 fn opened_file(path: &str, text: &str) -> OpenedFile {
     OpenedFile {
+        disk_revision: fragile_notepad::core::FileRevision::from_bytes(text.as_bytes()),
         path: path.into(),
         contents: Arc::new(DecodedText {
             text: text.to_owned(),

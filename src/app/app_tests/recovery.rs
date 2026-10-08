@@ -78,6 +78,7 @@ fn streamed_load_replays_chunks_before_completion_after_failed_exit() {
         }));
     }
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id: id,
         generation,
         path,

@@ -92,6 +92,8 @@ pub enum DocumentIndexState {
 pub struct Document {
     pub id: DocumentId,
     pub path: Option<PathBuf>,
+    /// Original disk bytes, retained even when recovery text or edits differ.
+    pub disk_revision: Option<super::FileRevision>,
     pub buffer: EditorBuffer,
     pub selection: EditorSelection,
     selection_set: SelectionSet,
@@ -230,6 +232,7 @@ impl Document {
         Self {
             id,
             path,
+            disk_revision: None,
             buffer,
             selection,
             selection_set,
@@ -292,6 +295,7 @@ impl Document {
             }
         }
         if self.path.as_ref() != Some(&path) {
+            self.disk_revision = None;
             self.metadata_revision = self.metadata_revision.wrapping_add(1);
         }
         self.path = Some(path);

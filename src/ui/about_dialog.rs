@@ -56,6 +56,12 @@ struct LicenseEntry {
 
 const LICENSES: &[LicenseEntry] = &[
     LicenseEntry {
+        name: "blake3",
+        version: "1.8.7",
+        license: "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception",
+        notes: "File fingerprints for detecting changes made outside the editor.",
+    },
+    LicenseEntry {
         name: "iced",
         version: "0.15.0-dev",
         license: "MIT",

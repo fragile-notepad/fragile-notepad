@@ -26,6 +26,8 @@ impl Default for Session {
 pub struct SessionDocument {
     #[serde(with = "native_path")]
     pub path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_revision: Option<super::FileRevision>,
     pub text: Option<String>,
     #[serde(with = "encoding")]
     pub encoding: TextEncoding,
@@ -52,6 +54,7 @@ impl Default for SessionDocument {
     fn default() -> Self {
         Self {
             path: None,
+            disk_revision: None,
             text: None,
             encoding: TextEncoding::Utf8,
             line_ending: None,

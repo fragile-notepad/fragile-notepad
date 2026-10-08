@@ -1,6 +1,87 @@
 use super::test_support::*;
 
 #[test]
+fn manual_and_auto_save_conflicts_keep_unsaved_changes() {
+    use crate::core::FileRevision;
+    use crate::services::types::FileError;
+
+    for auto_save in [false, true] {
+        let mut app = App::new().0;
+        let id = app.workspace.active_document_id();
+        let document = app.workspace.document_mut(id).unwrap();
+        document.set_path("conflicted.txt");
+        let original = FileRevision::from_bytes(b"original");
+        document.disk_revision = Some(original);
+        let _ = app.update(Message::EditorAction(
+            id,
+            EditorAction::InsertText("unsaved changes".into()),
+        ));
+        app.settings.auto_save = auto_save;
+        let _ = app.update(if auto_save {
+            Message::NewFile
+        } else {
+            Message::SaveFile
+        });
+        let request = app.files.pending_save().unwrap().clone();
+        assert_eq!(request.document_id, id);
+        let _ = app.update(Message::FileSaved(request, Err(FileError::FileChanged)));
+        let document = app.workspace.document(id).unwrap();
+        assert_eq!(document.text(), "unsaved changes");
+        assert!(document.is_dirty);
+        assert_eq!(document.disk_revision, Some(original));
+        assert!(app.files.pending_save().is_none());
+        assert!(app.file_status.as_deref().unwrap().contains("file changed"));
+    }
+}
+
+#[test]
+fn save_conflict_cancels_close_without_discarding_the_document() {
+    use crate::services::types::FileError;
+
+    let mut app = App::new().0;
+    let id = app.workspace.active_document_id();
+    app.workspace
+        .document_mut(id)
+        .unwrap()
+        .set_path("conflicted.txt");
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("unsaved changes".into()),
+    ));
+    let _ = app.update(Message::DirtyCloseResolved(id, DirtyCloseDecision::Save));
+    let request = app.files.pending_save().unwrap().clone();
+    let _ = app.update(Message::FileSaved(request, Err(FileError::FileChanged)));
+    assert!(app.workspace.document(id).unwrap().is_dirty);
+    assert_eq!(
+        app.workspace.document(id).unwrap().text(),
+        "unsaved changes"
+    );
+    assert!(app.files.pending_close_after_save().is_none());
+}
+
+#[test]
+fn saving_a_copy_over_the_source_refreshes_its_revision_without_marking_clean() {
+    let mut app = App::new().0;
+    let id = app.workspace.active_document_id();
+    let path = PathBuf::from("copy-source.txt");
+    let document = app.workspace.document_mut(id).unwrap();
+    document.set_path(path.clone());
+    document.disk_revision = Some(crate::core::FileRevision::from_bytes(b"original"));
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("unsaved changes".into()),
+    ));
+    let _ = app.update(Message::SaveCopyAs);
+    let request = app.files.pending_save().unwrap().clone();
+    let saved_revision = crate::core::FileRevision::from_bytes(&request.snapshot);
+    let _ = app.update(Message::FileCopySaved(request, Ok(path.clone())));
+    let document = app.workspace.document(id).unwrap();
+    assert_eq!(document.path, Some(path));
+    assert_eq!(document.disk_revision, Some(saved_revision));
+    assert!(document.is_dirty);
+}
+
+#[test]
 fn loading_file_is_inserted_before_chunks_finish() {
     let mut app = App::new().0;
     let path = PathBuf::from("large.txt");
@@ -112,6 +193,7 @@ fn stale_load_completion_does_not_clear_active_loading_state() {
     app.files.set_loading(true);
 
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id,
         generation: stale_generation,
         path: PathBuf::from("loading.txt"),
@@ -137,6 +219,7 @@ fn load_completion_for_closed_document_is_ignored_and_refreshes_loading_state() 
 
     let _ = app.workspace.close(document_id);
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id,
         generation,
         path: PathBuf::from("loading.txt"),
@@ -170,6 +253,7 @@ fn completion_from_closed_then_reopened_path_cannot_mutate_new_generation() {
         total_bytes: Some(20),
     }));
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id: closed_id,
         generation: closed_generation,
         path,
@@ -203,6 +287,7 @@ fn load_completion_applies_matching_generation_and_clears_indexing_state() {
         total_bytes: Some(11),
     }));
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id,
         generation,
         path: PathBuf::from("loaded.txt"),
@@ -301,6 +386,7 @@ fn reload_from_disk_reuses_active_document_and_chunked_completion() {
         total_bytes: Some(8),
     }));
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id,
         generation,
         path: path.clone(),
@@ -460,6 +546,7 @@ fn dropped_file_completion_opens_document_through_existing_open_path() {
     assert!(app.files.is_loading());
 
     let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         path: path.clone(),
         contents,
     })));
@@ -612,6 +699,7 @@ fn editor_mutation_is_blocked_while_document_is_loading() {
         total_bytes: Some(6),
     }));
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id,
         generation,
         path: PathBuf::from("loading.txt"),
@@ -657,7 +745,12 @@ fn save_completion_does_not_mark_clean_after_document_changes() {
         document.mark_dirty();
     }
 
+    let saved_revision = crate::core::FileRevision::from_bytes(&request.snapshot);
     let _ = app.update(Message::FileSaved(request, Ok(path)));
+    assert_eq!(
+        app.workspace.document(document_id).unwrap().disk_revision,
+        Some(saved_revision)
+    );
 
     assert!(
         app.workspace

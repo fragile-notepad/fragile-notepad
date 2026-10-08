@@ -1,7 +1,8 @@
 //! Service requests, events, and errors independent of application messages.
 
 use crate::core::{
-    DecodedText, DocumentId, DocumentLoadGeneration, EditorSettings, EncodingError, TextEncoding,
+    DecodedText, DocumentId, DocumentLoadGeneration, EditorSettings, EncodingError, FileRevision,
+    TextEncoding,
 };
 use std::{io, path::PathBuf, sync::Arc};
 
@@ -16,6 +17,7 @@ pub type SettingsSaveResult = Result<(), SettingsError>;
 pub struct SaveFileDialogOptions {
     pub file_name: Option<String>,
     pub filter: Option<SaveFileDialogFilter>,
+    pub original_file: Option<(PathBuf, Option<FileRevision>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +30,7 @@ pub struct SaveFileDialogFilter {
 pub struct OpenedFile {
     pub path: PathBuf,
     pub contents: Arc<DecodedText>,
+    pub disk_revision: FileRevision,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +78,7 @@ pub struct FileLoadFinished {
     pub fallback_contents: Option<Arc<DecodedText>>,
     pub bytes_read: u64,
     pub total_bytes: Option<u64>,
+    pub disk_revision: FileRevision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +94,8 @@ pub enum FileError {
     DialogClosed,
     Io(io::ErrorKind),
     Encoding(EncodingError),
+    FileChanged,
+    UnknownFileRevision,
 }
 
 impl FileError {
@@ -98,7 +104,19 @@ impl FileError {
             Self::DialogClosed => "dialog closed",
             Self::Io(_) => "I/O error",
             Self::Encoding(_) => "encoding error",
+            Self::FileChanged => {
+                "file changed or was deleted on disk; use Save As to save to a different file"
+            }
+            Self::UnknownFileRevision => {
+                "cannot verify the file on disk; use Save As to save to a different file"
+            }
         }
+    }
+}
+
+impl From<io::Error> for FileError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error.kind())
     }
 }
 

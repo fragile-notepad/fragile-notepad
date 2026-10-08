@@ -42,6 +42,41 @@ fn preview_from_chunks(events: &[FileLoadEvent]) -> String {
 }
 
 #[test]
+fn streamed_revisions_cover_original_bytes_across_encodings_and_chunk_boundaries() {
+    for bytes in [
+        b"".as_slice(),
+        b"plain UTF-8 text\r\n",
+        b"\xef\xbb\xbftext",
+        b"valid prefix\xffinvalid utf8",
+        b"\xff\xfet\0e\0x\0t\0",
+        b"\xfe\xff\0t\0e\0x\0t",
+    ] {
+        let path = temp_file_path("disk-revision");
+        fs::write(&path, bytes).unwrap();
+        for chunk_size in [1, 3, DEFAULT_CHUNK_SIZE] {
+            let events = collect_load_events(FileLoadRequest {
+                document_id: DocumentId::new(51),
+                generation: DocumentLoadGeneration::next(),
+                path: path.clone(),
+                chunk_size,
+            });
+            let finished = events
+                .iter()
+                .find_map(|event| match event {
+                    FileLoadEvent::Finished(Ok(finished)) => Some(finished),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                finished.disk_revision,
+                fragile_notepad::core::FileRevision::from_bytes(bytes)
+            );
+        }
+        fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn malformed_utf8_bom_preserves_text_and_reports_decoding_errors() {
     for (name, bytes, expected) in [
         (

@@ -23,6 +23,7 @@ impl App {
                         && let Some(generation) = document.load_generation()
                     {
                         document.complete_loading(generation, opened.contents.as_ref().clone());
+                        document.disk_revision = Some(opened.disk_revision);
                     }
                     self.workspace.select(document_id);
                     let history = self.record_open_history(opened_path);
@@ -31,6 +32,9 @@ impl App {
                     let auto_save = self.auto_save_before_switch(None);
                     self.workspace
                         .insert_decoded_file(opened.path, opened.contents.as_ref().clone());
+                    if let Some(document) = self.workspace.active_document_mut() {
+                        document.disk_revision = Some(opened.disk_revision);
+                    }
                     let history = self.record_open_history(opened_path);
                     Task::batch([auto_save, history])
                 }
@@ -243,6 +247,7 @@ impl App {
                     self.refresh_file_loading_state();
                     return Task::none();
                 }
+                document.disk_revision = Some(finished.disk_revision);
 
                 self.file_status = finished.had_errors.then(|| {
                     String::from("Opened with decoding errors; check the text before saving.")

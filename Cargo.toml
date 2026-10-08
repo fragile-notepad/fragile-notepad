@@ -9,6 +9,7 @@ default = ["hybrid-rendering"]
 hybrid-rendering = ["iced/wgpu-bare", "dep:iced_wgpu", "dep:wgpu"]
 
 [dependencies]
+blake3 = "1"
 encoding_rs = { path = "vendor/encoding_rs" }
 futures = "0.3"
 iced = { path = "vendor/iced", default-features = false, features = ["tiny-skia", "tokio", "image-without-codecs", "highlighter", "advanced", "web-colors", "linux-theme-detection", "x11", "wayland"] }

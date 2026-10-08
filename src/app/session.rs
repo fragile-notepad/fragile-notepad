@@ -33,6 +33,7 @@ impl SessionState {
             return;
         };
         if entry.text.is_some() {
+            document.disk_revision = entry.disk_revision;
             document.encoding = entry.encoding;
             document.line_ending = entry
                 .line_ending
@@ -244,6 +245,7 @@ impl App {
                 let selection = document.main_selection();
                 SessionDocument {
                     path: document.path.clone(),
+                    disk_revision: document.disk_revision,
                     text: ((document.has_complete_text_index()
                         || matches!(document.load_state, DocumentLoadState::Failed { .. }))
                         && (document.path.is_none() || document.is_dirty))

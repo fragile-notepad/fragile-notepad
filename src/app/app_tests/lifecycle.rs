@@ -1107,6 +1107,7 @@ fn opening_rust_file_defers_syntax_parsing_to_worker() {
         .join("\n");
 
     let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         path: PathBuf::from("widget.rs"),
         contents: Arc::new(crate::core::DecodedText {
             text: contents,

@@ -1,6 +1,6 @@
 //! Native file picker integration; disk I/O remains in file_system.
 
-use super::file_system::{load_file, save_file};
+use super::file_system::{load_file, save_file, save_file_if_unchanged};
 use super::types::{FileError, FileOpenResult, FileResult, FileSaveResult, SaveFileDialogOptions};
 use std::{future::Future, path::PathBuf};
 
@@ -75,7 +75,29 @@ fn save_file_with_dialog(
 
     async move {
         let picked_file = dialog.save_file().await.ok_or(FileError::DialogClosed)?;
-
-        save_file(picked_file.path().to_owned(), contents).await
+        let path = picked_file.path().to_owned();
+        save_picked_file(path, contents, options.original_file).await
     }
+}
+
+pub(super) async fn save_picked_file(
+    path: PathBuf,
+    contents: Vec<u8>,
+    original: Option<(PathBuf, Option<crate::core::FileRevision>)>,
+) -> FileSaveResult {
+    if let Some((original_path, revision)) = original {
+        let same_path = std::path::absolute(&original_path)? == std::path::absolute(&path)?;
+        let same_target = match (
+            tokio::fs::canonicalize(&original_path).await,
+            tokio::fs::canonicalize(&path).await,
+        ) {
+            (Ok(original), Ok(picked)) => original == picked,
+            _ => false,
+        };
+        if same_path || same_target {
+            return save_file_if_unchanged(path, contents, revision).await;
+        }
+    }
+    // Selecting a different destination is an explicit Save As/copy operation.
+    save_file(path, contents).await
 }

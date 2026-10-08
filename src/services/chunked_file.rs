@@ -4,17 +4,43 @@ use super::types::{
     FileError, FileLoadChunk, FileLoadEvent, FileLoadFailure, FileLoadFinished, FileLoadProgress,
     FileLoadRequest,
 };
-use crate::core::TextEncoding;
+use crate::core::{FileRevision, TextEncoding};
 
 use futures::{SinkExt, Stream, StreamExt, channel::mpsc, executor::block_on, stream};
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::sync::Arc;
 
 pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 const UTF8_BOM_BYTES: &[u8] = &[0xef, 0xbb, 0xbf];
 const UTF16BE_BOM_BYTES: &[u8] = &[0xfe, 0xff];
 const UTF16LE_BOM_BYTES: &[u8] = &[0xff, 0xfe];
+
+struct HashedFile {
+    file: File,
+    hasher: blake3::Hasher,
+}
+
+impl HashedFile {
+    fn open(path: &std::path::Path) -> io::Result<Self> {
+        Ok(Self {
+            file: File::open(path)?,
+            hasher: blake3::Hasher::new(),
+        })
+    }
+
+    fn revision(&self) -> FileRevision {
+        FileRevision(*self.hasher.finalize().as_bytes())
+    }
+}
+
+impl Read for HashedFile {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let length = self.file.read(buffer)?;
+        self.hasher.update(&buffer[..length]);
+        Ok(length)
+    }
+}
 
 pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoadEvent> {
     let (sender, receiver) = mpsc::channel(8);
@@ -50,7 +76,7 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
 
     send_progress(&mut sender, &request, 0, total_bytes);
 
-    let mut file = match File::open(&request.path) {
+    let mut file = match HashedFile::open(&request.path) {
         Ok(file) => file,
         Err(error) => {
             send_failure(&mut sender, request, FileError::Io(error.kind()));
@@ -72,6 +98,7 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
         send_terminal(
             &mut sender,
             FileLoadEvent::Finished(Ok(FileLoadFinished {
+                disk_revision: file.revision(),
                 document_id: request.document_id,
                 generation: request.generation,
                 path: request.path,
@@ -121,7 +148,7 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
 fn load_utf8_chunks(
     request: FileLoadRequest,
     mut sender: mpsc::Sender<FileLoadEvent>,
-    mut file: File,
+    mut file: HashedFile,
     first_read: Vec<u8>,
     encoding: TextEncoding,
     total_bytes: Option<u64>,
@@ -190,6 +217,7 @@ fn load_utf8_chunks(
     send_terminal(
         &mut sender,
         FileLoadEvent::Finished(Ok(FileLoadFinished {
+            disk_revision: file.revision(),
             document_id: request.document_id,
             generation: request.generation,
             path: request.path,
@@ -205,7 +233,7 @@ fn load_utf8_chunks(
 fn load_utf16_chunks(
     request: FileLoadRequest,
     mut sender: mpsc::Sender<FileLoadEvent>,
-    mut file: File,
+    mut file: HashedFile,
     first_read: Vec<u8>,
     encoding: TextEncoding,
     total_bytes: Option<u64>,
@@ -263,6 +291,7 @@ fn load_utf16_chunks(
     send_terminal(
         &mut sender,
         FileLoadEvent::Finished(Ok(FileLoadFinished {
+            disk_revision: file.revision(),
             document_id: request.document_id,
             generation: request.generation,
             path: request.path,
@@ -281,7 +310,7 @@ fn load_legacy_from_start(
     total_bytes: Option<u64>,
     had_errors: bool,
 ) {
-    let file = match File::open(&request.path) {
+    let file = match HashedFile::open(&request.path) {
         Ok(file) => file,
         Err(error) => {
             let mut sender = sender;
@@ -304,7 +333,7 @@ fn load_legacy_from_start(
 fn load_windows_1252_chunks(
     request: FileLoadRequest,
     mut sender: mpsc::Sender<FileLoadEvent>,
-    mut file: File,
+    mut file: HashedFile,
     first_read: Vec<u8>,
     total_bytes: Option<u64>,
     forced_had_errors: bool,
@@ -369,6 +398,7 @@ fn load_windows_1252_chunks(
     send_terminal(
         &mut sender,
         FileLoadEvent::Finished(Ok(FileLoadFinished {
+            disk_revision: file.revision(),
             document_id: request.document_id,
             generation: request.generation,
             path: request.path,

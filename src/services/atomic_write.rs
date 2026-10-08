@@ -10,22 +10,43 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
 pub async fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_with_check(path, contents, |_| std::future::ready(Ok(()))).await
+}
+
+pub async fn write_with_check<E, F>(
+    path: &Path,
+    contents: &[u8],
+    before_replace: impl FnOnce(PathBuf) -> F,
+) -> Result<(), E>
+where
+    E: From<io::Error>,
+    F: Future<Output = Result<(), E>>,
+{
     // Reads follow symlinks; replace the same target without replacing the link.
     // A dangling link or a loop must fail rather than silently become a file.
     let target = match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) if metadata.file_type().is_symlink() => tokio::fs::canonicalize(path).await?,
         Ok(_) => path.to_owned(),
         Err(error) if error.kind() == io::ErrorKind::NotFound => path.to_owned(),
-        Err(error) => return Err(error),
+        Err(error) => return Err(error.into()),
     };
-    write_with_permissions(&target, contents, false).await
+    write_with_permissions(&target, contents, false, before_replace).await
 }
 
 pub async fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
-    write_with_permissions(path, contents, true).await
+    write_with_permissions(path, contents, true, |_| std::future::ready(Ok(()))).await
 }
 
-async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) -> io::Result<()> {
+async fn write_with_permissions<E, F>(
+    path: &Path,
+    contents: &[u8],
+    _private: bool,
+    before_replace: impl FnOnce(PathBuf) -> F,
+) -> Result<(), E>
+where
+    E: From<io::Error>,
+    F: Future<Output = Result<(), E>>,
+{
     #[cfg(unix)]
     let permissions = if _private {
         None
@@ -33,7 +54,7 @@ async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) ->
         match tokio::fs::metadata(path).await {
             Ok(metadata) => Some(metadata.permissions()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
     };
     let temp_path = temp_path(path);
@@ -63,7 +84,10 @@ async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) ->
         file.sync_all().await?;
         drop(file);
 
-        replace_file(&temp_path, path).await
+        // Check after staging and syncing, immediately before publishing.
+        before_replace(path.to_owned()).await?;
+        replace_file(&temp_path, path).await?;
+        Ok(())
     }
     .await;
 

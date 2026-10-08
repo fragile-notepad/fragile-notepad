@@ -11,15 +11,22 @@ use iced::{Task, highlighter, window};
 use std::sync::Arc;
 
 fn save_dialog_options(document: &Document) -> SaveFileDialogOptions {
+    let mut options = SaveFileDialogOptions {
+        original_file: document
+            .path
+            .clone()
+            .map(|path| (path, document.disk_revision)),
+        ..Default::default()
+    };
     if !document.uses_syntax_highlighting() {
-        return SaveFileDialogOptions::default();
+        return options;
     }
 
     let Some(syntax) = highlighter::syntaxes()
         .iter()
         .find(|syntax| syntax.token.eq_ignore_ascii_case(&document.syntax_token))
     else {
-        return SaveFileDialogOptions::default();
+        return options;
     };
 
     let mut file_name = document
@@ -33,13 +40,12 @@ fn save_dialog_options(document: &Document) -> SaveFileDialogOptions {
     suggested_path.set_extension(&syntax.token);
     file_name = suggested_path.to_string_lossy().into_owned();
 
-    SaveFileDialogOptions {
-        file_name: Some(file_name),
-        filter: Some(SaveFileDialogFilter {
-            name: syntax.name.clone(),
-            extension: syntax.token.clone(),
-        }),
-    }
+    options.file_name = Some(file_name);
+    options.filter = Some(SaveFileDialogFilter {
+        name: syntax.name.clone(),
+        extension: syntax.token.clone(),
+    });
+    options
 }
 
 impl App {
@@ -261,10 +267,12 @@ impl App {
 
         if !force_save_as && let Some(path) = document.path.clone() {
             let contents = request.snapshot.as_ref().clone();
+            let expected = document.disk_revision;
 
-            return Task::perform(file_system::save_file(path, contents), move |result| {
-                Message::FileSaved(request, result)
-            });
+            return Task::perform(
+                file_system::save_file_if_unchanged(path, contents, expected),
+                move |result| Message::FileSaved(request, result),
+            );
         }
 
         let dialog_options = save_dialog_options(document);
@@ -298,6 +306,8 @@ impl App {
                 let saved_path = path.clone();
                 if let Some(document) = self.workspace.document_mut(request.document_id) {
                     document.set_path(path);
+                    document.disk_revision =
+                        Some(crate::core::FileRevision::from_bytes(&request.snapshot));
                     let saved_snapshot_is_current = document
                         .bytes_for_save()
                         .is_ok_and(|bytes| bytes == request.snapshot.as_ref().as_slice());
@@ -357,13 +367,25 @@ impl App {
 
     pub(super) fn save_copy_done(
         &mut self,
-        _request: SaveRequest,
+        request: SaveRequest,
         result: FileSaveResult,
     ) -> Task<Message> {
         self.files.pending_save = None;
 
         match result {
             Ok(path) => {
+                if let Some(document) = self.workspace.document_mut(request.document_id)
+                    && document.path.as_ref().is_some_and(|original| {
+                        original == &path
+                            || std::fs::canonicalize(original)
+                                .ok()
+                                .zip(std::fs::canonicalize(&path).ok())
+                                .is_some_and(|(original, copy)| original == copy)
+                    })
+                {
+                    document.disk_revision =
+                        Some(crate::core::FileRevision::from_bytes(&request.snapshot));
+                }
                 self.file_status = Some(format!("Saved copy: {}", path.display()));
             }
             Err(error) => {

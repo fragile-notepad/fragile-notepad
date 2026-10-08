@@ -14,6 +14,46 @@ fn ready(saved: Session) -> App {
 }
 
 #[test]
+fn recovered_edits_retain_the_original_disk_revision() {
+    let revision = crate::core::FileRevision::from_bytes(b"original disk bytes");
+    let saved = SessionDocument {
+        path: Some("recovered.txt".into()),
+        disk_revision: Some(revision),
+        text: Some("unsaved editor changes".into()),
+        is_dirty: true,
+        ..Default::default()
+    };
+    let serialized = serde_json::to_vec(&Session {
+        documents: vec![saved],
+        ..Default::default()
+    })
+    .unwrap();
+    let app = ready(serde_json::from_slice(&serialized).unwrap());
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "unsaved editor changes");
+    assert!(document.is_dirty);
+    assert_eq!(document.disk_revision, Some(revision));
+    assert_eq!(
+        app.snapshot_session().documents[0].disk_revision,
+        Some(revision)
+    );
+
+    let legacy = ready(Session {
+        documents: vec![SessionDocument {
+            path: Some("legacy.txt".into()),
+            text: Some("legacy recovery".into()),
+            is_dirty: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    assert_eq!(
+        legacy.workspace.active_document().unwrap().disk_revision,
+        None
+    );
+}
+
+#[test]
 fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis() {
     let mut original = ready(Session::default());
     let original_id = original.workspace.active_document_id();
@@ -419,6 +459,7 @@ fn streaming_completion_defers_analysis_and_rejects_stale_result() {
         total_bytes: Some(source.len() as u64),
     }));
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        disk_revision: crate::core::FileRevision::from_bytes(b"fixture"),
         document_id: id,
         generation,
         path,

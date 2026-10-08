@@ -1,9 +1,7 @@
 use iced::highlighter;
 use iced::widget::text_editor::LineEnding;
 
-use crate::core::encoding::{
-    DecodedText, TextEncoding, encode_text, encode_utf8_chunks_for_save, strip_text_bom,
-};
+use crate::core::encoding::{DecodedText, TextEncoding, encode_text, encode_utf8_chunks_for_save};
 use crate::editor::cjk::{CjkContext, CjkContextCache};
 use crate::editor::wrap_measurement::WrapMeasurement;
 use crate::editor::{
@@ -144,7 +142,6 @@ impl Document {
 
     pub fn from_path(id: DocumentId, path: impl Into<PathBuf>, text: &str) -> Self {
         let path = path.into();
-        let text = strip_text_bom(text);
         let line_ending = detect_line_ending(text);
 
         Self::from_parts(
@@ -159,7 +156,7 @@ impl Document {
 
     pub fn from_decoded(id: DocumentId, path: impl Into<PathBuf>, decoded: DecodedText) -> Self {
         let path = path.into();
-        let text = strip_text_bom(&decoded.text);
+        let text = &decoded.text;
         let line_ending = detect_line_ending(text);
         let mut document = Self::from_parts(
             id,
@@ -404,7 +401,7 @@ impl Document {
         // Invalidate font routing before the new text is measured for wrapping.
         self.revision = self.revision.saturating_add(1);
         if reset {
-            self.buffer = EditorBuffer::from_text(strip_text_bom(text).to_owned());
+            self.buffer = EditorBuffer::from_text(text.to_owned());
             self.folds.recompute(Vec::new());
             self.rebuild_viewport();
             self.decorations = DecorationModel::from_folds(
@@ -441,7 +438,7 @@ impl Document {
             return false;
         }
 
-        let text = strip_text_bom(&decoded.text);
+        let text = &decoded.text;
         self.buffer = EditorBuffer::from_text(text.to_owned());
         self.selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
         self.selection_set = SelectionSet::single(self.selection);

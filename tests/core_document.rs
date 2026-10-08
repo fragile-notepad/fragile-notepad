@@ -400,6 +400,55 @@ fn changing_encoding_to_utf8_bom_marks_document_dirty_and_adds_marker_on_save() 
 }
 
 #[test]
+fn bom_marked_documents_preserve_leading_feff_content_on_open_reload_and_save() {
+    for encoding in [
+        TextEncoding::Utf8Bom,
+        TextEncoding::Utf16BeBom,
+        TextEncoding::Utf16LeBom,
+    ] {
+        for text in ["\u{feff}", "\u{feff}hello", "\u{feff}\u{feff}hello"] {
+            let bytes = encode_text(text, encoding).unwrap();
+            let decoded = decode_bytes(&bytes);
+            assert_eq!(decoded.text, text);
+            assert!(!decoded.had_errors);
+            let document = Document::from_decoded(DocumentId::new(10), "bom.txt", decoded);
+            assert_eq!(document.text(), text);
+            assert_eq!(document.bytes_for_save().unwrap(), bytes);
+
+            let generation = fragile_notepad::core::DocumentLoadGeneration::next();
+            let mut reloaded = Document::loading(DocumentId::new(11), "bom.txt", generation);
+            assert!(reloaded.complete_loading(generation, decode_bytes(&bytes)));
+            assert_eq!(reloaded.text(), text);
+            assert_eq!(reloaded.bytes_for_save().unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn editor_text_keeps_leading_feff_in_utf8_saves_and_rejects_unmappable_legacy_saves() {
+    let text = "\u{feff}hello";
+    let mut document = Document::from_path(DocumentId::new(12), "pasted.txt", text);
+    assert_eq!(document.text(), text);
+    assert_eq!(document.bytes_for_save().unwrap(), text.as_bytes());
+    assert_eq!(
+        encode_text(text, TextEncoding::Utf8).unwrap(),
+        text.as_bytes()
+    );
+
+    for encoding in [
+        TextEncoding::Windows1252,
+        TextEncoding::Iso8859_1,
+        TextEncoding::Oem437,
+    ] {
+        document.set_encoding(encoding);
+        assert_eq!(
+            document.bytes_for_save(),
+            Err(fragile_notepad::core::EncodingError::UnmappableCharacters)
+        );
+    }
+}
+
+#[test]
 fn decoded_utf16le_bom_document_saves_back_as_utf16le() {
     let decoded = decode_bytes(&[0xff, 0xfe, b'h', 0, b'i', 0]);
     let document = Document::from_decoded(DocumentId::new(10), fixture_path("note.txt"), decoded);

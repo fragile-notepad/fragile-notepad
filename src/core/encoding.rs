@@ -3,7 +3,6 @@ use std::borrow::Cow;
 const UTF8_BOM_BYTES: &[u8] = &[0xef, 0xbb, 0xbf];
 const UTF16BE_BOM_BYTES: &[u8] = &[0xfe, 0xff];
 const UTF16LE_BOM_BYTES: &[u8] = &[0xff, 0xfe];
-const UTF8_BOM: &str = "\u{feff}";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextEncoding {
@@ -257,10 +256,10 @@ pub fn decode_bytes(bytes: &[u8]) -> DecodedText {
 
 pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, EncodingError> {
     match encoding {
-        TextEncoding::Utf8 => Ok(strip_text_bom(text).as_bytes().to_vec()),
+        TextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
         TextEncoding::Utf8Bom => {
             let mut bytes = UTF8_BOM_BYTES.to_vec();
-            bytes.extend_from_slice(strip_text_bom(text).as_bytes());
+            bytes.extend_from_slice(text.as_bytes());
             Ok(bytes)
         }
         TextEncoding::Utf16BeBom => Ok(encode_utf16(text, true)),
@@ -268,12 +267,12 @@ pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, Encodi
         TextEncoding::Iso8859_1 => encode_iso_8859_1(text),
         other if other.oem_code_page().is_some() => {
             let code_page = other.oem_code_page().expect("checked code page");
-            encoding_rs::oem::encode_oem(strip_text_bom(text), code_page)
+            encoding_rs::oem::encode_oem(text, code_page)
                 .map_err(|_| EncodingError::UnmappableCharacters)
         }
         other => {
             let encoding = other.encoding_rs().ok_or(EncodingError::Unsupported)?;
-            let (encoded, _, had_errors) = encoding.encode(strip_text_bom(text));
+            let (encoded, _, had_errors) = encoding.encode(text);
             if had_errors {
                 Err(EncodingError::UnmappableCharacters)
             } else {
@@ -294,14 +293,7 @@ pub fn encode_utf8_chunks_for_save<'a>(
         Vec::new()
     };
 
-    let mut first_chunk = true;
     for chunk in chunks {
-        let chunk = if first_chunk {
-            first_chunk = false;
-            strip_text_bom(chunk)
-        } else {
-            chunk
-        };
         bytes.extend_from_slice(chunk.as_bytes());
     }
 
@@ -312,12 +304,10 @@ pub fn encode_utf8_chunks_for_save<'a>(
     bytes
 }
 
-pub fn strip_text_bom(text: &str) -> &str {
-    text.strip_prefix(UTF8_BOM).unwrap_or(text)
-}
-
 fn decode_with_encoding(encoding: &'static encoding_rs::Encoding, bytes: &[u8]) -> (String, bool) {
-    let (text, _, had_errors) = encoding.decode(bytes);
+    // The byte-level caller has already removed the encoding marker. A second
+    // U+FEFF belongs to the document and must survive decoding and saving.
+    let (text, had_errors) = encoding.decode_without_bom_handling(bytes);
     (text.into_owned(), had_errors)
 }
 
@@ -354,7 +344,7 @@ fn encode_utf16(text: &str, big_endian: bool) -> Vec<u8> {
         UTF16LE_BOM_BYTES.to_vec()
     };
 
-    for unit in strip_text_bom(text).encode_utf16() {
+    for unit in text.encode_utf16() {
         let encoded = if big_endian {
             unit.to_be_bytes()
         } else {
@@ -367,8 +357,7 @@ fn encode_utf16(text: &str, big_endian: bool) -> Vec<u8> {
 }
 
 fn encode_iso_8859_1(text: &str) -> Result<Vec<u8>, EncodingError> {
-    strip_text_bom(text)
-        .chars()
+    text.chars()
         .map(|ch| {
             let code = ch as u32;
             u8::try_from(code).map_err(|_| EncodingError::UnmappableCharacters)

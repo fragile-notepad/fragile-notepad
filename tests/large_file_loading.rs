@@ -118,6 +118,61 @@ fn malformed_utf8_bom_preserves_text_and_reports_decoding_errors() {
 }
 
 #[test]
+fn streamed_bom_removal_preserves_leading_feff_across_chunk_boundaries() {
+    use fragile_notepad::core::{TextEncoding, encode_text};
+    for encoding in [
+        TextEncoding::Utf8Bom,
+        TextEncoding::Utf16BeBom,
+        TextEncoding::Utf16LeBom,
+    ] {
+        for text in ["\u{feff}", "\u{feff}hello", "\u{feff}\u{feff}hello"] {
+            let bytes = encode_text(text, encoding).unwrap();
+            let path = temp_file_path("bom-content");
+            fs::write(&path, &bytes).unwrap();
+            for chunk_size in [1, 3, DEFAULT_CHUNK_SIZE] {
+                let id = DocumentId::new(42);
+                let generation = DocumentLoadGeneration::next();
+                let events = collect_load_events(FileLoadRequest {
+                    document_id: id,
+                    generation,
+                    path: path.clone(),
+                    chunk_size,
+                });
+                let mut document = Document::loading(id, &path, generation);
+                for event in events {
+                    match event {
+                        FileLoadEvent::Chunk(chunk) => {
+                            assert!(document.replace_loading_preview(
+                                chunk.generation,
+                                &chunk.text,
+                                chunk.reset,
+                                chunk.bytes_read,
+                                chunk.total_bytes
+                            ));
+                        }
+                        FileLoadEvent::Finished(Ok(finished)) => {
+                            assert!(!finished.had_errors);
+                            assert_eq!(finished.encoding, encoding);
+                            assert!(
+                                document.complete_streaming_load(
+                                    finished.generation,
+                                    finished.encoding
+                                )
+                            );
+                        }
+                        FileLoadEvent::Finished(Err(error)) => panic!("{error:?}"),
+                        _ => {}
+                    }
+                }
+                assert_eq!(document.text(), text);
+                assert_eq!(document.bytes_for_save().unwrap(), bytes);
+            }
+            fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[test]
 fn chunked_loader_streams_progress_chunks_and_final_decoded_text() {
     let path = temp_file_path("utf8-crlf-bom");
     let mut bytes = Vec::from(&b"\xef\xbb\xbfalpha\r\ncaf"[..]);

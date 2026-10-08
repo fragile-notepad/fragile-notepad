@@ -156,7 +156,7 @@ fn load_utf8_chunks(
     let chunk_size = request.chunk_size.max(1);
     let mut buffer = vec![0; chunk_size];
     let mut bytes_read = first_read.len() as u64;
-    let mut decoder = encoding_rs::UTF_8.new_decoder();
+    let mut decoder = encoding_rs::UTF_8.new_decoder_without_bom_handling();
     let mut pending = strip_initial_bom(&first_read, encoding);
     let mut had_errors = false;
 

@@ -14,9 +14,10 @@ pub fn key_action(
         .resolve(key, modified_key, modifiers)
         .and_then(shortcut_action)
         .or_else(|| match modified_key.as_ref() {
-            keyboard::Key::Named(key::Named::Space) => {
-                Some(EditorAction::InsertText(" ".to_owned()))
-            }
+            keyboard::Key::Named(key::Named::Space) => text.map_or_else(
+                || Some(EditorAction::InsertText(" ".to_owned())),
+                text_action,
+            ),
             keyboard::Key::Named(key::Named::Tab) if modifiers.shift() => {
                 Some(EditorAction::Unindent)
             }
@@ -33,10 +34,17 @@ pub fn key_action(
                     EditorAction::MoveCaret(motion)
                 })
             }
-            _ => text
-                .and_then(|text| text.chars().find(|ch| !ch.is_control()))
-                .map(|ch| EditorAction::InsertText(ch.to_string())),
+            _ => text.and_then(text_action),
         })
+}
+
+fn text_action(text: &str) -> Option<EditorAction> {
+    // Dead keys and keyboard layouts can produce multiple characters per press.
+    let printable = text
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .collect::<String>();
+    (!printable.is_empty()).then_some(EditorAction::InsertText(printable))
 }
 
 fn caret_motion(named: key::Named, modifiers: keyboard::Modifiers) -> Option<CaretMotion> {

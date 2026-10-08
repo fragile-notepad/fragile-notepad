@@ -1658,6 +1658,75 @@ fn editor_widget_key_action_maps_undo_redo_select_all_and_text_inputs() {
 }
 
 #[test]
+fn editor_widget_key_action_preserves_windows_dead_key_text() {
+    let shortcuts = ShortcutMap::default();
+    // An incompatible key after a Windows dead key produces both characters in
+    // the text payload while the logical key remains the second pressed key.
+    let key = keyboard::Key::Character("q".into());
+    assert_eq!(
+        key_action(
+            &key,
+            &key,
+            keyboard::Modifiers::NONE,
+            Some("'q"),
+            &shortcuts
+        ),
+        Some(EditorAction::InsertText("'q".into()))
+    );
+
+    // Space commits the dead character, rather than inserting a literal space.
+    let key = keyboard::Key::Named(key::Named::Space);
+    assert_eq!(
+        key_action(&key, &key, keyboard::Modifiers::NONE, Some("'"), &shortcuts),
+        Some(EditorAction::InsertText("'".into()))
+    );
+    assert_eq!(
+        key_action(&key, &key, keyboard::Modifiers::NONE, None, &shortcuts),
+        Some(EditorAction::InsertText(" ".into()))
+    );
+}
+
+#[test]
+fn editor_widget_key_action_preserves_multi_scalar_text() {
+    let shortcuts = ShortcutMap::default();
+    for input in ["e\u{0301}", "\u{0915}\u{094d}\u{0937}"] {
+        let key = keyboard::Key::Character(input.into());
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::NONE,
+                Some(input),
+                &shortcuts
+            ),
+            Some(EditorAction::InsertText(input.into()))
+        );
+    }
+}
+
+#[test]
+fn editor_widget_key_action_filters_controls_without_truncating_text() {
+    let shortcuts = ShortcutMap::default();
+    let key = keyboard::Key::Character("a".into());
+    for (input, expected) in [
+        ("\u{0007}ab\u{0000}cd\n", Some("abcd")),
+        ("\u{0007}\u{0000}\n", None),
+        ("", None),
+    ] {
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::NONE,
+                Some(input),
+                &shortcuts
+            ),
+            expected.map(|text| EditorAction::InsertText(text.into()))
+        );
+    }
+}
+
+#[test]
 fn editor_widget_key_action_uses_custom_shortcut_map() {
     let mut shortcuts = ShortcutMap::default();
     shortcuts.clear(ShortcutCommand::DuplicateLine);

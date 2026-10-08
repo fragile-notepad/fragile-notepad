@@ -188,6 +188,16 @@ impl core::text::Paragraph for Paragraph {
 
         buffer.set_wrap(text::to_wrap(text.wrapping));
 
+        // Match plain text shaping so adding color spans does not change glyph
+        // positions. Auto only needs advanced shaping when any span is Unicode.
+        let shaping = match text.shaping {
+            Shaping::Auto if text.content.iter().all(|span| span.text.is_ascii()) => {
+                cosmic_text::Shaping::Basic
+            }
+            Shaping::Auto | Shaping::Advanced => cosmic_text::Shaping::Advanced,
+            Shaping::Basic => cosmic_text::Shaping::Basic,
+        };
+
         buffer.set_rich_text(
             text.content.iter().enumerate().map(|(i, span)| {
                 let attrs = text::to_attributes(span.font.unwrap_or(text.font));
@@ -217,7 +227,7 @@ impl core::text::Paragraph for Paragraph {
                 (span.text.as_ref(), attrs.metadata(i))
             }),
             &text::to_attributes(text.font),
-            cosmic_text::Shaping::Advanced,
+            shaping,
             None,
         );
 
@@ -554,6 +564,64 @@ impl PartialEq for Weak {
         match (self.raw.upgrade(), other.raw.upgrade()) {
             (Some(p1), Some(p2)) => p1 == p2,
             _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Color;
+    use crate::core::text::Paragraph as _;
+
+    #[test]
+    fn color_spans_preserve_plain_glyphs_and_positions_for_each_shaping_mode() {
+        for parts in [
+            ["fn main() ", "{...}", " else ", "{...};"],
+            ["prefix ", "café", " and ", "fin"],
+        ] {
+            let content = parts.concat();
+            let spans: Vec<Span<'_, ()>> = parts
+                .iter()
+                .enumerate()
+                .map(|(index, part)| {
+                    Span::new(*part).color(if index % 2 == 0 {
+                        Color::BLACK
+                    } else {
+                        Color::WHITE
+                    })
+                })
+                .collect();
+            for shaping in [Shaping::Auto, Shaping::Basic, Shaping::Advanced] {
+                let text = Text {
+                    content: content.as_str(),
+                    bounds: Size::new(1000.0, 20.0),
+                    size: Pixels(16.0),
+                    line_height: LineHeight::Absolute(Pixels(20.0)),
+                    font: Font::MONOSPACE,
+                    align_x: Alignment::Left,
+                    align_y: alignment::Vertical::Top,
+                    shaping,
+                    wrapping: Wrapping::None,
+                    ellipsis: Ellipsis::None,
+                    hint_factor: Some(1.0),
+                };
+                let plain = Paragraph::with_text(text);
+                let rich = Paragraph::with_spans(text.with_content(spans.as_slice()));
+                let glyphs = |paragraph: &Paragraph| {
+                    paragraph
+                        .buffer()
+                        .layout_runs()
+                        .flat_map(|run| run.glyphs)
+                        .map(|glyph| {
+                            let physical = glyph.physical((0.0, 0.0), 1.0);
+                            (physical.cache_key, physical.x, physical.y, glyph.w)
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert!(!glyphs(&plain).is_empty());
+                assert_eq!(glyphs(&plain), glyphs(&rich), "{shaping:?}: {content}");
+            }
         }
     }
 }

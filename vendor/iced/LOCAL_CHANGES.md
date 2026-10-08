@@ -34,6 +34,8 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
   and changed-span uploads.
 - Windows opening-fade painting and synchronous resize viewport updates.
 - Fractional image bounds through `Image::snap(false)` in both renderers.
+- Rich paragraphs honor `Basic`, `Advanced`, and `Auto` shaping like plain text,
+  preserving glyph positions when fold placeholders add color spans.
 
 Details: [hybrid rendering](../../SEAMLESS_HYBRID_RENDERING.md),
 [Vulkan resources](../../VULKAN_RENDERING.md),

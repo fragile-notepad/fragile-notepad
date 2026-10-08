@@ -4,6 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 
+#[cfg(target_os = "linux")]
+#[path = "atomic_write/linux.rs"]
+mod linux;
+
 #[cfg(windows)]
 use std::ffi::OsStr;
 #[cfg(windows)]
@@ -75,17 +79,28 @@ where
         #[cfg(windows)]
         copy_windows_permissions(path, &temp_path)?;
         file.write_all(contents).await?;
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         if let Some(permissions) = permissions {
             // Apply after writing (which can clear mode bits), before syncing
             // and publishing the replacement. New files retain the usual umask.
             file.set_permissions(permissions).await?;
         }
         file.sync_all().await?;
+        #[cfg(not(target_os = "linux"))]
         drop(file);
 
         // Check after staging and syncing, immediately before publishing.
         before_replace(path.to_owned()).await?;
+        #[cfg(target_os = "linux")]
+        {
+            if !_private {
+                // Read the current metadata after the conflict check. Refuse
+                // publication if ownership, ACLs or attributes cannot be kept.
+                linux::copy_metadata(path, &file).await?;
+                file.sync_all().await?;
+            }
+            drop(file);
+        }
         replace_file(&temp_path, path).await?;
         Ok(())
     }
@@ -268,10 +283,10 @@ fn temp_path(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    struct TestDirectory(PathBuf);
+    pub(super) struct TestDirectory(pub(super) PathBuf);
 
     impl TestDirectory {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let path = temp_path(&std::env::temp_dir().join("fragile-atomic-write-test"));
             std::fs::create_dir(&path).unwrap();
             Self(path)
@@ -284,7 +299,7 @@ mod tests {
         }
     }
 
-    fn run(test: impl Future<Output = ()>) {
+    pub(super) fn run(test: impl Future<Output = ()>) {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()

@@ -15,6 +15,7 @@ python3 scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared
     --target-os "$font_target_os" --cache-dir target/font-profiles
 bash scripts/generate_icon_assets.sh
 python3 scripts/test_icon_assets.py
+cargo clippy --locked --all-targets
 
 # cargo test also compiles the application and examples.
 if [[ "$(uname -s)" == "Linux" ]] && command -v xvfb-run >/dev/null 2>&1; then

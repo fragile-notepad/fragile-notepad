@@ -582,6 +582,11 @@ pub(super) fn merge_initial_settings(
         loaded.auto_save = current.auto_save;
     }
     macro_rules! decoration_edit {
+        ($field:ident) => {
+            if current.decorations.$field != defaults.decorations.$field {
+                loaded.decorations.$field = current.decorations.$field;
+            }
+        };
         ($field:ident, $mask:expr) => {
             if edits & $mask != 0 || current.decorations.$field != defaults.decorations.$field {
                 loaded.decorations.$field = current.decorations.$field;
@@ -594,8 +599,8 @@ pub(super) fn merge_initial_settings(
     decoration_edit!(show_end_of_line_markers, 32);
     decoration_edit!(show_indentation_guides, 64);
     decoration_edit!(show_folding_controls, 128);
-    decoration_edit!(show_wrap_indicator, 0);
-    decoration_edit!(show_wrap_guide, 0);
+    decoration_edit!(show_wrap_indicator);
+    decoration_edit!(show_wrap_guide);
     if edits == u32::MAX {
         let history = loaded.open_history;
         loaded = current.clone();

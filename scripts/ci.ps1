@@ -21,6 +21,7 @@ Invoke-CiCommand -Command @("python", "-m", "unittest", "discover", "-s", "scrip
 Invoke-CiCommand -Command @("python", "scripts/prepare_font_profiles.py", "--out-dir", "target/font-profiles/prepared", "--target-os", "windows", "--cache-dir", "target/font-profiles")
 & .\scripts\generate_icon_assets.ps1
 Invoke-CiCommand -Command @("python", "scripts/test_icon_assets.py")
+Invoke-CiCommand -Command @("cargo", "clippy", "--locked", "--all-targets")
 # cargo test also compiles the application and examples.
 Invoke-CiCommand -Command @("cargo", "test")
 Invoke-CiCommand -Command @("cargo", "test", "--locked", "--package", "iced_wgpu", "--lib")

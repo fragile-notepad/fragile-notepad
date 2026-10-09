@@ -5,6 +5,39 @@ use crate::core::{
 use crate::editor::EditorSelection;
 use crate::message::AdvancedSearchTab;
 
+pub(crate) fn parse_result_settings(
+    result_limit_input: &str,
+    preview_chars_input: &str,
+    context_before_input: &str,
+) -> Result<SearchResultSettings, &'static str> {
+    let result_limit = result_limit_input
+        .parse::<usize>()
+        .ok()
+        .filter(|value| {
+            (SearchResultSettings::MIN_RESULT_LIMIT..=SearchResultSettings::MAX_RESULT_LIMIT)
+                .contains(value)
+        })
+        .ok_or("Maximum results must be between 1 and 10,000.")?;
+    let preview_chars = preview_chars_input
+        .parse::<usize>()
+        .ok()
+        .filter(|value| {
+            (SearchResultSettings::MIN_PREVIEW_CHARS..=SearchResultSettings::MAX_PREVIEW_CHARS)
+                .contains(value)
+        })
+        .ok_or("Preview length must be between 1 and 2,000 characters.")?;
+    let context_before = context_before_input
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value < preview_chars)
+        .ok_or("Context before match must be 0 or more and shorter than the preview.")?;
+    Ok(SearchResultSettings {
+        result_limit,
+        preview_chars,
+        context_before,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchDialogState {
     pub active_tab: AdvancedSearchTab,
@@ -226,29 +259,11 @@ impl SearchDialogState {
     }
 
     pub fn parsed_result_settings(&self) -> Result<SearchResultSettings, &'static str> {
-        let result_limit = self
-            .result_limit_input
-            .parse::<usize>()
-            .ok()
-            .filter(|value| (1..=SearchResultSettings::MAX_RESULT_LIMIT).contains(value))
-            .ok_or("Displayed results must be between 1 and 10,000.")?;
-        let preview_chars = self
-            .preview_chars_input
-            .parse::<usize>()
-            .ok()
-            .filter(|value| (1..=SearchResultSettings::MAX_PREVIEW_CHARS).contains(value))
-            .ok_or("Preview length must be between 1 and 2,000 characters.")?;
-        let context_before = self
-            .context_before_input
-            .parse::<usize>()
-            .ok()
-            .filter(|value| *value < preview_chars)
-            .ok_or("Characters before a match must be between 0 and preview length minus 1.")?;
-        Ok(SearchResultSettings {
-            result_limit,
-            preview_chars,
-            context_before,
-        })
+        parse_result_settings(
+            &self.result_limit_input,
+            &self.preview_chars_input,
+            &self.context_before_input,
+        )
     }
 
     fn search_documents<'a>(

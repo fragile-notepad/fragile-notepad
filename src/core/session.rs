@@ -200,62 +200,6 @@ mod native_path {
 
 mod encoding {
     use super::*;
-    const ALL: &[TextEncoding] = &[
-        TextEncoding::Utf8,
-        TextEncoding::Utf8Bom,
-        TextEncoding::Utf16BeBom,
-        TextEncoding::Utf16LeBom,
-        TextEncoding::Windows1250,
-        TextEncoding::Windows1251,
-        TextEncoding::Windows1252,
-        TextEncoding::Windows1253,
-        TextEncoding::Windows1254,
-        TextEncoding::Windows1255,
-        TextEncoding::Windows1256,
-        TextEncoding::Windows1257,
-        TextEncoding::Windows1258,
-        TextEncoding::Iso8859_1,
-        TextEncoding::Iso8859_2,
-        TextEncoding::Iso8859_3,
-        TextEncoding::Iso8859_4,
-        TextEncoding::Iso8859_5,
-        TextEncoding::Iso8859_6,
-        TextEncoding::Iso8859_7,
-        TextEncoding::Iso8859_8,
-        TextEncoding::Iso8859_8I,
-        TextEncoding::Iso8859_9,
-        TextEncoding::Iso8859_10,
-        TextEncoding::Iso8859_13,
-        TextEncoding::Iso8859_14,
-        TextEncoding::Iso8859_15,
-        TextEncoding::Iso8859_16,
-        TextEncoding::Koi8R,
-        TextEncoding::Koi8U,
-        TextEncoding::Macintosh,
-        TextEncoding::Big5,
-        TextEncoding::Gb18030,
-        TextEncoding::ShiftJis,
-        TextEncoding::EucJp,
-        TextEncoding::EucKr,
-        TextEncoding::Iso2022Jp,
-        TextEncoding::Tis620,
-        TextEncoding::Oem437,
-        TextEncoding::Oem720,
-        TextEncoding::Oem737,
-        TextEncoding::Oem775,
-        TextEncoding::Oem850,
-        TextEncoding::Oem852,
-        TextEncoding::Oem855,
-        TextEncoding::Oem857,
-        TextEncoding::Oem858,
-        TextEncoding::Oem860,
-        TextEncoding::Oem861,
-        TextEncoding::Oem862,
-        TextEncoding::Oem863,
-        TextEncoding::Oem865,
-        TextEncoding::Oem866,
-        TextEncoding::Oem869,
-    ];
     pub fn serialize<S: serde::Serializer>(
         encoding: &TextEncoding,
         serializer: S,
@@ -266,9 +210,7 @@ mod encoding {
         deserializer: D,
     ) -> Result<TextEncoding, D::Error> {
         let label = String::deserialize(deserializer)?;
-        ALL.iter()
-            .copied()
-            .find(|value| value.label() == label)
+        TextEncoding::from_label(&label)
             .ok_or_else(|| serde::de::Error::custom("Unknown session encoding"))
     }
 }

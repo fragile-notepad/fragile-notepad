@@ -919,6 +919,7 @@ fn save_copy_as_starts_pending_snapshot_without_changing_document() {
     {
         let document = app.workspace.document_mut(document_id).expect("document");
         document.set_path(original_path.clone());
+        document.line_ending = Some(iced::widget::text_editor::LineEnding::Lf);
         document.buffer = crate::editor::EditorBuffer::from_text("copy body");
         document.refresh_after_text_change();
         document.mark_dirty();

@@ -1,5 +1,7 @@
 use iced::highlighter;
+use iced::widget::text_editor::LineEnding;
 
+use crate::core::encoding::TextEncoding;
 use crate::core::shortcuts::{KeyBinding, ShortcutCommand, ShortcutMap};
 use crate::editor::DecorationSettings;
 
@@ -97,6 +99,9 @@ pub struct EditorSettings {
     pub word_wrap: bool,
     pub wrap_column_limit: Option<usize>,
     pub auto_save: bool,
+    pub new_file_encoding: TextEncoding,
+    pub new_file_line_ending: LineEnding,
+    pub recent_file_limit: usize,
     pub zoom: f32,
     pub scroll_speed: f32,
     pub search_results: SearchResultSettings,
@@ -110,7 +115,15 @@ pub struct EditorSettings {
 }
 
 impl EditorSettings {
-    pub const MAX_OPEN_HISTORY: usize = 16;
+    pub const DEFAULT_NEW_FILE_LINE_ENDING: LineEnding = if cfg!(windows) {
+        LineEnding::CrLf
+    } else {
+        LineEnding::Lf
+    };
+    pub const DEFAULT_RECENT_FILE_LIMIT: usize = 16;
+    pub const MIN_RECENT_FILE_LIMIT: usize = 0;
+    pub const MAX_RECENT_FILE_LIMIT: usize = 100;
+    pub const MAX_OPEN_HISTORY: usize = Self::DEFAULT_RECENT_FILE_LIMIT;
     pub const DEFAULT_ZOOM: f32 = 1.0;
     pub const MIN_ZOOM: f32 = 0.5;
     pub const MAX_ZOOM: f32 = 3.0;
@@ -169,6 +182,12 @@ impl EditorSettings {
 
     pub fn set_auto_save(&mut self, auto_save: bool) {
         self.auto_save = auto_save;
+    }
+
+    pub fn set_recent_file_limit(&mut self, limit: usize) {
+        self.recent_file_limit =
+            limit.clamp(Self::MIN_RECENT_FILE_LIMIT, Self::MAX_RECENT_FILE_LIMIT);
+        self.open_history.truncate(self.recent_file_limit);
     }
 
     pub fn set_indentation(&mut self, indentation: IndentationMode) {
@@ -237,7 +256,8 @@ impl EditorSettings {
         let before = self.open_history.clone();
         self.open_history.retain(|existing| existing != &path);
         self.open_history.insert(0, path);
-        self.open_history.truncate(Self::MAX_OPEN_HISTORY);
+        self.open_history
+            .truncate(self.recent_file_limit.min(Self::MAX_RECENT_FILE_LIMIT));
 
         self.open_history != before
     }
@@ -249,7 +269,7 @@ impl EditorSettings {
         self.open_history.clear();
 
         for path in paths {
-            if self.open_history.len() >= Self::MAX_OPEN_HISTORY {
+            if self.open_history.len() >= self.recent_file_limit.min(Self::MAX_RECENT_FILE_LIMIT) {
                 break;
             }
             if path.as_os_str().is_empty() || self.open_history.iter().any(|entry| entry == &path) {
@@ -273,7 +293,11 @@ impl EditorSettings {
         }
 
         let mut open_history = XmlElement::new("open-history");
-        for path in &self.open_history {
+        for path in self
+            .open_history
+            .iter()
+            .take(self.recent_file_limit.min(Self::MAX_RECENT_FILE_LIMIT))
+        {
             open_history
                 .push_child(XmlElement::new("file").attribute("path", persisted_path(path)));
         }
@@ -289,6 +313,18 @@ impl EditorSettings {
                     )
                     .attribute("auto-save", self.auto_save)
                     .attribute("syntax-theme", self.syntax_theme.to_string()),
+            )
+            .child(
+                XmlElement::new("files")
+                    .attribute("new-file-encoding", self.new_file_encoding.label())
+                    .attribute(
+                        "new-file-line-ending",
+                        line_ending_key(self.new_file_line_ending),
+                    )
+                    .attribute(
+                        "recent-file-limit",
+                        self.recent_file_limit.min(Self::MAX_RECENT_FILE_LIMIT),
+                    ),
             )
             .child(open_history)
             .child(
@@ -352,6 +388,27 @@ impl EditorSettings {
             }
             if let Some(auto_save) = general.attribute("auto-save").and_then(parse_bool) {
                 settings.auto_save = auto_save;
+            }
+        }
+
+        if let Some(files) = child(root, "files") {
+            if let Some(encoding) = files
+                .attribute("new-file-encoding")
+                .and_then(TextEncoding::from_label)
+            {
+                settings.new_file_encoding = encoding;
+            }
+            if let Some(ending) = files
+                .attribute("new-file-line-ending")
+                .and_then(parse_line_ending)
+            {
+                settings.new_file_line_ending = ending;
+            }
+            if let Some(limit) = files
+                .attribute("recent-file-limit")
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                settings.set_recent_file_limit(limit);
             }
         }
 
@@ -483,6 +540,9 @@ impl Default for EditorSettings {
             word_wrap: true,
             wrap_column_limit: None,
             auto_save: false,
+            new_file_encoding: TextEncoding::Utf8,
+            new_file_line_ending: Self::DEFAULT_NEW_FILE_LINE_ENDING,
+            recent_file_limit: Self::DEFAULT_RECENT_FILE_LIMIT,
             zoom: Self::DEFAULT_ZOOM,
             scroll_speed: Self::DEFAULT_SCROLL_SPEED,
             search_results: SearchResultSettings::default(),
@@ -502,6 +562,26 @@ impl Default for EditorSettings {
 
 fn persisted_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn line_ending_key(ending: LineEnding) -> &'static str {
+    match ending {
+        LineEnding::Lf => "lf",
+        LineEnding::CrLf => "crlf",
+        LineEnding::Cr => "cr",
+        LineEnding::LfCr => "lfcr",
+        LineEnding::None => line_ending_key(EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING),
+    }
+}
+
+fn parse_line_ending(value: &str) -> Option<LineEnding> {
+    match value {
+        "lf" => Some(LineEnding::Lf),
+        "crlf" => Some(LineEnding::CrLf),
+        "cr" => Some(LineEnding::Cr),
+        "lfcr" => Some(LineEnding::LfCr),
+        _ => None,
+    }
 }
 
 fn child<'a, 'input>(

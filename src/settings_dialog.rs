@@ -10,6 +10,10 @@ pub struct SettingsDialogState {
     pub draft: EditorSettings,
     pub system_dark: bool,
     pub wrap_column_input: String,
+    pub recent_file_limit_input: String,
+    pub result_limit_input: String,
+    pub preview_chars_input: String,
+    pub context_before_input: String,
     pub category: SettingsCategory,
     pub shortcut_group: ShortcutGroup,
     pub capturing_shortcut: Option<ShortcutCommand>,
@@ -130,7 +134,7 @@ fn ease_in_out_cubic(progress: f32) -> f32 {
 }
 
 impl SettingsDialogState {
-    pub(crate) fn new(settings: &EditorSettings) -> Self {
+    pub fn new(settings: &EditorSettings) -> Self {
         Self {
             draft: settings.clone(),
             system_dark: false,
@@ -138,6 +142,10 @@ impl SettingsDialogState {
                 .wrap_column_limit
                 .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
                 .to_string(),
+            recent_file_limit_input: settings.recent_file_limit.to_string(),
+            result_limit_input: settings.search_results.result_limit.to_string(),
+            preview_chars_input: settings.search_results.preview_chars.to_string(),
+            context_before_input: settings.search_results.context_before.to_string(),
             category: SettingsCategory::General,
             shortcut_group: ShortcutGroup::File,
             capturing_shortcut: None,
@@ -152,6 +160,8 @@ impl SettingsDialogState {
             .wrap_column_limit
             .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
             .to_string();
+        self.recent_file_limit_input = settings.recent_file_limit.to_string();
+        self.sync_search_result_inputs();
         self.category = SettingsCategory::General;
         self.shortcut_group = ShortcutGroup::File;
         self.capturing_shortcut = None;
@@ -160,7 +170,64 @@ impl SettingsDialogState {
     }
 
     pub(crate) fn apply_to(&self, settings: &mut EditorSettings) {
+        let history = std::mem::take(&mut settings.open_history);
         *settings = self.draft.clone();
+        settings.open_history = history;
+        settings.set_recent_file_limit(self.draft.recent_file_limit);
+    }
+
+    pub fn validation_error(&self) -> Option<String> {
+        if self
+            .recent_file_limit_input
+            .parse::<usize>()
+            .ok()
+            .filter(|value| {
+                (EditorSettings::MIN_RECENT_FILE_LIMIT..=EditorSettings::MAX_RECENT_FILE_LIMIT)
+                    .contains(value)
+            })
+            .is_none()
+        {
+            return Some(format!(
+                "History limit must be between {} and {}.",
+                EditorSettings::MIN_RECENT_FILE_LIMIT,
+                EditorSettings::MAX_RECENT_FILE_LIMIT
+            ));
+        }
+        if self.draft.wrap_column_limit.is_some()
+            && self
+                .wrap_column_input
+                .parse::<usize>()
+                .ok()
+                .filter(|value| EditorSettings::valid_wrap_column(*value))
+                .is_none()
+        {
+            return Some(format!(
+                "Wrap width must be between {} and {} columns.",
+                EditorSettings::MIN_WRAP_COLUMN,
+                EditorSettings::MAX_WRAP_COLUMN
+            ));
+        }
+        self.parsed_search_results().err().map(str::to_owned)
+    }
+
+    pub(crate) fn sync_search_result_inputs(&mut self) {
+        self.result_limit_input = self.draft.search_results.result_limit.to_string();
+        self.preview_chars_input = self.draft.search_results.preview_chars.to_string();
+        self.context_before_input = self.draft.search_results.context_before.to_string();
+    }
+
+    pub(crate) fn update_search_results_from_inputs(&mut self) {
+        if let Ok(settings) = self.parsed_search_results() {
+            self.draft.search_results = settings;
+        }
+    }
+
+    fn parsed_search_results(&self) -> Result<crate::core::SearchResultSettings, &'static str> {
+        crate::search_dialog::parse_result_settings(
+            &self.result_limit_input,
+            &self.preview_chars_input,
+            &self.context_before_input,
+        )
     }
 
     pub(crate) fn sync_shortcut_notice_animation(&mut self) {

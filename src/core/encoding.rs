@@ -77,6 +77,70 @@ pub struct DecodedText {
 }
 
 impl TextEncoding {
+    pub const ALL: &'static [Self] = &[
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16BeBom,
+        Self::Utf16LeBom,
+        Self::Windows1250,
+        Self::Windows1251,
+        Self::Windows1252,
+        Self::Windows1253,
+        Self::Windows1254,
+        Self::Windows1255,
+        Self::Windows1256,
+        Self::Windows1257,
+        Self::Windows1258,
+        Self::Iso8859_1,
+        Self::Iso8859_2,
+        Self::Iso8859_3,
+        Self::Iso8859_4,
+        Self::Iso8859_5,
+        Self::Iso8859_6,
+        Self::Iso8859_7,
+        Self::Iso8859_8,
+        Self::Iso8859_8I,
+        Self::Iso8859_9,
+        Self::Iso8859_10,
+        Self::Iso8859_13,
+        Self::Iso8859_14,
+        Self::Iso8859_15,
+        Self::Iso8859_16,
+        Self::Koi8R,
+        Self::Koi8U,
+        Self::Macintosh,
+        Self::Big5,
+        Self::Gb18030,
+        Self::ShiftJis,
+        Self::EucJp,
+        Self::EucKr,
+        Self::Iso2022Jp,
+        Self::Tis620,
+        Self::Oem437,
+        Self::Oem720,
+        Self::Oem737,
+        Self::Oem775,
+        Self::Oem850,
+        Self::Oem852,
+        Self::Oem855,
+        Self::Oem857,
+        Self::Oem858,
+        Self::Oem860,
+        Self::Oem861,
+        Self::Oem862,
+        Self::Oem863,
+        Self::Oem865,
+        Self::Oem866,
+        Self::Oem869,
+    ];
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|encoding| encoding.label() == label)
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Utf8 => "UTF-8",

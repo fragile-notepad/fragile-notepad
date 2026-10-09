@@ -45,7 +45,22 @@ pub enum SettingsCategory {
     General,
     Appearance,
     Editor,
+    Display,
+    Search,
     Shortcuts,
+    Advanced,
+}
+
+impl SettingsCategory {
+    pub const ALL: &'static [Self] = &[
+        Self::General,
+        Self::Appearance,
+        Self::Editor,
+        Self::Display,
+        Self::Search,
+        Self::Shortcuts,
+        Self::Advanced,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +142,13 @@ message_catalog! {
         DraftWrapColumnChanged(arg0: String) => Reject,
         DraftWrapColumnPreset(arg0: usize) => Reject,
         DraftAutoSaveToggled(arg0: bool) => Reject,
+        DraftNewFileEncodingSelected(arg0: TextEncoding) => Reject,
+        DraftNewFileLineEndingSelected(arg0: iced::widget::text_editor::LineEnding) => Reject,
+        DraftRecentFileLimitChanged(arg0: String) => Reject,
+        DraftSearchResultLimitChanged(arg0: String) => Reject,
+        DraftSearchPreviewCharsChanged(arg0: String) => Reject,
+        DraftSearchContextBeforeChanged(arg0: String) => Reject,
+        DraftSearchResultsReset => Reject,
         DraftAppearanceSelected(arg0: AppearanceMode) => Reject,
         DraftHardwareAccelerationSelected(arg0: HardwareAccelerationMode) => Reject,
         DraftIndentationSelected(arg0: IndentationMode) => Reject,

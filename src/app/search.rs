@@ -1036,6 +1036,11 @@ impl App {
         };
         self.search_dialog.result_settings = settings;
         let persist = self.set_search_result_settings(settings);
+        Task::batch([persist, self.search_result_settings_changed()])
+    }
+
+    pub(super) fn search_result_settings_changed(&mut self) -> Task<Message> {
+        let settings = self.search_dialog.result_settings;
         if self.find.match_limit != Some(settings.result_limit) {
             self.refresh_find_matches();
         }
@@ -1045,15 +1050,15 @@ impl App {
                 // and the captured scope remain owned by the original request.
                 pending.dialog.set_result_settings(settings);
             }
-            return persist;
+            return Task::none();
         }
         if self.advanced_search_window.is_some() && self.search_dialog.count_summary.is_none() {
             self.search_dialog.preview_generation =
                 self.search_dialog.preview_generation.wrapping_add(1);
             self.search_dialog.clear_results();
-            Task::batch([persist, self.schedule_search_preview()])
+            self.schedule_search_preview()
         } else {
-            persist
+            Task::none()
         }
     }
 }

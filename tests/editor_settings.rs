@@ -1,8 +1,143 @@
 use fragile_notepad::core::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, KeyBinding,
-    SearchResultSettings, ShortcutCommand, ShortcutKey,
+    SearchResultSettings, ShortcutCommand, ShortcutKey, TextEncoding,
 };
+use iced::widget::text_editor::LineEnding;
 use std::path::PathBuf;
+
+#[test]
+fn new_file_defaults_round_trip_all_supported_encodings_and_line_endings() {
+    for &encoding in TextEncoding::ALL {
+        for line_ending in [
+            LineEnding::Lf,
+            LineEnding::CrLf,
+            LineEnding::Cr,
+            LineEnding::LfCr,
+        ] {
+            let settings = EditorSettings {
+                new_file_encoding: encoding,
+                new_file_line_ending: line_ending,
+                ..EditorSettings::default()
+            };
+            let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+            assert_eq!(restored.new_file_encoding, encoding);
+            assert_eq!(restored.new_file_line_ending, line_ending);
+        }
+    }
+}
+
+#[test]
+fn file_preferences_legacy_and_malformed_xml_preserve_existing_defaults() {
+    for xml in [
+        "<fragile-notepad-settings version=\"1\" />",
+        "<fragile-notepad-settings><files /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><files new-file-encoding=\"unknown\" new-file-line-ending=\"unknown\" recent-file-limit=\"-1\" /></fragile-notepad-settings>",
+    ] {
+        let restored = EditorSettings::from_xml_str(xml);
+        assert_eq!(restored.new_file_encoding, TextEncoding::Utf8);
+        assert_eq!(
+            restored.new_file_line_ending,
+            EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING
+        );
+        assert_eq!(
+            restored.recent_file_limit,
+            EditorSettings::DEFAULT_RECENT_FILE_LIMIT
+        );
+    }
+}
+
+#[test]
+fn new_file_line_ending_without_a_line_break_falls_back_to_platform_default() {
+    let restored = EditorSettings::from_xml_str(
+        "<fragile-notepad-settings><files new-file-line-ending=\"none\" /></fragile-notepad-settings>",
+    );
+    assert_eq!(
+        restored.new_file_line_ending,
+        EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING
+    );
+
+    let settings = EditorSettings {
+        new_file_line_ending: LineEnding::None,
+        ..EditorSettings::default()
+    };
+    let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+    assert_eq!(
+        restored.new_file_line_ending,
+        EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING
+    );
+}
+
+#[test]
+fn recent_file_limit_trims_preserves_recency_and_can_disable_history() {
+    let mut settings = EditorSettings::default();
+    for path in ["first.txt", "second.txt", "third.txt"] {
+        settings.record_open_history_path(path);
+    }
+    settings.set_recent_file_limit(2);
+    assert_eq!(
+        settings.open_history,
+        vec![PathBuf::from("third.txt"), PathBuf::from("second.txt")]
+    );
+    settings.record_open_history_path("second.txt");
+    settings.record_open_history_path("fourth.txt");
+    assert_eq!(
+        settings.open_history,
+        vec![PathBuf::from("fourth.txt"), PathBuf::from("second.txt")]
+    );
+
+    settings.set_recent_file_limit(0);
+    assert!(settings.open_history.is_empty());
+    assert!(!settings.record_open_history_path("disabled.txt"));
+    assert!(settings.open_history.is_empty());
+    let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+    assert_eq!(restored.recent_file_limit, 0);
+    assert!(restored.open_history.is_empty());
+
+    settings.set_recent_file_limit(usize::MAX);
+    assert_eq!(
+        settings.recent_file_limit,
+        EditorSettings::MAX_RECENT_FILE_LIMIT
+    );
+}
+
+#[test]
+fn recent_file_limit_applies_before_restoring_history_and_clamps_xml() {
+    // XML element order does not affect the applied history cap.
+    for (value, expected_limit, expected_history_len) in [("0", 0, 0), ("1", 1, 1), ("101", 100, 3)]
+    {
+        let xml = format!(
+            "<fragile-notepad-settings><open-history><file path=\"one.txt\" /><file path=\"two.txt\" /><file path=\"one.txt\" /><file path=\"three.txt\" /></open-history><files recent-file-limit=\"{value}\" /></fragile-notepad-settings>"
+        );
+        let restored = EditorSettings::from_xml_str(&xml);
+        assert_eq!(restored.recent_file_limit, expected_limit);
+        assert_eq!(restored.open_history.len(), expected_history_len);
+        if expected_history_len > 0 {
+            assert_eq!(restored.open_history[0], PathBuf::from("one.txt"));
+        }
+    }
+}
+
+#[test]
+fn persistence_normalizes_public_history_fields_to_the_configured_limit() {
+    let settings = EditorSettings {
+        recent_file_limit: 1,
+        open_history: vec![PathBuf::from("newest.txt"), PathBuf::from("older.txt")],
+        ..EditorSettings::default()
+    };
+    let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+    assert_eq!(restored.recent_file_limit, 1);
+    assert_eq!(restored.open_history, vec![PathBuf::from("newest.txt")]);
+
+    let settings = EditorSettings {
+        recent_file_limit: usize::MAX,
+        ..settings
+    };
+    let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+    assert_eq!(
+        restored.recent_file_limit,
+        EditorSettings::MAX_RECENT_FILE_LIMIT
+    );
+}
 
 #[test]
 fn search_result_settings_normalize_safe_bounds_and_preview_context() {

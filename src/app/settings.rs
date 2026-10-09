@@ -150,16 +150,12 @@ impl App {
                 Task::none()
             }
             SettingsMessage::DraftWrapColumnChanged(value) => {
-                if value.len() <= EditorSettings::MAX_WRAP_COLUMN.to_string().len()
-                    && value.chars().all(|ch| ch.is_ascii_digit())
+                if let Ok(columns) = value.parse::<usize>()
+                    && EditorSettings::valid_wrap_column(columns)
                 {
-                    if let Ok(columns) = value.parse::<usize>()
-                        && EditorSettings::valid_wrap_column(columns)
-                    {
-                        self.settings_dialog.draft.wrap_column_limit = Some(columns);
-                    }
-                    self.settings_dialog.wrap_column_input = value;
+                    self.settings_dialog.draft.wrap_column_limit = Some(columns);
                 }
+                self.settings_dialog.wrap_column_input = value;
                 Task::none()
             }
             SettingsMessage::DraftWrapColumnPreset(columns) => {
@@ -169,6 +165,51 @@ impl App {
             }
             SettingsMessage::DraftAutoSaveToggled(auto_save) => {
                 self.settings_dialog.draft.set_auto_save(auto_save);
+                Task::none()
+            }
+            SettingsMessage::DraftNewFileEncodingSelected(encoding) => {
+                self.settings_dialog.draft.new_file_encoding = encoding;
+                Task::none()
+            }
+            SettingsMessage::DraftNewFileLineEndingSelected(line_ending) => {
+                self.settings_dialog.draft.new_file_line_ending =
+                    if line_ending == iced::widget::text_editor::LineEnding::None {
+                        EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING
+                    } else {
+                        line_ending
+                    };
+                Task::none()
+            }
+            SettingsMessage::DraftRecentFileLimitChanged(value) => {
+                if let Ok(limit) = value.parse::<usize>()
+                    && (EditorSettings::MIN_RECENT_FILE_LIMIT
+                        ..=EditorSettings::MAX_RECENT_FILE_LIMIT)
+                        .contains(&limit)
+                {
+                    self.settings_dialog.draft.set_recent_file_limit(limit);
+                }
+                self.settings_dialog.recent_file_limit_input = value;
+                Task::none()
+            }
+            SettingsMessage::DraftSearchResultLimitChanged(value) => {
+                self.settings_dialog.result_limit_input = value;
+                self.settings_dialog.update_search_results_from_inputs();
+                Task::none()
+            }
+            SettingsMessage::DraftSearchPreviewCharsChanged(value) => {
+                self.settings_dialog.preview_chars_input = value;
+                self.settings_dialog.update_search_results_from_inputs();
+                Task::none()
+            }
+            SettingsMessage::DraftSearchContextBeforeChanged(value) => {
+                self.settings_dialog.context_before_input = value;
+                self.settings_dialog.update_search_results_from_inputs();
+                Task::none()
+            }
+            SettingsMessage::DraftSearchResultsReset => {
+                self.settings_dialog.draft.search_results =
+                    crate::core::SearchResultSettings::default();
+                self.settings_dialog.sync_search_result_inputs();
                 Task::none()
             }
             SettingsMessage::DraftAppearanceSelected(appearance) => {
@@ -260,14 +301,23 @@ impl App {
                 Task::none()
             }
             SettingsMessage::ApplySettings => {
-                if self.apply_settings_dialog() {
+                if self.settings_dialog.validation_error().is_some() {
+                    return Task::none();
+                }
+                let (request_boost, search_task) = self.apply_settings_dialog();
+                let boost_task = if request_boost {
                     self.request_gpu_boost()
                 } else {
                     Task::none()
-                }
+                };
+                Task::batch([search_task, boost_task])
             }
             SettingsMessage::SaveSettings => {
-                let boost_task = if self.apply_settings_dialog() {
+                if self.settings_dialog.validation_error().is_some() {
+                    return Task::none();
+                }
+                let (request_boost, search_task) = self.apply_settings_dialog();
+                let boost_task = if request_boost {
                     self.request_gpu_boost()
                 } else {
                     Task::none()
@@ -276,6 +326,7 @@ impl App {
                 Task::batch([
                     self.persist_settings(),
                     self.close_settings_window(),
+                    search_task,
                     boost_task,
                 ])
             }
@@ -295,6 +346,7 @@ impl App {
                         settings,
                         self.settings_persistence.initial_edits,
                     );
+                    self.apply_initial_new_file_defaults();
                     self.settings_persistence.changed = true;
                     self.settings_dialog.reset_from(&self.settings);
                     self.search_dialog
@@ -519,15 +571,26 @@ impl App {
         }
     }
 
-    fn apply_settings_dialog(&mut self) -> bool {
+    fn apply_settings_dialog(&mut self) -> (bool, Task<Message>) {
         let old_hardware_acceleration = self.settings.hardware_acceleration;
+        let old_search_results = self.settings.search_results;
         self.settings_persistence
             .edit(&mut self.settings, SettingsEdit::All, |settings| {
                 self.settings_dialog.apply_to(settings);
             });
 
-        self.settings.hardware_acceleration != old_hardware_acceleration
-            && super::rendering::startup_gpu_boost_requested(&self.settings)
+        let search_task = if self.settings.search_results != old_search_results {
+            self.search_dialog
+                .set_result_settings(self.settings.search_results);
+            self.search_result_settings_changed()
+        } else {
+            Task::none()
+        };
+        (
+            self.settings.hardware_acceleration != old_hardware_acceleration
+                && super::rendering::startup_gpu_boost_requested(&self.settings),
+            search_task,
+        )
     }
 
     fn cancel_settings_dialog(&mut self) -> Task<Message> {
@@ -559,6 +622,7 @@ impl App {
             },
         );
         self.settings_dialog.draft.search_results = self.settings.search_results;
+        self.settings_dialog.sync_search_result_inputs();
         self.persist_settings()
     }
 
@@ -584,6 +648,9 @@ pub(super) fn merge_initial_settings(
         word_wrap,
         wrap_column_limit,
         auto_save,
+        new_file_encoding,
+        new_file_line_ending,
+        recent_file_limit,
         zoom,
         scroll_speed,
         indentation,
@@ -630,6 +697,7 @@ pub(super) fn merge_initial_settings(
         loaded = current.clone();
         loaded.open_history = history;
     }
+    loaded.set_recent_file_limit(loaded.recent_file_limit);
     for path in current.open_history.iter().rev() {
         loaded.record_open_history_path(path.clone());
     }
@@ -654,9 +722,39 @@ pub(super) fn apply_to_workspace(
         }
         Event::Workspace(WorkspaceEvent::DocumentOpened(id)) => {
             if let Some(document) = workspace.document_mut(id) {
+                apply_new_file_defaults(document, settings);
                 apply(document);
             }
         }
         _ => {}
+    }
+}
+
+fn apply_new_file_defaults(document: &mut crate::core::Document, settings: &EditorSettings) {
+    if document.path.is_none()
+        && document.load_state == crate::core::DocumentLoadState::Complete
+        && document.buffer.len_bytes() == 0
+        && !document.is_dirty
+    {
+        // Initial save properties do not make a new empty document dirty.
+        document.encoding = settings.new_file_encoding;
+        document.line_ending = Some(match settings.new_file_line_ending {
+            iced::widget::text_editor::LineEnding::None => {
+                EditorSettings::DEFAULT_NEW_FILE_LINE_ENDING
+            }
+            ending => ending,
+        });
+    }
+}
+
+impl App {
+    pub(super) fn apply_initial_new_file_defaults(&mut self) {
+        // Settings arrive after the first scratch document is opened. Keep any
+        // user edits and recovery metadata while updating that initial placeholder.
+        if self.workspace.documents().len() == 1
+            && let Some(document) = self.workspace.document_mut(crate::core::DocumentId::new(1))
+        {
+            apply_new_file_defaults(document, &self.settings);
+        }
     }
 }

@@ -53,6 +53,11 @@ Run `cargo run --locked --example NAME`:
 | `preview_branding` | `target/bunny-review/` |
 | `preview_cjk` | `target/cjk-*` |
 
+Dialog previews render all panels by default. Select a panel with
+`cargo run --locked --example preview_dialogs -- --panel settings`.
+Available panels are `settings`, `search`, `go-to-line`, `windows`, and `editor`;
+use `--help` for options.
+
 Branding and CJK previews accept `-- --vulkan`; CJK also accepts `-- --weights`
 or `-- --hangul-weights`. Debug builds expose **About → Debug → Window controls**;
 `FRAGILE_NOTEPAD_TITLE_BAR=macos|windows` selects a title-bar style.

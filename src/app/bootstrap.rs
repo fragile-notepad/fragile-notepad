@@ -61,6 +61,7 @@ impl App {
             pending_search: None,
         };
 
+        app.apply_initial_new_file_defaults();
         app.events.publish(super::events::Event::Started);
         let initial_work = super::update::drain(&mut app);
 

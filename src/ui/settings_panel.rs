@@ -1,5 +1,6 @@
 use iced::advanced::text::highlighter::Highlighter as _;
 use iced::highlighter;
+use iced::widget::text_editor::LineEnding;
 use iced::widget::{
     button, column, container, keyed_column, rich_text, row, rule, scrollable, space, span, text,
     text_input, toggler,
@@ -8,7 +9,8 @@ use iced::{Center, Color, Element, Fill, Font};
 
 use crate::core::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, KeyBinding,
-    ShortcutCommand, ShortcutDisplayPart, ShortcutGroup, ShortcutModifierIcon,
+    SearchResultSettings, ShortcutCommand, ShortcutDisplayPart, ShortcutGroup,
+    ShortcutModifierIcon, TextEncoding,
 };
 use crate::message::{Message, SettingsCategory};
 use crate::settings_dialog::{SettingsDialogState, ShortcutNoticeKind};
@@ -24,19 +26,49 @@ const INDENTATION_OPTIONS: &[IndentationMode] = &[
     IndentationMode::Spaces(8),
 ];
 const SHORTCUT_STATUS_HEIGHT: f32 = 42.0;
+const CONTROL_WIDTH: f32 = 210.0;
+const NEW_FILE_ENCODINGS: &[TextEncoding] = &[
+    TextEncoding::Utf8,
+    TextEncoding::Utf8Bom,
+    TextEncoding::Utf16LeBom,
+    TextEncoding::Utf16BeBom,
+];
 
-pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
-    let title = match dialog.category {
-        SettingsCategory::General => "General",
+pub const fn category_label(category: SettingsCategory) -> &'static str {
+    match category {
+        SettingsCategory::General => "Files",
         SettingsCategory::Appearance => "Appearance",
         SettingsCategory::Editor => "Editor",
-        SettingsCategory::Shortcuts => "Keyboard shortcuts",
-    };
+        SettingsCategory::Display => "Display",
+        SettingsCategory::Search => "Search",
+        SettingsCategory::Shortcuts => "Shortcuts",
+        SettingsCategory::Advanced => "Advanced",
+    }
+}
+
+const fn category_description(category: SettingsCategory) -> &'static str {
+    match category {
+        SettingsCategory::General => "New files, saving, and recent files.",
+        SettingsCategory::Appearance => "Colors and text size.",
+        SettingsCategory::Editor => "Typing, line wrapping, and scrolling.",
+        SettingsCategory::Display => "Line numbers, spaces, and visual guides.",
+        SettingsCategory::Search => "Search results and previews.",
+        SettingsCategory::Shortcuts => "Keyboard shortcut assignments.",
+        SettingsCategory::Advanced => "Graphics settings.",
+    }
+}
+
+pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let validation_error = dialog.validation_error();
+    let valid = validation_error.is_none();
     let pane = match dialog.category {
-        SettingsCategory::General => general_pane(&dialog.draft),
+        SettingsCategory::General => files_pane(dialog),
         SettingsCategory::Appearance => appearance_pane(&dialog.draft, dialog.system_dark),
         SettingsCategory::Editor => editor_pane(dialog),
+        SettingsCategory::Display => display_pane(&dialog.draft),
+        SettingsCategory::Search => search_pane(dialog),
         SettingsCategory::Shortcuts => shortcuts_pane(dialog),
+        SettingsCategory::Advanced => advanced_pane(&dialog.draft),
     };
     let pane: Element<'_, Message> = if dialog.category == SettingsCategory::Shortcuts {
         pane
@@ -48,21 +80,15 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .height(Fill)
             .into()
     };
-    let sidebar = container(
-        column![
-            category("General", SettingsCategory::General, dialog.category),
-            category("Appearance", SettingsCategory::Appearance, dialog.category),
-            category("Editor", SettingsCategory::Editor, dialog.category),
-            category("Shortcuts", SettingsCategory::Shortcuts, dialog.category),
-            space::vertical(),
-        ]
-        .spacing(2)
-        .height(Fill),
-    )
-    .padding([16, 10])
-    .width(156)
-    .height(Fill)
-    .style(styles::settings_category_list);
+    let categories = SettingsCategory::ALL.iter().fold(
+        column![utility::description("SETTINGS")].spacing(4),
+        |items, &item| items.push(category(category_label(item), item, dialog.category)),
+    );
+    let sidebar = container(categories.push(space::vertical()).height(Fill))
+        .padding([16, 10])
+        .width(156)
+        .height(Fill)
+        .style(styles::settings_category_list);
 
     container(
         column![
@@ -70,7 +96,11 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
                 sidebar,
                 container(
                     column![
-                        utility::heading(title),
+                        column![
+                            utility::heading(category_label(dialog.category)),
+                            utility::description(category_description(dialog.category)),
+                        ]
+                        .spacing(4),
                         // A new category starts at the top; redraws within a page retain scrolling.
                         keyed_column![(dialog.category, pane)]
                             .height(Fill)
@@ -86,10 +116,12 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .height(Fill),
             rule::horizontal(1).style(styles::utility_rule),
             row![
-                space::horizontal(),
-                footer_button("Cancel", Message::CancelSettings, false),
-                footer_button("Apply", Message::ApplySettings, false),
-                footer_button("Save", Message::SaveSettings, true),
+                container(text(validation_error.unwrap_or_default()).size(12))
+                    .style(styles::info_muted)
+                    .width(Fill),
+                footer_button("Cancel", Some(Message::CancelSettings), false),
+                footer_button("Apply", valid.then_some(Message::ApplySettings), false),
+                footer_button("Save & close", valid.then_some(Message::SaveSettings), true),
             ]
             .spacing(8)
             .align_y(Center)
@@ -116,62 +148,101 @@ fn category(
     )
 }
 
-fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
-    let modes = [
-        (
-            HardwareAccelerationMode::Off,
-            "Software",
-            "Render without graphics acceleration.",
+fn files_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let settings = &dialog.draft;
+    column![
+        section(
+            "New files",
+            column![
+                described_row(
+                    "Encoding",
+                    "Default text encoding for new files.",
+                    dropdown(
+                        Some(settings.new_file_encoding),
+                        NEW_FILE_ENCODINGS,
+                        |encoding| encoding.label().into(),
+                        Message::DraftNewFileEncodingSelected,
+                    )
+                    .width(CONTROL_WIDTH)
+                    .into()
+                ),
+                divider(),
+                described_row(
+                    "Line endings",
+                    "Default line endings for new files.",
+                    dropdown(
+                        Some(settings.new_file_line_ending),
+                        &[LineEnding::Lf, LineEnding::CrLf, LineEnding::Cr],
+                        |ending| match ending {
+                            LineEnding::Lf => "LF (\\n)",
+                            LineEnding::CrLf => "CRLF (\\r\\n)",
+                            LineEnding::Cr => "CR (\\r)",
+                            LineEnding::LfCr => "LFCR (legacy)",
+                            LineEnding::None => "None",
+                        }
+                        .into(),
+                        Message::DraftNewFileLineEndingSelected,
+                    )
+                    .width(CONTROL_WIDTH)
+                    .into()
+                ),
+            ]
+            .spacing(12)
+            .into()
         ),
-        (
-            HardwareAccelerationMode::Lazy,
-            "Hybrid",
-            "Use graphics hardware when available.",
+        section(
+            "Saving",
+            described_toggle(
+                "Auto-save",
+                "Automatically saves named files when switching tabs or leaving the window.",
+                settings.auto_save,
+                Message::DraftAutoSaveToggled,
+            )
         ),
-        (
-            HardwareAccelerationMode::Diagnostic,
-            "Diagnostic",
-            "Request hardware rendering for troubleshooting.",
+        section(
+            "Recent files",
+            described_row(
+                "History limit",
+                format!(
+                    "0 disables recent files. Maximum: {}.",
+                    EditorSettings::MAX_RECENT_FILE_LIMIT
+                ),
+                number_input(
+                    &EditorSettings::DEFAULT_RECENT_FILE_LIMIT.to_string(),
+                    &dialog.recent_file_limit_input,
+                    Message::DraftRecentFileLimitChanged
+                ),
+            )
         ),
     ]
-    .into_iter()
-    .fold(row![].spacing(8), |row, (mode, title, hint)| {
-        row.push(
-            button(
-                column![
-                    text(title).size(14).font(utility::semibold()),
-                    utility::description(hint),
-                    space::vertical(),
-                    text(if settings.hardware_acceleration == mode {
-                        "Selected"
-                    } else {
-                        ""
-                    })
-                    .size(11),
-                ]
-                .spacing(6)
-                .height(76),
-            )
-            .padding(10)
-            .width(Fill)
-            .style(styles::utility_selection(
-                settings.hardware_acceleration == mode,
-            ))
-            .on_press(Message::DraftHardwareAccelerationSelected(mode)),
-        )
-    });
-    column![
-        section("Rendering", column![
-            modes,
-            utility::description("If hardware rendering is already active, switching to Software takes effect after restarting."),
-        ].spacing(10).into()),
-        section("Scrolling", setting_row(
-            "Editor scroll speed",
-            stepper(format!("{:.2}×", settings.scroll_speed), Message::SettingsScrollSpeedDecrease,
-                Message::SettingsScrollSpeedIncrease, Message::SettingsScrollSpeedReset,
-                settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED, settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED),
-        )),
-    ].spacing(14).into()
+    .spacing(14)
+    .into()
+}
+
+fn advanced_pane(settings: &EditorSettings) -> Element<'_, Message> {
+    column![section(
+        "Rendering",
+        column![
+            described_row(
+                "Renderer",
+                "Hybrid rendering uses graphics hardware when available.",
+                dropdown(
+                    Some(settings.hardware_acceleration),
+                    HardwareAccelerationMode::ALL,
+                    |mode| mode.label().into(),
+                    Message::DraftHardwareAccelerationSelected,
+                )
+                .width(CONTROL_WIDTH)
+                .into()
+            ),
+            divider(),
+            utility::description("Switching to software requires a restart."),
+            utility::description("Hardware diagnostic mode helps diagnose graphics issues."),
+        ]
+        .spacing(12)
+        .into()
+    )]
+    .into()
 }
 
 fn appearance_pane(settings: &EditorSettings, system_dark: bool) -> Element<'_, Message> {
@@ -197,12 +268,10 @@ fn appearance_pane(settings: &EditorSettings, system_dark: bool) -> Element<'_, 
                         highlighter::Theme::to_string,
                         Message::DraftThemeSelected,
                     )
-                    .width(210)
+                    .width(CONTROL_WIDTH)
                     .into()
                 ),
-                utility::description(
-                    "Light and dark variants follow the color mode automatically."
-                ),
+                utility::description("Colors adapt to the light or dark app theme."),
                 rule::horizontal(1).style(styles::utility_rule),
                 setting_row(
                     "Editor zoom",
@@ -389,36 +458,34 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
     let settings = &dialog.draft;
     let fixed_wrap = settings.wrap_column_limit.is_some();
     let mut wrap_controls = column![setting_row(
-        "Wrap at",
+        "Wrap width",
         dropdown(
             Some(fixed_wrap),
             &[false, true],
             |fixed| if *fixed {
-                "Column…".into()
+                "Fixed column".into()
             } else {
                 "Window width".into()
             },
             Message::DraftFixedWrapSelected,
         )
-        .width(190)
+        .width(CONTROL_WIDTH)
         .into(),
     ),]
     .spacing(10);
     if fixed_wrap {
         wrap_controls = wrap_controls
             .push(setting_row(
-                "Column",
-                text_input(
+                "Column limit",
+                number_input(
                     &EditorSettings::DEFAULT_WRAP_COLUMN.to_string(),
                     &dialog.wrap_column_input,
-                )
-                .on_input(Message::DraftWrapColumnChanged)
-                .style(styles::input)
-                .width(100)
-                .into(),
+                    Message::DraftWrapColumnChanged,
+                ),
             ))
             .push(
                 row![
+                    space::horizontal(),
                     controls::compact_command_button("80", 12, Message::DraftWrapColumnPreset(80)),
                     controls::compact_command_button(
                         "100",
@@ -436,7 +503,7 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .push(
                 container(
                     text(format!(
-                        "{}–{} columns. Narrower windows wrap at the window edge.",
+                        "{}–{} columns. Long lines wrap earlier in narrower windows.",
                         EditorSettings::MIN_WRAP_COLUMN,
                         EditorSettings::MAX_WRAP_COLUMN,
                     ))
@@ -444,111 +511,74 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
                 )
                 .style(styles::info_muted),
             );
-        if dialog
-            .wrap_column_input
-            .parse::<usize>()
-            .ok()
-            .is_none_or(|value| !EditorSettings::valid_wrap_column(value))
-        {
-            wrap_controls = wrap_controls.push(
-                container(
-                    text(format!(
-                        "Enter a column from {} to {}. The last valid width is kept until then.",
-                        EditorSettings::MIN_WRAP_COLUMN,
-                        EditorSettings::MAX_WRAP_COLUMN,
-                    ))
-                    .size(12),
-                )
-                .style(styles::info_muted),
-            );
-        }
     }
     column![
         section(
-            "Typing & layout",
-            column![
-                setting_row(
-                    "Indentation",
-                    dropdown(
-                        Some(settings.indentation),
-                        INDENTATION_OPTIONS,
-                        indentation_label,
-                        Message::DraftIndentationSelected
-                    )
-                    .width(190)
-                    .into()
-                ),
-                rule::horizontal(1).style(styles::utility_rule),
-                column![
-                    toggle_row(
-                        "Word wrap",
-                        settings.word_wrap,
-                        Message::DraftWordWrapToggled
-                    ),
-                    utility::description("Wrap long lines without inserting line breaks."),
-                ]
-                .spacing(5),
-                wrap_controls,
-                rule::horizontal(1).style(styles::utility_rule),
-                column![
-                    toggle_row(
-                        "Wrap continuation markers",
-                        settings.decorations.show_wrap_indicator,
-                        Message::DraftWrapIndicatorToggled
-                    ),
-                    utility::description("Mark wrapped continuation lines in the gutter."),
-                ]
-                .spacing(5),
-                column![
-                    toggle_row(
-                        "Column guide",
-                        settings.decorations.show_wrap_guide,
-                        Message::DraftWrapGuideToggled
-                    ),
-                    container(
-                        text(format!(
-                            "Show the wrap boundary. With word wrap off, show the fixed column or column {}.",
-                            EditorSettings::DEFAULT_WRAP_COLUMN,
-                        ))
-                        .size(12),
-                    )
-                    .style(styles::info_muted),
-                ]
-                .spacing(5),
-            ]
+            "Indentation",
+            column![described_row(
+                "Insert with Tab",
+                "Tabs or spaces inserted by the Tab key.",
+                dropdown(
+                    Some(settings.indentation),
+                    INDENTATION_OPTIONS,
+                    indentation_label,
+                    Message::DraftIndentationSelected
+                )
+                .width(CONTROL_WIDTH)
+                .into()
+            ),]
             .spacing(10)
             .into()
         ),
         section(
-            "Saving",
+            "Line wrapping",
             column![
-                toggle_row(
-                    "Auto-save named files",
-                    settings.auto_save,
-                    Message::DraftAutoSaveToggled,
+                described_toggle(
+                    "Word wrap",
+                    "Wraps long lines without inserting line breaks.",
+                    settings.word_wrap,
+                    Message::DraftWordWrapToggled,
                 ),
-                utility::description("Save changes when switching tabs or leaving the window."),
+                divider(),
+                wrap_controls,
             ]
-            .spacing(5)
+            .spacing(12)
             .into(),
         ),
         section(
-            "Gutter & structure",
+            "Scrolling",
+            described_row(
+                "Scroll speed",
+                "Mouse wheel scroll distance.",
+                stepper(
+                    format!("{:.2}×", settings.scroll_speed),
+                    Message::SettingsScrollSpeedDecrease,
+                    Message::SettingsScrollSpeedIncrease,
+                    Message::SettingsScrollSpeedReset,
+                    settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED,
+                    settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED
+                ),
+            )
+        ),
+    ]
+    .spacing(14)
+    .into()
+}
+
+fn display_pane(settings: &EditorSettings) -> Element<'_, Message> {
+    column![
+        section(
+            "Line numbers & folding",
             column![
                 toggle_row(
-                    "Line numbers",
+                    "Show line numbers",
                     settings.decorations.show_line_numbers,
                     Message::DraftLineNumbersToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
-                toggle_row(
-                    "Indentation guides",
-                    settings.decorations.show_indentation_guides,
-                    Message::DraftIndentationGuidesToggled
-                ),
-                rule::horizontal(1).style(styles::utility_rule),
-                toggle_row(
-                    "Folding controls",
+                described_toggle(
+                    "Show folding controls",
+                    "Controls for collapsing and expanding text blocks.",
                     settings.decorations.show_folding_controls,
                     Message::DraftFoldingControlsToggled
                 ),
@@ -557,23 +587,59 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .into()
         ),
         section(
+            "Guides & wrapping",
+            column![
+                described_toggle(
+                    "Indentation guides",
+                    "Vertical guides at each indentation level.",
+                    settings.decorations.show_indentation_guides,
+                    Message::DraftIndentationGuidesToggled
+                ),
+                divider(),
+                described_toggle(
+                    "Wrap markers",
+                    "Markers at the start of wrapped lines.",
+                    settings.decorations.show_wrap_indicator,
+                    Message::DraftWrapIndicatorToggled
+                ),
+                divider(),
+                described_toggle(
+                    "Column guide",
+                    if settings.word_wrap {
+                        "Vertical guide at the wrap boundary.".to_owned()
+                    } else {
+                        format!(
+                            "Vertical guide at column {}.",
+                            settings
+                                .wrap_column_limit
+                                .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
+                        )
+                    },
+                    settings.decorations.show_wrap_guide,
+                    Message::DraftWrapGuideToggled
+                ),
+            ]
+            .spacing(12)
+            .into()
+        ),
+        section(
             "Whitespace",
             column![
-                utility::description("Show markers without changing file contents."),
+                utility::description("Visible symbols for spaces, tabs, and line endings."),
                 toggle_row(
-                    "Spaces",
+                    "Show spaces",
                     settings.decorations.show_spaces,
                     Message::DraftVisibleSpacesToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
-                    "Tabs",
+                    "Show tabs",
                     settings.decorations.show_tabs,
                     Message::DraftVisibleTabsToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
-                    "Line endings",
+                    "Show line endings",
                     settings.decorations.show_end_of_line_markers,
                     Message::DraftEolMarkersToggled
                 ),
@@ -581,6 +647,68 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .spacing(10)
             .into()
         ),
+    ]
+    .spacing(14)
+    .into()
+}
+
+fn search_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    column![
+        section(
+            "Results",
+            described_row(
+                "Maximum results",
+                format!(
+                    "Maximum matches displayed ({}–{}).",
+                    SearchResultSettings::MIN_RESULT_LIMIT,
+                    SearchResultSettings::MAX_RESULT_LIMIT
+                ),
+                number_input(
+                    &SearchResultSettings::DEFAULT_RESULT_LIMIT.to_string(),
+                    &dialog.result_limit_input,
+                    Message::DraftSearchResultLimitChanged
+                ),
+            )
+        ),
+        section(
+            "Match previews",
+            column![
+                described_row(
+                    "Preview length",
+                    format!(
+                        "Characters displayed per result ({}–{}).",
+                        SearchResultSettings::MIN_PREVIEW_CHARS,
+                        SearchResultSettings::MAX_PREVIEW_CHARS
+                    ),
+                    number_input(
+                        &SearchResultSettings::DEFAULT_PREVIEW_CHARS.to_string(),
+                        &dialog.preview_chars_input,
+                        Message::DraftSearchPreviewCharsChanged
+                    )
+                ),
+                divider(),
+                described_row(
+                    "Context before match",
+                    "Characters included before each match in the preview.",
+                    number_input(
+                        &SearchResultSettings::DEFAULT_CONTEXT_BEFORE.to_string(),
+                        &dialog.context_before_input,
+                        Message::DraftSearchContextBeforeChanged
+                    )
+                ),
+            ]
+            .spacing(12)
+            .into()
+        ),
+        row![
+            space::horizontal(),
+            controls::compact_command_button(
+                "Restore search defaults",
+                12,
+                Message::DraftSearchResultsReset,
+            )
+        ],
+        utility::description("Also available in Find and Replace."),
     ]
     .spacing(14)
     .into()
@@ -660,7 +788,7 @@ fn shortcut_status(dialog: &SettingsDialogState) -> Element<'_, Message> {
 
     let content: Element<'_, Message> = match kind {
         ShortcutNoticeKind::None => container(utility::description(
-            "Click a binding, then press the new shortcut.",
+            "Select a shortcut, then press a new key combination.",
         ))
         .width(Fill)
         .center_y(SHORTCUT_STATUS_HEIGHT)
@@ -668,9 +796,12 @@ fn shortcut_status(dialog: &SettingsDialogState) -> Element<'_, Message> {
         ShortcutNoticeKind::Listening(command) => container(
             row![
                 text("Listening").size(12).font(utility::semibold()),
-                text(format!("Press a shortcut for {}", command.label()))
-                    .size(12)
-                    .width(Fill),
+                text(format!(
+                    "Press a new key combination for {}.",
+                    command.label()
+                ))
+                .size(12)
+                .width(Fill),
                 button(text("Cancel").size(12))
                     .padding([6, 9])
                     .style(styles::command_button)
@@ -688,7 +819,7 @@ fn shortcut_status(dialog: &SettingsDialogState) -> Element<'_, Message> {
             row![
                 text("Conflict").size(12).font(utility::semibold()),
                 text(format!(
-                    "{} is already assigned to {}.",
+                    "{} is already used for {}.",
                     conflict.binding.display(),
                     conflict.command.label()
                 ))
@@ -819,6 +950,62 @@ fn setting_row<'a>(title: &'static str, control: Element<'a, Message>) -> Elemen
     .into()
 }
 
+fn described_row<'a>(
+    title: &'static str,
+    description: impl Into<String>,
+    control: Element<'a, Message>,
+) -> Element<'a, Message> {
+    row![
+        column![
+            text(title).size(13).font(utility::semibold()),
+            container(text(description.into()).size(12)).style(styles::info_muted),
+        ]
+        .spacing(4)
+        .width(Fill),
+        control,
+    ]
+    .spacing(16)
+    .align_y(Center)
+    .into()
+}
+
+fn described_toggle<'a>(
+    title: &'static str,
+    description: impl Into<String>,
+    enabled: bool,
+    message: impl Fn(bool) -> Message + 'a,
+) -> Element<'a, Message> {
+    described_row(
+        title,
+        description,
+        toggler(enabled)
+            .style(styles::toggler)
+            .size(20)
+            .on_toggle(message)
+            .into(),
+    )
+}
+
+fn number_input<'a>(
+    placeholder: &str,
+    value: &str,
+    message: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    // Inputs share the same control column as dropdowns and steppers.
+    container(
+        text_input(placeholder, value)
+            .on_input(message)
+            .style(styles::input)
+            .width(100),
+    )
+    .align_right(CONTROL_WIDTH)
+    .into()
+}
+
+fn divider() -> Element<'static, Message> {
+    rule::horizontal(1).style(styles::utility_rule).into()
+}
+
 fn toggle_row<'a>(
     title: &'static str,
     enabled: bool,
@@ -843,7 +1030,7 @@ fn stepper<'a>(
     can_increase: bool,
 ) -> Element<'a, Message> {
     let icon = |icon| hero::icon(icon, 14, IconTone::Text);
-    row![
+    let controls = row![
         button(icon(HeroIcon::Minus))
             .padding(6)
             .style(styles::command_button)
@@ -856,23 +1043,23 @@ fn stepper<'a>(
         controls::compact_command_button("Reset", 12, reset),
     ]
     .spacing(4)
-    .align_y(Center)
-    .into()
+    .align_y(Center);
+    container(controls).align_right(CONTROL_WIDTH).into()
 }
 
 fn footer_button(
     label: &'static str,
-    message: Message,
+    message: Option<Message>,
     primary: bool,
 ) -> Element<'static, Message> {
-    button(container(text(label).size(13)).center_x(54))
+    button(container(text(label).size(13)).center_x(if primary { 84 } else { 54 }))
         .padding([7, 10])
-        .style(if primary {
+        .style(if primary && message.is_some() {
             styles::primary_command_button
         } else {
             styles::command_button
         })
-        .on_press(message)
+        .on_press_maybe(message)
         .into()
 }
 

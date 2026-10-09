@@ -9,6 +9,9 @@ fn ready() -> App {
     let _ = app.update(Message::SettingsLoaded(Ok(None)));
     let _ = app.update(Message::SessionLoaded(Ok(None)));
     let _ = app.update(Message::StartupReady);
+    // Complete any startup save caused by platform-specific new-file defaults.
+    let _ = app.update(Message::SessionFlush);
+    let _ = app.update(Message::SessionPersisted(Ok(())));
     app
 }
 

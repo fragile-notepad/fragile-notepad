@@ -10,7 +10,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @invariant @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
+    @location(0) @interpolate(flat) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) @interpolate(flat) content_type: u32,
 };
@@ -92,22 +92,10 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
         default: {}
     }
 
-    var dim: vec2<u32> = vec2(0u);
-    switch content_type {
-        case 0u: {
-            dim = textureDimensions(color_atlas_texture);
-            break;
-        }
-        case 1u: {
-            dim = textureDimensions(mask_atlas_texture);
-            break;
-        }
-        default: {}
-    }
-
     vert_output.content_type = content_type;
-
-    vert_output.uv = vec2<f32>(uv) / vec2<f32>(dim);
+    // Nearest atlas sampling needs integer texels, not normalized coordinates.
+    // Pixel-space interpolation preserves clipping and custom pass viewports.
+    vert_output.uv = vec2<f32>(uv);
 
     return vert_output;
 }
@@ -116,10 +104,10 @@ fn vs_main(in_vert: VertexInput) -> VertexOutput {
 fn fs_main(in_frag: VertexOutput) -> @location(0) vec4<f32> {
     switch in_frag.content_type {
         case 0u: {
-            return textureSampleLevel(color_atlas_texture, atlas_sampler, in_frag.uv, 0.0);
+            return textureLoad(color_atlas_texture, vec2<i32>(in_frag.uv), 0);
         }
         case 1u: {
-            return vec4<f32>(in_frag.color.rgb, in_frag.color.a * textureSampleLevel(mask_atlas_texture, atlas_sampler, in_frag.uv, 0.0).x);
+            return vec4<f32>(in_frag.color.rgb, in_frag.color.a * textureLoad(mask_atlas_texture, vec2<i32>(in_frag.uv), 0).x);
         }
         default: {
             return vec4<f32>(0.0);

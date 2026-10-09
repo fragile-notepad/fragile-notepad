@@ -26,6 +26,9 @@ pub(crate) struct InnerAtlas {
     /// been touched since the last `trim` and is considered in use for the current frame.
     pub generation: usize,
     pub max_texture_dimension_2d: u32,
+    retention_size: u32,
+    allocation_calls: u64,
+    evictions: u64,
 }
 
 impl InnerAtlas {
@@ -66,10 +69,14 @@ impl InnerAtlas {
             glyph_cache,
             generation: 0,
             max_texture_dimension_2d,
+            retention_size: size,
+            allocation_calls: 0,
+            evictions: 0,
         }
     }
 
     pub(crate) fn try_allocate(&mut self, width: usize, height: usize) -> Option<Allocation> {
+        self.allocation_calls = self.allocation_calls.saturating_add(1);
         let size = size2(width as i32, height as i32);
 
         loop {
@@ -77,6 +84,13 @@ impl InnerAtlas {
 
             if allocation.is_some() {
                 return allocation;
+            }
+
+            // Grow under pressure before discarding historical glyphs. At the
+            // retention target, the normal LRU policy resumes; current-frame
+            // glyph protection can still require growth beyond this target.
+            if self.size < self.retention_size {
+                return None;
             }
 
             // Try to free least recently used allocation
@@ -90,6 +104,7 @@ impl InnerAtlas {
                 }
 
                 let _ = self.glyph_cache.pop_lru();
+                self.evictions = self.evictions.saturating_add(1);
 
                 (_, value) = self.glyph_cache.peek_lru()?;
             }
@@ -100,6 +115,7 @@ impl InnerAtlas {
             }
 
             let (_, value) = self.glyph_cache.pop_lru().unwrap();
+            self.evictions = self.evictions.saturating_add(1);
             self.packer.deallocate(value.atlas_id.unwrap());
         }
     }
@@ -253,6 +269,19 @@ pub struct TextAtlas {
     pub(crate) color_mode: ColorMode,
 }
 
+/// Cumulative diagnostics for the mask glyph cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CacheStatistics {
+    /// Current side length of the square mask atlas, in pixels.
+    pub mask_size: u32,
+    /// Number of cached glyphs, including glyphs without rasterized pixels.
+    pub mask_glyphs: usize,
+    /// Calls to allocate mask atlas space, including retries after growth.
+    pub mask_allocation_calls: u64,
+    /// Glyph entries removed by LRU eviction since atlas creation.
+    pub mask_evictions: u64,
+}
+
 impl TextAtlas {
     /// Creates a new [`TextAtlas`].
     pub fn new(device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Self {
@@ -298,6 +327,26 @@ impl TextAtlas {
     pub fn trim(&mut self) {
         self.mask_atlas.trim();
         self.color_atlas.trim();
+    }
+
+    /// Sets the mask atlas side length to grow towards before evicting glyphs.
+    ///
+    /// Growth is lazy and only occurs when an allocation fails. This is a soft
+    /// retention target, not a limit: a larger current-frame working set may
+    /// still grow the atlas beyond it. The default preserves the original LRU
+    /// policy. Color glyph caching is unaffected.
+    pub fn set_mask_cache_retention_size(&mut self, size: u32) {
+        self.mask_atlas.retention_size = size.min(self.mask_atlas.max_texture_dimension_2d);
+    }
+
+    /// Returns cumulative mask cache diagnostics without modifying its state.
+    pub fn cache_statistics(&self) -> CacheStatistics {
+        CacheStatistics {
+            mask_size: self.mask_atlas.size,
+            mask_glyphs: self.mask_atlas.glyph_cache.len(),
+            mask_allocation_calls: self.mask_atlas.allocation_calls,
+            mask_evictions: self.mask_atlas.evictions,
+        }
     }
 
     pub(crate) fn grow(

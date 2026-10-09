@@ -1,5 +1,7 @@
 //! Composition of the main workbench surface and its transient overlays.
 
+mod background;
+
 use iced::widget::{column, container, row, stack};
 use iced::{Element, Fill, Length};
 
@@ -38,7 +40,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     } = model;
     let active_document = workspace.active_document();
     let editor = if let Some(document) = active_document {
-        editor::view(document, settings)
+        background::editor(editor::view(document, settings))
     } else {
         editor::empty()
     };
@@ -73,7 +75,14 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     let editor_surface = container(editor)
         .height(Fill)
         .width(Fill)
-        .style(styles::editor_surface);
+        .style(move |theme| {
+            let mut style = styles::editor_surface(theme);
+            // AdvancedEditor fills its bounds; retain the fill for the empty state.
+            if active_document.is_some() {
+                style.background = None;
+            }
+            style
+        });
 
     let main_area: Element<'a, Message> = if chrome_animation.function_list_rendered_visible
         || is_function_list_visible
@@ -104,11 +113,11 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         editor_surface.into()
     };
 
-    let shell = container(workbench.push(main_area).push(status_bar::view(
-        active_document,
-        settings,
-        file_status,
-    )))
+    let shell = container(background::shell(
+        workbench
+            .push(main_area)
+            .push(status_bar::view(active_document, settings, file_status)),
+    ))
     .height(Fill)
     .width(Fill)
     .style(styles::app_shell);

@@ -165,6 +165,19 @@ impl Renderer {
         }
     }
 
+    /// Returns shared mask glyph cache occupancy and allocation/eviction counters.
+    pub fn text_cache_statistics(&self) -> cryoglyph::CacheStatistics {
+        self.engine.text_pipeline.cache_statistics()
+    }
+
+    /// Sets the shared mask atlas size to retain before evicting older glyphs.
+    ///
+    /// The atlas grows on demand. This does not allocate immediately or impose
+    /// a hard size limit when the visible glyphs need more space.
+    pub fn set_text_cache_retention_dimension(&self, dimension: u32) {
+        self.engine.text_pipeline.set_mask_cache_target(dimension);
+    }
+
     /// Record commands that draw the current primitives to the target texture view.
     ///
     /// You must call [`finish`](Self::finish) and [`recall`](Self::recall) when submitting

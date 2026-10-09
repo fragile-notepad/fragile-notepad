@@ -1,3 +1,4 @@
+use iced::advanced::Renderer as _;
 use iced::advanced::widget::{self, Tree, tree};
 use iced::advanced::{Layout, Shell, Widget, layout, mouse, overlay, renderer};
 use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, window};
@@ -5,11 +6,17 @@ use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vect
 use super::Action;
 use crate::message::Message;
 
-pub(super) fn frame(content: Element<Message>, id: window::Id, border: f32) -> Element<Message> {
+pub(super) fn frame(
+    content: Element<Message>,
+    id: window::Id,
+    border: f32,
+    focused: bool,
+) -> Element<Message> {
     Element::new(ChromeRegion {
         content,
         id,
         border: Some(border),
+        focused,
     })
 }
 
@@ -18,6 +25,7 @@ pub(super) fn drag_region(content: Element<Message>, id: window::Id) -> Element<
         content,
         id,
         border: None,
+        focused: false,
     })
 }
 
@@ -25,6 +33,7 @@ struct ChromeRegion<'a> {
     content: Element<'a, Message>,
     id: window::Id,
     border: Option<f32>,
+    focused: bool,
 }
 
 #[derive(Default)]
@@ -59,15 +68,110 @@ impl Widget<Message, Theme, Renderer> for ChromeRegion<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            layout.child(0),
-            cursor,
-            viewport,
-        );
+        if self.border.is_some() && renderer.scale_factor().is_none() {
+            // The software renderer has no physical scale hint. Preserve its
+            // original full fill instead of splitting antialiased clip masks.
+            iced::widget::container::draw_background(
+                renderer,
+                &crate::ui::styles::window_frame(theme, self.focused),
+                layout.bounds(),
+            );
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout.child(0),
+                cursor,
+                viewport,
+            );
+            return;
+        }
+        if let Some(border) = self.border {
+            let bounds = layout.bounds();
+            // Children cover the interior. Keep the original quad geometry for
+            // its border and AA, but rasterize only the visible frame bands.
+            let scale = renderer.scale_factor().unwrap_or(1.0).max(f32::EPSILON);
+            let edge = (border.max(1.0) + 1.0 / scale)
+                .min(bounds.width / 2.0)
+                .min(bounds.height / 2.0);
+            // Back the children's antialiased inset edges. Pixel-aligned clip
+            // joins also avoid partial coverage with the software renderer.
+            let left = ((bounds.x + edge) * scale).ceil() / scale;
+            let right = (((bounds.x + bounds.width - edge) * scale).floor() / scale).max(left);
+            let top = ((bounds.y + edge) * scale).ceil() / scale;
+            let bottom = (((bounds.y + bounds.height - edge) * scale).floor() / scale).max(top);
+            // The caption and client background share an antialiased edge.
+            // Back the pixels around it too: at fractional scales their partial
+            // coverage can otherwise reveal the cleared target between them.
+            let caption_bottom = (bounds.y + super::HEIGHT) * scale;
+            let seam_top = ((caption_bottom - 1.0).floor() / scale).clamp(top, bottom);
+            let seam_bottom = ((caption_bottom + 1.0).ceil() / scale).clamp(seam_top, bottom);
+            let appearance = crate::ui::styles::window_frame(theme, self.focused);
+            for band in [
+                Rectangle {
+                    height: top - bounds.y,
+                    ..bounds
+                },
+                Rectangle {
+                    y: bottom,
+                    height: bounds.y + bounds.height - bottom,
+                    ..bounds
+                },
+                Rectangle {
+                    y: top,
+                    width: left - bounds.x,
+                    height: bottom - top,
+                    ..bounds
+                },
+                Rectangle {
+                    x: right,
+                    y: top,
+                    width: bounds.x + bounds.width - right,
+                    height: bottom - top,
+                    ..bounds
+                },
+                Rectangle {
+                    x: left,
+                    y: seam_top,
+                    width: right - left,
+                    height: seam_bottom - seam_top,
+                },
+            ] {
+                if let Some(clip) = band.intersection(viewport) {
+                    renderer.with_layer(clip, |renderer| {
+                        iced::widget::container::draw_background(renderer, &appearance, bounds);
+                    });
+                }
+            }
+        }
+        if self.border.is_some() {
+            // Keep children after the frame's clipped layers. Returning to the
+            // parent layer would put their unlayered quads before those bands.
+            if let Some(clip) = layout.bounds().intersection(viewport) {
+                renderer.with_layer(clip, |renderer| {
+                    self.content.as_widget().draw(
+                        &tree.children[0],
+                        renderer,
+                        theme,
+                        style,
+                        layout.child(0),
+                        cursor,
+                        viewport,
+                    );
+                });
+            }
+        } else {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout.child(0),
+                cursor,
+                viewport,
+            );
+        }
     }
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()

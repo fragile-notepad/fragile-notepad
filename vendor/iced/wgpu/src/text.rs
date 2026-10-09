@@ -279,8 +279,11 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let cache = cryoglyph::Cache::new(device);
-        let atlas =
+        let mut atlas =
             cryoglyph::TextAtlas::with_color_mode(device, queue, &cache, format, COLOR_MODE);
+        // Keep recent scrolling glyphs in the shared atlas. Allocate lazily so
+        // small documents and independent cached groups retain small atlases.
+        atlas.set_mask_cache_retention_size(1024);
 
         Pipeline {
             format,
@@ -295,6 +298,20 @@ impl Pipeline {
 
     pub fn trim(&self) {
         self.atlas.write().expect("Write text atlas").trim();
+    }
+
+    pub(crate) fn cache_statistics(&self) -> cryoglyph::CacheStatistics {
+        self.atlas
+            .read()
+            .expect("Read text atlas")
+            .cache_statistics()
+    }
+
+    pub(crate) fn set_mask_cache_target(&self, size: u32) {
+        self.atlas
+            .write()
+            .expect("Write text atlas")
+            .set_mask_cache_retention_size(size);
     }
 }
 

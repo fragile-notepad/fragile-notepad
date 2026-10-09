@@ -390,3 +390,123 @@ fn cached_glyphs_remain_protected_until_the_next_trim() {
     assert!(atlas.mask_atlas.try_allocate(size, size).is_some());
     assert!(atlas.mask_atlas.glyph_cache.is_empty());
 }
+
+#[test]
+fn mask_retention_grows_lazily_then_resumes_lru_without_evicting_pinned_glyphs() {
+    let Ok(adapter) = block_on(instance().request_adapter(&Default::default())) else {
+        eprintln!("Skipping Vulkan mask retention validation: no Vulkan adapter");
+        return;
+    };
+    let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
+    let cache = Cache::new(&device);
+    let mut atlas = TextAtlas::new(&device, &queue, &cache, wgpu::TextureFormat::Rgba8Unorm);
+    let initial_size = atlas.cache_statistics().mask_size;
+    atlas.set_mask_cache_retention_size(1024);
+    assert_eq!(atlas.cache_statistics().mask_size, initial_size);
+
+    let mut viewport = Viewport::new(&device, &cache);
+    viewport.update(
+        &queue,
+        Resolution {
+            width: 512,
+            height: 256,
+        },
+    );
+    let mut renderer = TextRenderer::new(&mut atlas, &device, Default::default(), None);
+    let mut fonts = FontSystem::new();
+    let mut swash = SwashCache::new();
+    let buffer = text(&mut fonts, "Retained glyphs: café 日本語", 18.0);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    renderer
+        .prepare(
+            &device,
+            &queue,
+            &mut encoder,
+            &mut fonts,
+            &mut atlas,
+            &viewport,
+            [area(&buffer, 0)],
+            &mut swash,
+        )
+        .unwrap();
+    let expected = capture(&device, &mut encoder, &renderer, &atlas, &viewport);
+    queue.submit([encoder.finish()]);
+    let expected = pixels(&device, &expected);
+    let coordinates: Vec<_> = atlas
+        .mask_atlas
+        .glyph_cache
+        .iter()
+        .filter_map(|(key, glyph)| match glyph.gpu_cache {
+            GpuCacheStatus::InAtlas { x, y, .. } => Some((*key, x, y)),
+            GpuCacheStatus::SkipRasterization => None,
+        })
+        .collect();
+    assert!(!coordinates.is_empty());
+    atlas.trim();
+    let before_growth = atlas.cache_statistics();
+
+    while atlas.mask_atlas.size < 1024 {
+        let size = atlas.mask_atlas.size as usize;
+        // A full-side request cannot fit beside any live allocation. Historical
+        // entries must survive this failed request so prepare can grow instead.
+        assert!(atlas.mask_atlas.try_allocate(size, size).is_none());
+        assert_eq!(
+            atlas.cache_statistics().mask_evictions,
+            before_growth.mask_evictions
+        );
+        assert_eq!(
+            atlas.cache_statistics().mask_glyphs,
+            before_growth.mask_glyphs
+        );
+        assert!(atlas.grow(&device, &queue, &mut fonts, &mut swash, ContentType::Mask));
+        for &(key, expected_x, expected_y) in &coordinates {
+            let glyph = atlas.mask_atlas.glyph_cache.peek(&key).unwrap();
+            let GpuCacheStatus::InAtlas { x, y, .. } = glyph.gpu_cache else {
+                panic!("retained glyph lost its atlas allocation");
+            };
+            assert_eq!((x, y), (expected_x, expected_y));
+        }
+    }
+    assert_eq!(atlas.cache_statistics().mask_size, 1024);
+
+    // Preparing the same text pins every retained mask glyph in the new frame.
+    // Rendering must still read the same texels after growth and atlas rebinding.
+    let mut encoder = device.create_command_encoder(&Default::default());
+    renderer
+        .prepare(
+            &device,
+            &queue,
+            &mut encoder,
+            &mut fonts,
+            &mut atlas,
+            &viewport,
+            [area(&buffer, 0)],
+            &mut swash,
+        )
+        .unwrap();
+    let actual = capture(&device, &mut encoder, &renderer, &atlas, &viewport);
+    queue.submit([encoder.finish()]);
+    assert_eq!(pixels(&device, &actual), expected);
+    let size = atlas.mask_atlas.size as usize;
+    assert!(atlas.mask_atlas.try_allocate(size, size).is_none());
+    assert_eq!(
+        atlas.cache_statistics().mask_evictions,
+        before_growth.mask_evictions
+    );
+    assert_eq!(
+        atlas.cache_statistics().mask_glyphs,
+        before_growth.mask_glyphs
+    );
+
+    // At the retention target, advancing the frame restores ordinary eviction.
+    atlas.trim();
+    assert!(atlas.mask_atlas.try_allocate(size, size).is_some());
+    let after_eviction = atlas.cache_statistics();
+    assert_eq!(after_eviction.mask_size, 1024);
+    assert_eq!(after_eviction.mask_glyphs, 0);
+    assert_eq!(
+        after_eviction.mask_evictions,
+        before_growth.mask_evictions + before_growth.mask_glyphs as u64
+    );
+    assert!(after_eviction.mask_allocation_calls > before_growth.mask_allocation_calls);
+}

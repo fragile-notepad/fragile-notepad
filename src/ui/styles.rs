@@ -366,11 +366,15 @@ fn elevation(palette: VisualPalette, y: f32, blur: f32) -> Shadow {
     }
 }
 
+pub fn app_shell_background(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).app
+}
+
 pub fn app_shell(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
+    // Each workbench row paints its own background; the shell supplies text color.
     container::Style {
-        background: Some(Background::Color(palette.app)),
         text_color: Some(palette.text),
         ..container::Style::default()
     }

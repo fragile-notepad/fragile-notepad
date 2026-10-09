@@ -18,9 +18,11 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
 
 fn capture(device: &wgpu::Device, queue: &wgpu::Queue, background: Background) -> Vec<u8> {
     let pipeline = Pipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
-    let mut state = State::new();
-    let mut batch = Batch::default();
-    batch.add(
+    capture_quad(
+        device,
+        queue,
+        &pipeline,
+        background,
         Quad {
             position: [16.4998, 16.4998],
             size: [20.0, 20.0],
@@ -32,18 +34,31 @@ fn capture(device: &wgpu::Device, queue: &wgpu::Queue, background: Background) -
             shadow_blur_radius: 0.0,
             snap: 1,
         },
-        &background,
-    );
+        1.0,
+    )
+}
+
+fn capture_quad(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &Pipeline,
+    background: Background,
+    quad: Quad,
+    scale: f32,
+) -> Vec<u8> {
+    let mut state = State::new();
+    let mut batch = Batch::default();
+    batch.add(quad, &background);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let mut belt = wgpu::util::StagingBelt::new(device.clone(), 1024);
     state.prepare(
-        &pipeline,
+        pipeline,
         device,
         &mut belt,
         &mut encoder,
         &batch,
         Transformation::orthographic(64, 64),
-        1.0,
+        scale,
     );
     belt.finish();
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -75,7 +90,7 @@ fn capture(device: &wgpu::Device, queue: &wgpu::Queue, background: Background) -
             ..wgpu::RenderPassDescriptor::default()
         });
         state.render(
-            &pipeline,
+            pipeline,
             0,
             Rectangle::with_size(crate::core::Size::new(64, 64)),
             &batch,
@@ -151,5 +166,62 @@ fn single_stop_gradient_keeps_its_color_across_the_quad() {
     for (x, y) in [(20, 20), (32, 32)] {
         let offset = (y * 64 + x) * 4;
         assert_eq!(&actual[offset..offset + 4], &[255, 255, 255, 255]);
+    }
+}
+
+#[test]
+fn solid_interiors_preserve_rounded_borders_shadows_and_fractional_edges() {
+    let Some((device, queue)) = device() else {
+        eprintln!("Skipping Vulkan solid validation: adapter unavailable");
+        return;
+    };
+    let pipeline = Pipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    for scale in [0.75, 1.0, 1.5] {
+        for case in 0..6 {
+            let color = Color::from_rgba(0.25, 0.6, 0.85, if case % 2 == 0 { 1.0 } else { 0.45 });
+            let quad = Quad {
+                position: [7.25, 8.75],
+                size: if case == 5 { [2.5, 3.0] } else { [38.0, 37.5] },
+                border_color: color::pack(Color::from_rgba(0.9, 0.2, 0.1, 0.7)),
+                border_radius: if case < 2 {
+                    [0.0; 4]
+                } else {
+                    [2.0, 8.0, 4.0, 12.0]
+                },
+                border_width: match case {
+                    0 | 1 => 0.0,
+                    2 | 3 => 1.25,
+                    _ => 7.0,
+                },
+                shadow_color: color::pack(if case < 3 {
+                    Color::TRANSPARENT
+                } else {
+                    Color::from_rgba(0.1, 0.3, 0.2, 0.5)
+                }),
+                shadow_offset: [2.0, -3.0],
+                shadow_blur_radius: if case == 4 { 3.0 } else { 0.0 },
+                snap: case % 2,
+            };
+            let solid = capture_quad(&device, &queue, &pipeline, color.into(), quad, scale);
+            // The constant gradient uses the original distance-field path at
+            // every pixel, including interiors skipped by the solid shader.
+            let gradient = gradient::Linear::new(0.0)
+                .add_stop(0.0, color)
+                .add_stop(1.0, color);
+            let reference = capture_quad(
+                &device,
+                &queue,
+                &pipeline,
+                Background::Gradient(gradient.into()),
+                quad,
+                scale,
+            );
+            for (index, (actual, expected)) in solid.iter().zip(&reference).enumerate() {
+                assert!(
+                    actual.abs_diff(*expected) <= 1,
+                    "scale={scale} case={case} byte={index}: {actual} vs {expected}"
+                );
+            }
+        }
     }
 }

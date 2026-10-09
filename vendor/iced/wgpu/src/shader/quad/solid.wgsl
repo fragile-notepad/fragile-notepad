@@ -14,15 +14,16 @@ struct SolidVertexInput {
 
 struct SolidVertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-    @location(1) border_color: vec4<f32>,
-    @location(2) pos: vec2<f32>,
-    @location(3) scale: vec2<f32>,
-    @location(4) border_radius: vec4<f32>,
-    @location(5) border_width: f32,
-    @location(6) shadow_color: vec4<f32>,
-    @location(7) shadow_offset: vec2<f32>,
-    @location(8) shadow_blur_radius: f32,
+    // These values are constant for every vertex in an instance.
+    @location(0) @interpolate(flat) color: vec4<f32>,
+    @location(1) @interpolate(flat) border_color: vec4<f32>,
+    @location(2) @interpolate(flat) pos: vec2<f32>,
+    @location(3) @interpolate(flat) scale: vec2<f32>,
+    @location(4) @interpolate(flat) border_radius: vec4<f32>,
+    @location(5) @interpolate(flat) border_width: f32,
+    @location(6) @interpolate(flat) shadow_color: vec4<f32>,
+    @location(7) @interpolate(flat) shadow_offset: vec2<f32>,
+    @location(8) @interpolate(flat) shadow_blur_radius: f32,
 }
 
 @vertex
@@ -68,6 +69,17 @@ fn solid_vs_main(input: SolidVertexInput) -> SolidVertexOutput {
 fn solid_fs_main(
     input: SolidVertexOutput
 ) -> @location(0) vec4<f32> {
+    // Large surfaces need no edge, border, or shadow work in their interior.
+    // Leave a conservative inset so fractional edges and rounded corners still
+    // use the same distance field and antialiasing as before.
+    let radius = max(max(input.border_radius.x, input.border_radius.y),
+        max(input.border_radius.z, input.border_radius.w));
+    let inset = max(radius, input.border_width) + 0.5;
+    let center_distance = abs(input.position.xy - input.pos - input.scale * 0.5);
+    if all(center_distance < input.scale * 0.5 - vec2<f32>(inset)) {
+        return input.color;
+    }
+
     var mixed_color: vec4<f32> = input.color;
 
     var dist = rounded_box_sdf(

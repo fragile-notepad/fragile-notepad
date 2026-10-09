@@ -15,6 +15,9 @@ use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
+#[cfg(test)]
+mod shader_tests;
+
 #[derive(Debug, Clone)]
 pub struct Cache(Arc<Inner>);
 

@@ -416,3 +416,137 @@ fn both_control_styles_render_in_light_dark_and_inactive_states() {
         }
     }
 }
+
+fn compare_frame_backgrounds_at_display_scales(renderer: &mut Renderer) {
+    fn content() -> Element<'static, Message> {
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill)
+            .style(styles::editor_surface)
+            .into()
+    }
+
+    fn original_frame(id: window::Id, focused: bool, maximized: bool) -> Element<'static, Message> {
+        let resize = !maximized && !cfg!(target_os = "macos");
+        let border = if resize { RESIZE_BORDER } else { 0.0 };
+        // Preserve the previous full-window background and exactly the same
+        // caption, content, padding, and resize border geometry as frame().
+        container(
+            iced::widget::column![
+                bar(
+                    id,
+                    "notes.csv — Fragile Notepad".into(),
+                    ControlStyle::Windows,
+                    focused,
+                    maximized,
+                ),
+                container(content())
+                    .padding(
+                        iced::Padding::ZERO
+                            .left(border)
+                            .right(border)
+                            .bottom(border)
+                    )
+                    .height(Fill),
+            ]
+            .height(Fill),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(move |theme| styles::window_frame(theme, focused))
+        .into()
+    }
+
+    fn screenshot(
+        mut element: Element<'_, Message>,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        scale: f32,
+    ) -> Vec<u8> {
+        let viewport = Rectangle::with_size(SIZE);
+        renderer::Renderer::reset(renderer, viewport);
+        renderer::Renderer::hint(renderer, scale);
+        let (tree, node) = mount(&mut element, renderer);
+        assert_eq!(node.size(), SIZE);
+        element.as_widget().draw(
+            &tree,
+            renderer,
+            theme,
+            &renderer::Style::default(),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &viewport,
+        );
+        renderer.screenshot(
+            Size::new(
+                (SIZE.width * scale).round() as u32,
+                (SIZE.height * scale).round() as u32,
+            ),
+            scale,
+            // Expose any holes left between the frame bands and opaque content.
+            Color::from_rgb(1.0, 0.0, 1.0),
+        )
+    }
+
+    let id = window::Id::unique();
+    for (theme, theme_name) in [(Theme::Light, "light"), (Theme::Dark, "dark")] {
+        for focused in [false, true] {
+            for maximized in [false, true] {
+                for scale in [1.0, 1.25, 1.5, 1.3] {
+                    let optimized = frame(
+                        content(),
+                        id,
+                        "notes.csv — Fragile Notepad".into(),
+                        ControlStyle::Windows,
+                        focused,
+                        maximized,
+                    );
+                    let actual = screenshot(optimized, renderer, &theme, scale);
+                    let expected = screenshot(
+                        original_frame(id, focused, maximized),
+                        renderer,
+                        &theme,
+                        scale,
+                    );
+                    assert_eq!(actual.len(), expected.len());
+                    if let Some((index, (actual, expected))) = actual
+                        .chunks_exact(4)
+                        .zip(expected.chunks_exact(4))
+                        .enumerate()
+                        .find(|(_, (actual, expected))| actual != expected)
+                    {
+                        let width = (SIZE.width * scale).round() as usize;
+                        panic!(
+                            "{theme_name}, focused={focused}, maximized={maximized}, \
+                             scale={scale}, pixel=({}, {}): optimized={actual:?}, \
+                             original={expected:?}",
+                            index % width,
+                            index / width,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn clipped_frame_matches_full_background_at_fractional_display_scales() {
+    compare_frame_backgrounds_at_display_scales(&mut renderer());
+}
+
+#[cfg(feature = "hybrid-rendering")]
+#[test]
+fn vulkan_clipped_frame_matches_full_background_at_fractional_display_scales() {
+    let Some(mut renderer) = futures::executor::block_on(<Renderer as Headless>::new(
+        renderer::Settings::default(),
+        Some("wgpu"),
+    )) else {
+        eprintln!("Skipping Vulkan frame validation: no wgpu headless adapter");
+        return;
+    };
+    assert_eq!(renderer.name(), "wgpu");
+    renderer::Renderer::hint(&mut renderer, 1.3);
+    assert_eq!(renderer::Renderer::scale_factor(&renderer), Some(1.3));
+    compare_frame_backgrounds_at_display_scales(&mut renderer);
+}

@@ -83,9 +83,8 @@ pub fn frame<'a>(
         .height(Fill),
     )
     .width(Fill)
-    .height(Fill)
-    .style(move |theme| styles::window_frame(theme, focused));
-    interaction::frame(surface.into(), id, border)
+    .height(Fill);
+    interaction::frame(surface.into(), id, border, focused)
 }
 
 fn bar<'a>(

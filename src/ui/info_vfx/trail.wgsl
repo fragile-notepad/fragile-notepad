@@ -1,5 +1,6 @@
-// Same analytic field as the software fallback, evaluated directly on the GPU.
-// The pipeline prepends either an immediate or uniform parameter declaration.
+// Rasterize the same endpoint-inclusive grid as the software fallback.
+// The pipeline supplies field_parameters: time, dark, width, height, and
+// LINEAR_TARGET to match the main target's color transfer.
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -22,15 +23,18 @@ fn soft_edge(value: f32) -> f32 {
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let parameters = field_parameters();
     let time = parameters.x;
-    let dark = parameters.z > 0.5;
+    let dark = parameters.y > 0.5;
     let colors = array<vec3<f32>, 3>(
         select(vec3<f32>(66.0, 145.0, 203.0), vec3<f32>(133.0, 195.0, 241.0), dark),
         select(vec3<f32>(145.0, 116.0, 205.0), vec3<f32>(185.0, 163.0, 235.0), dark),
         select(vec3<f32>(219.0, 146.0, 139.0), vec3<f32>(238.0, 181.0, 172.0), dark),
     );
-    let u = input.uv.x;
-    let v = input.uv.y;
+    // Fragment positions are texel centers; CPU samples include both edges.
+    let uv = (input.position.xy - vec2<f32>(0.5)) / (parameters.zw - vec2<f32>(1.0));
+    let u = uv.x;
+    let v = uv.y;
     let t = clamp(u / 0.80, 0.0, 1.0);
     let arch = sin(t * 3.141592653589793);
     let flow = sin(t * 7.0 - time * 0.65);
@@ -53,10 +57,17 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         weight += light;
         rgb += colors[strand] * light;
     }
-    let alpha = (1.0 - exp(-weight)) * envelope * select(0.44, 0.50, dark) * parameters.y;
-    var color = rgb / (max(weight, 0.0001) * 255.0);
-    if parameters.w > 0.5 {
-        color = select(color / 12.92, pow((color + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), color > vec3<f32>(0.04045));
+    let alpha = (1.0 - exp(-weight)) * envelope * select(0.44, 0.50, dark);
+    let color = rgb / (max(weight, 0.0001) * 255.0);
+    // Match render_field's 8-bit quantization before premultiplication. Filtering
+    // premultiplied texels is intentionally approximate to the straight-RGBA
+    // software reference, while avoiding colored fringes under low alpha.
+    let rgba = floor(clamp(vec4<f32>(color, alpha), vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0 + vec4<f32>(0.5)) / 255.0;
+    var target_color = rgba.rgb;
+    if LINEAR_TARGET {
+        target_color = select(target_color / 12.92, pow((target_color + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), target_color > vec3<f32>(0.04045));
     }
-    return vec4<f32>(color * alpha, alpha);
+    // An sRGB attachment encodes this linear premultiplied value on store and
+    // decodes it before filtering. The non-sRGB path retains Iced's web colors.
+    return vec4<f32>(target_color * rgba.a, rgba.a);
 }

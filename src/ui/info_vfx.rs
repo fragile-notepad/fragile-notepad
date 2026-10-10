@@ -1132,8 +1132,8 @@ mod tests {
                 let max = differences.iter().copied().max().unwrap();
                 let mean =
                     differences.iter().map(|d| *d as f64).sum::<f64>() / differences.len() as f64;
-                // The CPU path interpolates a half-resolution, 8-bit texture;
-                // the shader evaluates the same smooth field at native resolution.
+                // Both paths interpolate a bounded half-resolution, 8-bit
+                // field; GPU shader arithmetic and quantization can differ slightly.
                 assert!(
                     max <= 12 && mean < 1.0,
                     "scale={scale} time={time} max={max} mean={mean}"

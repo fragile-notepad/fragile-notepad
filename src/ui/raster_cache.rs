@@ -17,21 +17,32 @@ pub(crate) fn cached<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
     enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    Element::new(RasterCache::new(content).enabled(enabled))
+    Element::new(
+        RasterCache::new(content)
+            .enabled(enabled)
+            .settle_before_capture(),
+    )
 }
 
 pub(crate) fn cached_animated<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
     enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    Element::new(RasterCache::new(content).animated(true).enabled(enabled))
+    Element::new(
+        RasterCache::new(content)
+            .animated(true)
+            .enabled(enabled)
+            .settle_before_capture(),
+    )
 }
 
 pub(crate) fn cached_editor<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
     enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    let mut cache = RasterCache::new(content).enabled(enabled);
+    let mut cache = RasterCache::new(content)
+        .enabled(enabled)
+        .settle_before_capture();
     cache.paint_state = Some(editor_paint_state::<iced::Renderer>);
     Element::new(cache)
 }
@@ -53,6 +64,7 @@ fn editor_paint_state<Renderer: iced::advanced::text::Renderer>(tree: &Tree) -> 
 struct RasterCache<'a, Message, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     enabled: bool,
+    settle_before_capture: bool,
     animated: bool,
     paint_state: Option<fn(&Tree) -> (u64, bool)>,
 }
@@ -65,6 +77,7 @@ where
         Self {
             content: content.into(),
             enabled: true,
+            settle_before_capture: false,
             animated: false,
             paint_state: None,
         }
@@ -79,12 +92,18 @@ where
         self.enabled = enabled;
         self
     }
+
+    fn settle_before_capture(mut self) -> Self {
+        self.settle_before_capture = true;
+        self
+    }
 }
 
 #[derive(Debug, Default)]
 struct State {
     cache: renderer::Cache,
     revision: Cell<u64>,
+    previous_draw_revision: Cell<Option<u64>>,
     pending_frame: Option<window::RedrawRequest>,
     draw_context: RefCell<Option<DrawContext>>,
     local_paint: Cell<Option<(u64, bool)>>,
@@ -262,7 +281,13 @@ where
                 viewport,
             );
         };
+        let revision = state.revision.get();
+        let settled = state.previous_draw_revision.replace(Some(revision)) == Some(revision);
         let live = !self.enabled
+            // Rebuilt views often invalidate every frame during scrolling or
+            // app transitions. Capture only after one unchanged redraw, so a
+            // never-reused picture does not add an offscreen texture pass.
+            || (self.settle_before_capture && !settled)
             || local_paint.map_or(
                 self.animated && state.pending_frame() != window::RedrawRequest::Wait,
                 |(_, live)| live,
@@ -272,7 +297,7 @@ where
             // paying for a new offscreen texture pass on every animation frame.
             renderer.with_layer(bounds, draw);
         } else {
-            renderer.with_cached_layer(&state.cache, state.revision.get(), bounds, draw);
+            renderer.with_cached_layer(&state.cache, revision, bounds, draw);
         }
     }
 
@@ -598,6 +623,38 @@ mod tests {
         }
         assert_eq!((renderer.hits, renderer.misses), (2, 2));
         assert_eq!(probe.draws.get(), 4);
+    }
+
+    #[test]
+    fn rebuilt_paint_stays_live_until_unchanged_then_captures_and_hits() {
+        let probe = Probe::default();
+        let mut content = RasterCache::new(Element::new(probe.clone())).settle_before_capture();
+        let mut renderer = RecordingRenderer::default();
+        let mut tree = Tree::new(&content as &dyn Widget<(), Theme, RecordingRenderer>);
+        content.diff(&mut tree);
+        let node = content.layout(&mut tree, &renderer, &layout::Limits::new(Size::ZERO, SIZE));
+        let viewport = Rectangle::with_size(SIZE);
+        for frame in 0..7 {
+            if frame < 4 {
+                // A new style/data closure can change paint while preserving
+                // the widget tree and all geometry, just like an App rebuild.
+                content.diff(&mut tree);
+            }
+            content.draw(
+                &tree,
+                &mut renderer,
+                &Theme::Light,
+                &renderer::Style::default(),
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+                &viewport,
+            );
+            if frame < 4 {
+                assert_eq!((renderer.hits, renderer.misses), (0, 0));
+            }
+        }
+        assert_eq!((renderer.hits, renderer.misses), (2, 1));
+        assert_eq!(probe.draws.get(), 5);
     }
 
     #[test]

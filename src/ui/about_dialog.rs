@@ -170,12 +170,12 @@ fn dialog(
             container(
                 column![
                     header(progress, interactive),
-                    raster_cache::cached(tabs(active_tab, progress))
+                    raster_cache::cached(tabs(active_tab, progress), progress >= 1.0)
                 ]
                 .spacing(12)
             )
             .padding([20, 28]),
-            container(raster_cache::cached_animated(content))
+            container(raster_cache::cached_animated(content, progress >= 1.0))
                 .padding([0, 28])
                 .height(Fill)
                 .width(Fill),
@@ -203,7 +203,8 @@ fn dialog(
                     ]
                     .spacing(14)
                 )
-                .padding([16, 28])
+                .padding([16, 28]),
+                progress >= 1.0,
             ),
         ]
         .height(Fill)
@@ -244,7 +245,8 @@ fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
             )
             .width(Fill)
             .height(info_vfx::HEADER_HEIGHT)
-            .center_y(Fill)
+            .center_y(Fill),
+            progress >= 1.0,
         ),
     ]
     .into()

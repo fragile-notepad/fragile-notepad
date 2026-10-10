@@ -38,17 +38,28 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         file_status,
         active_outline_state,
     } = model;
+    // These transitions are driven by App messages, outside child redraw
+    // deadlines. Capture settled pixels instead of rebuilding surfaces per frame.
+    let retain = ![
+        chrome_animation.find_progress,
+        chrome_animation.inline_replace_progress,
+        chrome_animation.function_list_progress,
+        chrome_animation.about_progress,
+        chrome_animation.dirty_close_progress,
+    ]
+    .into_iter()
+    .any(|progress| progress > 0.0 && progress < 1.0);
     let active_document = workspace.active_document();
     let editor = if let Some(document) = active_document {
         // Wrap outside the context menu, whose child is the AdvancedEditor tree.
-        raster_cache::cached_editor(background::editor(editor::view(document, settings)))
+        raster_cache::cached_editor(background::editor(editor::view(document, settings)), retain)
     } else {
         editor::empty()
     };
 
     let mut workbench = column![
-        raster_cache::cached(toolbar::menu_bar(active_menu)),
-        raster_cache::cached(toolbar::tool_bar(active_document)),
+        raster_cache::cached(toolbar::menu_bar(active_menu), retain),
+        raster_cache::cached(toolbar::tool_bar(active_document), retain),
         tabs::view(workspace, dragged_tab, hovered_drop_tab),
     ];
 
@@ -115,14 +126,17 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     };
 
     let shell = container(background::shell(workbench.push(main_area).push(
-        raster_cache::cached(status_bar::view(active_document, settings, file_status)),
+        raster_cache::cached(
+            status_bar::view(active_document, settings, file_status),
+            retain,
+        ),
     )))
     .height(Fill)
     .width(Fill)
     .style(styles::app_shell);
     // A quiet shell needs one composite. When any child has a pending redraw
     // (caret, scrolling, or fade), draw it live and let the smaller caches help.
-    let shell = raster_cache::cached_animated(shell);
+    let shell = raster_cache::cached_animated(shell, retain);
 
     let with_menu: Element<'a, Message> = if active_menu.is_some() {
         stack![

@@ -5,6 +5,8 @@
 //! or other children that advance on every redraw. These children draw live
 //! while a frame is pending; the final frame refreshes the retained surface.
 //! Keep independently animated widgets outside a static cache when possible.
+//! App-controlled transitions pass `enabled = false` until they settle: their
+//! redraws originate outside the child and cannot be inferred from its deadlines.
 
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Layout, Shell, Widget, layout, mouse, overlay, renderer};
@@ -13,20 +15,23 @@ use std::cell::{Cell, RefCell};
 
 pub(crate) fn cached<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
+    enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    Element::new(RasterCache::new(content))
+    Element::new(RasterCache::new(content).enabled(enabled))
 }
 
 pub(crate) fn cached_animated<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
+    enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    Element::new(RasterCache::new(content).animated(true))
+    Element::new(RasterCache::new(content).animated(true).enabled(enabled))
 }
 
 pub(crate) fn cached_editor<'a>(
     content: impl Into<Element<'a, crate::message::Message>>,
+    enabled: bool,
 ) -> Element<'a, crate::message::Message> {
-    let mut cache = RasterCache::new(content);
+    let mut cache = RasterCache::new(content).enabled(enabled);
     cache.paint_state = Some(editor_paint_state::<iced::Renderer>);
     Element::new(cache)
 }
@@ -47,6 +52,7 @@ fn editor_paint_state<Renderer: iced::advanced::text::Renderer>(tree: &Tree) -> 
 
 struct RasterCache<'a, Message, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
+    enabled: bool,
     animated: bool,
     paint_state: Option<fn(&Tree) -> (u64, bool)>,
 }
@@ -58,6 +64,7 @@ where
     fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         Self {
             content: content.into(),
+            enabled: true,
             animated: false,
             paint_state: None,
         }
@@ -65,6 +72,11 @@ where
 
     fn animated(mut self, animated: bool) -> Self {
         self.animated = animated;
+        self
+    }
+
+    fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 }
@@ -90,6 +102,7 @@ impl State {
 
 #[derive(Debug, Clone, PartialEq)]
 struct DrawContext {
+    enabled: bool,
     bounds: Rectangle,
     viewport: Rectangle,
     cursor: mouse::Cursor,
@@ -220,6 +233,7 @@ where
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
         let context = DrawContext {
+            enabled: self.enabled,
             bounds,
             viewport: *viewport,
             cursor,
@@ -248,10 +262,11 @@ where
                 viewport,
             );
         };
-        let live = local_paint.map_or(
-            self.animated && state.pending_frame() != window::RedrawRequest::Wait,
-            |(_, live)| live,
-        );
+        let live = !self.enabled
+            || local_paint.map_or(
+                self.animated && state.pending_frame() != window::RedrawRequest::Wait,
+                |(_, live)| live,
+            );
         if live {
             // Keep changing pictures out of the retained path instead of
             // paying for a new offscreen texture pass on every animation frame.
@@ -556,6 +571,33 @@ mod tests {
             cursor,
             &viewport,
         );
+    }
+
+    #[test]
+    fn app_controlled_motion_draws_live_then_refreshes_before_reusing_pixels() {
+        let probe = Probe::default();
+        let mut content = RasterCache::new(Element::new(probe.clone()));
+        let mut renderer = RecordingRenderer::default();
+        let mut tree = Tree::new(&content as &dyn Widget<(), Theme, RecordingRenderer>);
+        content.diff(&mut tree);
+        let node = content.layout(&mut tree, &renderer, &layout::Limits::new(Size::ZERO, SIZE));
+        let viewport = Rectangle::with_size(SIZE);
+        // Toggle without diffing to verify the paint context itself refreshes
+        // the old retained pixels after the externally controlled live phase.
+        for enabled in [true, true, false, false, true, true] {
+            content.enabled = enabled;
+            content.draw(
+                &tree,
+                &mut renderer,
+                &Theme::Light,
+                &renderer::Style::default(),
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+                &viewport,
+            );
+        }
+        assert_eq!((renderer.hits, renderer.misses), (2, 2));
+        assert_eq!(probe.draws.get(), 4);
     }
 
     #[test]
@@ -1018,7 +1060,7 @@ mod tests {
         document.buffer = EditorBuffer::from_text("fn main() {\n    let note = 1;\n}\n");
         document.refresh_after_text_change();
         let mut plain = editor::view(&document, &settings);
-        let mut cached = cached_editor(editor::view(&document, &settings));
+        let mut cached = cached_editor(editor::view(&document, &settings), true);
         let (mut plain_tree, plain_node) = mount(&mut plain, &renderer, SIZE);
         let (mut cached_tree, cached_node) = mount(&mut cached, &renderer, SIZE);
         for (content, tree, node) in [
@@ -1195,11 +1237,10 @@ mod tests {
         .expect("software renderer");
         let document = Document::untitled(DocumentId::new(2));
         let settings = EditorSettings::default();
-        let mut content = cached(crate::ui::status_bar::view(
-            Some(&document),
-            &settings,
-            Some("indexing"),
-        ));
+        let mut content = cached(
+            crate::ui::status_bar::view(Some(&document), &settings, Some("indexing")),
+            true,
+        );
         let (mut tree, node) = mount(&mut content, &renderer, SIZE);
         let now = Instant::now();
         for at in [

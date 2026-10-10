@@ -16,7 +16,7 @@ use crate::editor::viewport::ViewportModel;
 use super::actions::key_action;
 use super::font::{editor_font_runs_for_display_fragment, editor_font_runs_for_fragment};
 use super::line_cache::{
-    LineGeometry, measured_position_point_with_context, measured_text_hit_target_with_context,
+    LineGeometry, measured_position_point_with_cache, measured_text_hit_target_with_context,
     measured_virtual_caret_x,
 };
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
@@ -892,7 +892,7 @@ where
     let cursor = context
         .buffer
         .clamp_position(context.selections.main().cursor);
-    let point = measured_position_point_with_context(
+    let point = measured_position_point_with_cache(
         context.buffer,
         context.viewport,
         context.decorations,
@@ -901,6 +901,7 @@ where
         context.caret_row,
         renderer,
         context.cjk_context,
+        &mut state.line_geometries.borrow_mut(),
     );
 
     InputMethod::Enabled {
@@ -943,6 +944,7 @@ mod tests {
         layout: EditorLayout,
         bounds: Rectangle,
         last_redraw: window::RedrawRequest,
+        last_input_method: InputMethod,
     }
 
     impl TestEditor {
@@ -981,6 +983,7 @@ mod tests {
                     height: layout.height,
                 },
                 last_redraw: window::RedrawRequest::Wait,
+                last_input_method: InputMethod::Disabled,
             }
         }
 
@@ -1023,6 +1026,7 @@ mod tests {
                 &mut shell,
             );
             self.last_redraw = shell.redraw_request();
+            self.last_input_method = shell.input_method().clone();
             for action in &messages {
                 match action {
                     EditorAction::PlaceCaret(position) => {
@@ -1064,6 +1068,80 @@ mod tests {
                 mouse::Cursor::Available(point),
             )
         }
+    }
+
+    #[test]
+    fn focused_redraws_retain_caret_shaping_and_update_ime_coordinates() {
+        let mut editor = TestEditor::new("caf\u{e9}\t漢字\n".repeat(20).as_str());
+        let cursor = EditorPosition::new(8, "caf\u{e9}\t漢".len());
+        editor.selections = SelectionSet::new(EditorSelection::new(cursor, cursor));
+        editor.state.is_focused = true;
+        let now = Instant::now();
+        let mut first = None;
+        for (frame, first_visible_row) in [0, 4, 8, 4, 0].into_iter().enumerate() {
+            editor.layout.scroll.first_visible_row = first_visible_row;
+            editor.layout.scroll.horizontal_px = if first_visible_row == 8 { 12.0 } else { 0.0 };
+            for tick in 0..3 {
+                editor.dispatch(
+                    Event::Window(window::Event::RedrawRequested(
+                        now + Duration::from_millis((frame * 3 + tick) as u64 * 16),
+                    )),
+                    mouse::Cursor::Unavailable,
+                );
+                let expected = super::super::line_cache::measured_position_point_with_context(
+                    &editor.buffer,
+                    &editor.viewport,
+                    &editor.decorations,
+                    editor.layout,
+                    cursor,
+                    None,
+                    &(),
+                    None,
+                );
+                let InputMethod::Enabled {
+                    cursor, purpose, ..
+                } = editor.last_input_method
+                else {
+                    panic!("focused editor must keep the input method enabled");
+                };
+                assert_eq!(purpose, input_method::Purpose::Normal);
+                assert_eq!(cursor.x, editor.bounds.x + expected.x);
+                assert_eq!(cursor.y, editor.bounds.y + expected.y);
+                if frame == 0 {
+                    first = Some(cursor);
+                }
+                if frame == 4 {
+                    assert_eq!(Some(cursor), first);
+                }
+            }
+        }
+        assert_eq!(
+            editor.state.line_geometries.borrow().build_count(),
+            1,
+            "forced redraws and scroll-only changes must not reshape the caret paragraph"
+        );
+        editor.dispatch(
+            Event::InputMethod(input_method::Event::Preedit(
+                "候補".to_owned(),
+                Some(0.."候補".len()),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        let InputMethod::Enabled {
+            preedit: Some(ref preedit),
+            ..
+        } = editor.last_input_method
+        else {
+            panic!("preedit must still be published alongside retained caret geometry");
+        };
+        assert_eq!(preedit.content, "候補");
+        assert_eq!(preedit.selection, Some(0.."候補".len()));
+        assert_eq!(editor.state.line_geometries.borrow().build_count(), 1);
+        editor.dispatch(
+            Event::Window(window::Event::Unfocused),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(editor.last_redraw, window::RedrawRequest::NextFrame);
     }
 
     #[test]

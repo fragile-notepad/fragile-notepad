@@ -13,7 +13,7 @@ use super::position::{
 };
 use super::viewport::{RowSegment, ViewportModel};
 use iced::{Color, Rectangle, highlighter};
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 pub(crate) mod syntax;
 pub use syntax::{SyntaxLineCache, SyntaxParseResult};
@@ -571,12 +571,16 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
     let mut line_text = String::new();
     let mut line_spans = Vec::new();
     let mut projected = Vec::new();
-    let lookups = RenderDecorationLookups::new(decorations);
     let text_x = scrolled_text_origin_x(layout, decorations);
     let max_row = layout
         .scroll
         .first_visible_row
         .saturating_add(layout.visible_row_capacity());
+    let lookups = RenderDecorationLookups::new(
+        decorations,
+        (layout.scroll.first_visible_row..=max_row)
+            .filter_map(|row| viewport.visible_row_to_document_line(row)),
+    );
     for visible_row in layout.scroll.first_visible_row..=max_row {
         let Some(line) = viewport.visible_row_to_document_line(visible_row) else {
             break;
@@ -1176,11 +1180,74 @@ fn caret_plan_for_position(
 
 struct RenderDecorationLookups<'a> {
     decorations: &'a DecorationModel,
+    visible: HashMap<usize, VisibleLineDecorations<'a>>,
+    #[cfg(test)]
+    metadata_visits: usize,
+}
+
+#[derive(Default)]
+struct VisibleLineDecorations<'a> {
+    hidden: Option<&'a HiddenLineSpan>,
+    guides: Vec<&'a IndentGuide>,
 }
 
 impl<'a> RenderDecorationLookups<'a> {
-    fn new(decorations: &'a DecorationModel) -> Self {
-        Self { decorations }
+    fn new(decorations: &'a DecorationModel, visible_lines: impl Iterator<Item = usize>) -> Self {
+        let mut result = Self {
+            decorations,
+            visible: if decorations.hidden_line_spans.is_empty()
+                && (!decorations.settings.show_indentation_guides
+                    || decorations.indent_guides.is_empty())
+            {
+                HashMap::new()
+            } else {
+                visible_lines
+                    .map(|line| (line, VisibleLineDecorations::default()))
+                    .collect()
+            },
+            #[cfg(test)]
+            metadata_visits: 0,
+        };
+        if result.visible.is_empty() {
+            return result;
+        }
+        let first = *result.visible.keys().min().expect("visible line");
+        let last = *result.visible.keys().max().expect("visible line");
+        // Metadata can arrive unordered, and brace/indentation folds may share
+        // a header. Scan it once per frame and retain only visible logical lines;
+        // repeated wrapped rows reuse the same small lookup without rescanning
+        // every guide in the document for each row.
+        for span in &decorations.hidden_line_spans {
+            #[cfg(test)]
+            {
+                result.metadata_visits += 1;
+            }
+            if span.header_line < first || span.header_line > last {
+                continue;
+            }
+            if let Some(line) = result.visible.get_mut(&span.header_line)
+                && line
+                    .hidden
+                    .is_none_or(|previous| previous.last_hidden_line <= span.last_hidden_line)
+            {
+                line.hidden = Some(span);
+            }
+        }
+        if decorations.settings.show_indentation_guides {
+            for guide in &decorations.indent_guides {
+                #[cfg(test)]
+                {
+                    result.metadata_visits += 1;
+                }
+                if guide.line < first || guide.line > last {
+                    continue;
+                }
+                if let Some(line) = result.visible.get_mut(&guide.line) {
+                    line.guides.push(guide);
+                }
+            }
+        }
+        result
     }
 
     fn line_decoration(&self, line: usize) -> Option<&'a LineDecoration> {
@@ -1188,18 +1255,187 @@ impl<'a> RenderDecorationLookups<'a> {
     }
 
     fn hidden_line_span(&self, line: usize) -> Option<&'a HiddenLineSpan> {
-        self.decorations
-            .hidden_line_spans
-            .iter()
-            .filter(|span| span.header_line == line)
-            .max_by_key(|span| span.last_hidden_line)
+        self.visible.get(&line).and_then(|line| line.hidden)
     }
 
     fn indent_guides(&self, line: usize) -> impl Iterator<Item = &'a IndentGuide> {
-        self.decorations
-            .indent_guides
-            .iter()
-            .filter(move |guide| guide.line == line)
+        self.visible
+            .get(&line)
+            .into_iter()
+            .flat_map(|line| line.guides.iter().copied())
+    }
+}
+
+#[cfg(test)]
+mod decoration_lookup_tests {
+    use super::*;
+    use crate::editor::{DecorationSettings, FoldModel, ScrollOffset};
+
+    #[test]
+    fn visible_decoration_index_matches_unordered_metadata_with_one_scan() {
+        let mut decorations = DecorationModel::new(DecorationSettings::default());
+        decorations.indent_guides = (0..10_000)
+            .rev()
+            .flat_map(|line| [3, 1, 2].map(|depth| IndentGuide { line, depth }))
+            .collect();
+        decorations.hidden_line_spans = [
+            (700, 730),
+            (701, 710),
+            (9_999, 10_002),
+            (700, 725),
+            (700, 740),
+            (700, 740),
+        ]
+        .map(|(header_line, last_hidden_line)| HiddenLineSpan {
+            header_line,
+            first_hidden_line: header_line + 1,
+            last_hidden_line,
+        })
+        .to_vec();
+        let visible = [700, 701, 701, 703, 708, 708];
+        let lookups = RenderDecorationLookups::new(&decorations, visible.into_iter());
+        let visits = decorations.indent_guides.len() + decorations.hidden_line_spans.len();
+        assert_eq!(lookups.metadata_visits, visits);
+        assert_eq!(
+            lookups.visible.len(),
+            4,
+            "wrap continuations share one logical-line index"
+        );
+        for _ in 0..40 {
+            for line in visible {
+                assert_eq!(
+                    lookups.indent_guides(line).collect::<Vec<_>>(),
+                    decorations
+                        .indent_guides
+                        .iter()
+                        .filter(|guide| guide.line == line)
+                        .collect::<Vec<_>>(),
+                    "original depth order must be preserved",
+                );
+                let expected = decorations
+                    .hidden_line_spans
+                    .iter()
+                    .filter(|span| span.header_line == line)
+                    .max_by_key(|span| span.last_hidden_line);
+                assert_eq!(lookups.hidden_line_span(line), expected);
+                if let Some(expected) = expected {
+                    assert!(
+                        std::ptr::eq(lookups.hidden_line_span(line).unwrap(), expected),
+                        "equal-length folds keep the original last-match preference"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            lookups.metadata_visits, visits,
+            "row lookup must not rescan document metadata"
+        );
+        assert!(lookups.indent_guides(9_999).next().is_none());
+        assert!(lookups.hidden_line_span(9_999).is_none());
+    }
+
+    #[test]
+    fn decoration_index_preserves_wrapped_fold_rows_during_scroll_reversal() {
+        let buffer = EditorBuffer::from_text("    漢字\tcontinuation text\n".repeat(120));
+        let folds = FoldModel::with_collapsed(
+            vec![
+                FoldRange::new(5, 8),
+                FoldRange::new(5, 10),
+                FoldRange::new(60, 64),
+            ],
+            [
+                FoldRange::new(5, 8),
+                FoldRange::new(5, 10),
+                FoldRange::new(60, 64),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let viewport = ViewportModel::new_wrapped(&buffer, &folds, 12, 4);
+        let decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            &folds,
+            (0..buffer.line_count())
+                .rev()
+                .flat_map(|line| [2, 1].map(|depth| IndentGuide { line, depth }))
+                .collect(),
+        );
+        let mut saw_fold = false;
+        let mut saw_continuation = false;
+        for first_visible_row in [0, 4, 12, 28, 12, 4, 0] {
+            let layout = EditorLayout::new(
+                EditorMetrics::default(),
+                ScrollOffset {
+                    first_visible_row,
+                    horizontal_px: 0.0,
+                },
+                320.0,
+                150.0,
+            );
+            let plan = build_render_plan_with_cache(
+                &buffer,
+                &viewport,
+                &decorations,
+                EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+                layout,
+                &SyntaxLineCache::default(),
+            );
+            for row in plan.rows {
+                let segment = viewport.row_segment(row.visible_row, &buffer).unwrap();
+                let expected_depths = if segment.is_continuation() {
+                    vec![]
+                } else {
+                    decorations
+                        .indent_guides
+                        .iter()
+                        .filter(|guide| guide.line == row.line)
+                        .map(|guide| guide.depth)
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    row.indent_guides
+                        .iter()
+                        .map(|guide| guide.depth)
+                        .collect::<Vec<_>>(),
+                    expected_depths
+                );
+                let expected_hidden = decorations
+                    .hidden_line_spans
+                    .iter()
+                    .filter(|span| span.header_line == row.line && segment.is_last)
+                    .max_by_key(|span| span.last_hidden_line);
+                assert_eq!(
+                    row.hidden_lines
+                        .map(|span| (span.first_hidden_line, span.last_hidden_line)),
+                    expected_hidden.map(|span| (span.first_hidden_line, span.last_hidden_line))
+                );
+                saw_fold |= row.hidden_lines.is_some();
+                saw_continuation |= segment.is_continuation();
+            }
+        }
+        assert!(
+            saw_fold && saw_continuation,
+            "exercise both fold headers and wrapped CJK fragments"
+        );
+    }
+
+    #[test]
+    fn disabled_guides_and_empty_viewports_do_not_scan_unused_metadata() {
+        let mut decorations = DecorationModel::new(DecorationSettings {
+            show_indentation_guides: false,
+            ..DecorationSettings::default()
+        });
+        decorations.indent_guides = (0..10_000)
+            .map(|line| IndentGuide { line, depth: 1 })
+            .collect();
+        let disabled = RenderDecorationLookups::new(&decorations, [10, 11].into_iter());
+        assert_eq!(disabled.metadata_visits, 0);
+        assert!(disabled.indent_guides(10).next().is_none());
+        decorations.settings.show_indentation_guides = true;
+        let empty = RenderDecorationLookups::new(&decorations, std::iter::empty());
+        assert_eq!(empty.metadata_visits, 0);
+        assert!(empty.visible.is_empty());
     }
 }
 

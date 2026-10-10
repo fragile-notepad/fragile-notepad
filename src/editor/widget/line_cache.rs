@@ -63,9 +63,13 @@ impl<Paragraph> LineGeometryCache<Paragraph> {
             .next_power_of_two()
             .max(LINE_GEOMETRY_CACHE_MINIMUM);
 
-        if self.entries.len() != target {
-            self.entries.clear();
+        if self.entries.len() < target {
+            let previous = std::mem::take(&mut self.entries);
             self.entries.resize_with(target, || None);
+            for entry in previous.into_iter().flatten() {
+                let slot = entry.visible_row % target;
+                self.entries[slot] = Some(entry);
+            }
         }
     }
 
@@ -82,7 +86,7 @@ impl<Paragraph> LineGeometryCache<Paragraph> {
     }
 
     #[cfg(test)]
-    fn build_count(&self) -> usize {
+    pub(super) fn build_count(&self) -> usize {
         self.build_count
     }
 }
@@ -261,11 +265,66 @@ pub(crate) fn measured_position_point_with_context<Renderer>(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
     decorations: &DecorationModel,
+    layout: EditorLayout,
+    position: EditorPosition,
+    caret_row: Option<usize>,
+    renderer: &Renderer,
+    context: Option<&CjkContext>,
+) -> Point
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    measured_position_point_impl(
+        buffer,
+        viewport,
+        decorations,
+        layout,
+        position,
+        caret_row,
+        renderer,
+        context,
+        None,
+    )
+}
+
+/// Retains caret shaping while recomputing its position in the current viewport.
+pub(super) fn measured_position_point_with_cache<Renderer>(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    layout: EditorLayout,
+    position: EditorPosition,
+    caret_row: Option<usize>,
+    renderer: &Renderer,
+    context: Option<&CjkContext>,
+    cache: &mut LineGeometryCache<Renderer::Paragraph>,
+) -> Point
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    measured_position_point_impl(
+        buffer,
+        viewport,
+        decorations,
+        layout,
+        position,
+        caret_row,
+        renderer,
+        context,
+        Some(cache),
+    )
+}
+
+fn measured_position_point_impl<Renderer>(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
     mut layout: EditorLayout,
     position: EditorPosition,
     caret_row: Option<usize>,
     renderer: &Renderer,
     context: Option<&CjkContext>,
+    cache: Option<&mut LineGeometryCache<Renderer::Paragraph>>,
 ) -> Point
 where
     Renderer: text::Renderer<Font = Font>,
@@ -300,25 +359,45 @@ where
         })
         .unwrap_or((0, line.len(), 0));
     let fragment = &line[start.min(line.len())..end.min(line.len())];
-    let geometry = LineGeometry::new_with_font_runs(
+    let fonts = editor_font_runs_for_display_fragment(
         fragment,
-        layout.metrics,
-        renderer,
-        visual_offset,
-        decorations.settings.indent_width,
-        &editor_font_runs_for_display_fragment(
-            fragment,
-            context,
-            display_position.line,
-            start,
-            viewport,
-        ),
-        fold_needs_measured_geometry(display_position.line, viewport, decorations),
+        context,
+        display_position.line,
+        start,
+        viewport,
     );
+    let measure_ascii = fold_needs_measured_geometry(display_position.line, viewport, decorations);
+    let uncached;
+    let geometry = if let Some(cache) = cache {
+        cache.ensure_capacity(layout.visible_row_capacity());
+        let slot = cache.ensure(
+            visible_row,
+            visual_offset,
+            fragment,
+            layout.metrics,
+            renderer,
+            context.and_then(|context| context.language_for_line(display_position.line)),
+            decorations.settings.indent_width,
+            &fonts,
+            measure_ascii,
+        );
+        cache.geometry(slot).expect("cached caret geometry")
+    } else {
+        uncached = LineGeometry::new_with_font_runs(
+            fragment,
+            layout.metrics,
+            renderer,
+            visual_offset,
+            decorations.settings.indent_width,
+            &fonts,
+            measure_ascii,
+        );
+        &uncached
+    };
 
     Point::new(
         measured_caret_x(
-            &geometry,
+            geometry,
             display_position.column.saturating_sub(start),
             layout,
             decorations,
@@ -849,6 +928,307 @@ mod tests {
     use crate::editor::decoration::DecorationSettings;
     use crate::editor::fold::FoldModel;
     use crate::editor::layout::ScrollOffset;
+
+    #[test]
+    fn cached_caret_geometry_survives_scroll_reversal_and_repositions_ime() {
+        let buffer = EditorBuffer::from_text("caf\u{e9}\t漢字\n".repeat(40));
+        let context = CjkContext::from_buffer(&buffer);
+        let folds = FoldModel::default();
+        let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);
+        let decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            &folds,
+            vec![],
+        );
+        let mut cache = LineGeometryCache::<()>::default();
+        let position = EditorPosition::new(8, "caf\u{e9}\t漢".len());
+        let mut positions = Vec::new();
+        for first_visible_row in [0, 4, 8, 12, 8, 4, 0] {
+            for horizontal_px in [0.0, 18.0, 0.0] {
+                let layout = EditorLayout::new(
+                    EditorMetrics::default(),
+                    ScrollOffset {
+                        first_visible_row,
+                        horizontal_px,
+                    },
+                    320.0,
+                    150.0,
+                );
+                let actual = measured_position_point_with_cache(
+                    &buffer,
+                    &viewport,
+                    &decorations,
+                    layout,
+                    position,
+                    None,
+                    &(),
+                    Some(&context),
+                    &mut cache,
+                );
+                assert_eq!(
+                    actual,
+                    measured_position_point_with_context(
+                        &buffer,
+                        &viewport,
+                        &decorations,
+                        layout,
+                        position,
+                        None,
+                        &(),
+                        Some(&context)
+                    )
+                );
+                positions.push(actual);
+            }
+        }
+        assert_ne!(
+            positions[0].x, positions[1].x,
+            "horizontal scroll updates IME coordinates"
+        );
+        assert_ne!(
+            positions[0].y, positions[3].y,
+            "vertical scroll updates IME coordinates"
+        );
+        assert_eq!(
+            positions.first(),
+            positions.last(),
+            "reversal restores the original position"
+        );
+        assert_eq!(
+            cache.build_count(),
+            1,
+            "caret shaping is retained across scroll-only updates"
+        );
+        assert!(
+            matches!(
+                cache.geometry(cache.slot_for_row(8)),
+                Some(LineGeometry::Measured { .. })
+            ),
+            "exercise measured Unicode/tab geometry, not the ASCII fast path"
+        );
+    }
+
+    #[test]
+    fn cached_caret_geometry_preserves_wrap_affinity_and_reflow() {
+        let buffer = EditorBuffer::from_text("abcdefghij\n漢字かな");
+        let folds = FoldModel::default();
+        let context = CjkContext::from_buffer(&buffer);
+        let mut viewport = ViewportModel::new_wrapped(&buffer, &folds, 4, 4);
+        let decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            &folds,
+            vec![],
+        );
+        let layout = EditorLayout::new(
+            EditorMetrics::default(),
+            ScrollOffset {
+                first_visible_row: 0,
+                horizontal_px: 80.0,
+            },
+            320.0,
+            150.0,
+        );
+        let position = EditorPosition::new(0, 4);
+        let mut cache = LineGeometryCache::<()>::default();
+        let mut upstream = None;
+        for affinity in [Some(0), None, Some(0), None] {
+            let actual = measured_position_point_with_cache(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                position,
+                affinity,
+                &(),
+                Some(&context),
+                &mut cache,
+            );
+            assert_eq!(
+                actual,
+                measured_position_point_with_context(
+                    &buffer,
+                    &viewport,
+                    &decorations,
+                    layout,
+                    position,
+                    affinity,
+                    &(),
+                    Some(&context)
+                )
+            );
+            if affinity.is_some() {
+                upstream = Some(actual);
+            } else {
+                assert!(actual.y > upstream.unwrap().y);
+                assert!(actual.x < upstream.unwrap().x);
+            }
+        }
+        assert_eq!(
+            cache.build_count(),
+            2,
+            "wrapped fragments retain separate geometry"
+        );
+        viewport = ViewportModel::new_wrapped(&buffer, &folds, 6, 4);
+        let actual = measured_position_point_with_cache(
+            &buffer,
+            &viewport,
+            &decorations,
+            layout,
+            position,
+            None,
+            &(),
+            Some(&context),
+            &mut cache,
+        );
+        assert_eq!(
+            actual,
+            measured_position_point_with_context(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                position,
+                None,
+                &(),
+                Some(&context)
+            )
+        );
+        assert_eq!(
+            cache.build_count(),
+            3,
+            "reflow changes fragment text and geometry"
+        );
+    }
+
+    #[test]
+    fn cached_caret_geometry_invalidates_text_metrics_tabs_context_and_fonts() {
+        let mut buffer = EditorBuffer::from_text("漢字");
+        let folds = FoldModel::default();
+        let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);
+        let mut decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            &folds,
+            vec![],
+        );
+        let japanese = CjkContext::from_buffer(&EditorBuffer::from_text("かな漢字"));
+        let korean = CjkContext::from_buffer(&EditorBuffer::from_text("한글漢字"));
+        assert_ne!(japanese.language_for_line(0), korean.language_for_line(0));
+        let mut layout =
+            EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 320.0, 150.0);
+        let position = EditorPosition::new(0, "漢".len());
+        let mut cache = LineGeometryCache::<()>::default();
+        let check = |cache: &mut LineGeometryCache<()>,
+                     buffer: &EditorBuffer,
+                     decorations: &DecorationModel,
+                     layout: EditorLayout,
+                     context: &CjkContext| {
+            let actual = measured_position_point_with_cache(
+                buffer,
+                &viewport,
+                decorations,
+                layout,
+                position,
+                None,
+                &(),
+                Some(context),
+                cache,
+            );
+            assert_eq!(
+                actual,
+                measured_position_point_with_context(
+                    buffer,
+                    &viewport,
+                    decorations,
+                    layout,
+                    position,
+                    None,
+                    &(),
+                    Some(context)
+                )
+            );
+        };
+        check(&mut cache, &buffer, &decorations, layout, &japanese);
+        check(&mut cache, &buffer, &decorations, layout, &japanese);
+        assert_eq!(cache.build_count(), 1);
+        check(&mut cache, &buffer, &decorations, layout, &korean);
+        assert_eq!(
+            cache.build_count(),
+            2,
+            "same Han text must respect changed logical language context"
+        );
+        buffer = EditorBuffer::from_text("漢語");
+        check(&mut cache, &buffer, &decorations, layout, &korean);
+        assert_eq!(cache.build_count(), 3);
+        layout.metrics.character_width += 2.0;
+        check(&mut cache, &buffer, &decorations, layout, &korean);
+        assert_eq!(cache.build_count(), 4);
+        decorations.settings.indent_width = 8;
+        check(&mut cache, &buffer, &decorations, layout, &korean);
+        assert_eq!(cache.build_count(), 5);
+        // An owned font load always advances the generation, even when this
+        // bundled face was previously loaded from a borrowed static address.
+        iced::advanced::graphics::text::font_system()
+            .write()
+            .unwrap()
+            .load_font(std::borrow::Cow::Owned(
+                include_bytes!("../../../vendor/iced/graphics/fonts/Iced-Icons.ttf").to_vec(),
+            ));
+        check(&mut cache, &buffer, &decorations, layout, &korean);
+        assert_eq!(
+            cache.build_count(),
+            6,
+            "loaded-font generation invalidates cached geometry"
+        );
+    }
+
+    #[test]
+    fn geometry_cache_growth_and_smaller_pages_retain_recent_rows() {
+        let mut cache = LineGeometryCache::<()>::default();
+        let metrics = EditorMetrics::default();
+        cache.ensure_capacity(37);
+        let rows = [0, 127, 255, 257];
+        for row in rows {
+            cache.ensure(
+                row,
+                0,
+                &format!("row {row}"),
+                metrics,
+                &(),
+                None,
+                4,
+                &[],
+                false,
+            );
+        }
+        assert_eq!(cache.build_count(), rows.len());
+        // Crossing a capacity boundary must rehash, not discard, retained rows.
+        // Short pages after scrolling to the end must not shrink the cache again.
+        for page_rows in [256, 37, 2, 0, 256] {
+            cache.ensure_capacity(page_rows);
+            for row in rows.into_iter().rev() {
+                let slot = cache.ensure(
+                    row,
+                    0,
+                    &format!("row {row}"),
+                    metrics,
+                    &(),
+                    None,
+                    4,
+                    &[],
+                    false,
+                );
+                assert_eq!(cache.entries[slot].as_ref().unwrap().visible_row, row);
+            }
+        }
+        assert_eq!(
+            cache.build_count(),
+            rows.len(),
+            "resize and scroll reversal preserve cached paragraphs"
+        );
+    }
 
     #[test]
     fn wrapped_fragment_geometry_preserves_logical_tab_stops() {

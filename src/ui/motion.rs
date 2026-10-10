@@ -2,6 +2,7 @@
 
 use std::time::{Duration, Instant};
 
+use iced::advanced::text::Renderer as _;
 use iced::advanced::widget::{self, Tree, tree};
 use iced::advanced::{Layout, Renderer as _, Shell, Widget, layout, mouse, overlay, renderer};
 use iced::{Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, window};
@@ -456,6 +457,72 @@ impl<'a> Motion<'a> {
             reveal: None,
         }
     }
+
+    fn layout_child(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        // Local entrances and disclosures relayout the surrounding tree every
+        // frame. Their child's constraints stay fixed while only its offset or
+        // visible height changes. Reuse that untransformed layout; external
+        // fades still reconcile their child normally on every app update.
+        let local_animation = self.reveal.is_some()
+            || (self.fade.is_none() && self.external_progress.is_none() && self.distance != 0.0);
+        if !local_animation {
+            return self
+                .content
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, limits);
+        }
+
+        let context = ChildLayoutContext::new(renderer, *limits);
+        if let Some(cached) = &tree.state.downcast_ref::<State>().child_layout
+            && cached.context == context
+        {
+            return cached.node.clone();
+        }
+
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        tree.state.downcast_mut::<State>().child_layout = Some(ChildLayout {
+            context,
+            node: node.clone(),
+        });
+        node
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct ChildLayoutContext {
+    limits: layout::Limits,
+    scale_factor: Option<f32>,
+    font_version: iced::advanced::graphics::text::Version,
+    default_font: iced::Font,
+    default_size: iced::Pixels,
+}
+
+impl ChildLayoutContext {
+    fn new(renderer: &Renderer, limits: layout::Limits) -> Self {
+        Self {
+            limits,
+            scale_factor: renderer.scale_factor(),
+            font_version: iced::advanced::graphics::text::font_system()
+                .read()
+                .expect("Read font system")
+                .version(),
+            default_font: renderer.default_font(),
+            default_size: renderer.default_size(),
+        }
+    }
+}
+
+struct ChildLayout {
+    context: ChildLayoutContext,
+    node: layout::Node,
 }
 
 struct State {
@@ -464,6 +531,7 @@ struct State {
     progress: f32,
     reveal_target: bool,
     reveal_from: f32,
+    child_layout: Option<ChildLayout>,
 }
 
 impl Widget<Message, Theme, Renderer> for Motion<'_> {
@@ -478,11 +546,13 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             progress: if self.fade.is_some() { 1.0 } else { 0.0 },
             reveal_target: self.reveal.is_some_and(|(expanded, _)| expanded),
             reveal_from: 0.0,
+            child_layout: None,
         })
     }
 
     fn diff(&mut self, tree: &mut Tree) {
         let state = tree.state.downcast_mut::<State>();
+        state.child_layout = None;
         if state.key != self.key {
             state.key.clone_from(&self.key);
             state.started = None;
@@ -513,7 +583,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         limits: &layout::Limits,
     ) -> layout::Node {
         if self.reveal.is_some() {
-            // Measure the complete child on every frame. Clipping its paint,
+            // Keep the complete child layout on every frame. Clipping its paint,
             // rather than compressing its own layout, keeps caret and hit-test
             // geometry stable throughout the disclosure.
             let child_limits = layout::Limits::with_compression(
@@ -521,10 +591,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
                 limits.max(),
                 limits.compression(),
             );
-            let content =
-                self.content
-                    .as_widget_mut()
-                    .layout(&mut tree.children[0], renderer, &child_limits);
+            let content = self.layout_child(tree, renderer, &child_limits);
             let size = Size::new(
                 content.size().width,
                 content.size().height * tree.state.downcast_ref::<State>().progress,
@@ -536,10 +603,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             |progress| 1.0 - progress,
         );
         let offset = self.distance * remaining;
-        let content = self
-            .content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits);
+        let content = self.layout_child(tree, renderer, limits);
         // Move the actual child layout so touch, mouse, keyboard operations and
         // nested overlays all agree with the visible bounds throughout motion.
         layout::Node::with_children(
@@ -616,15 +680,27 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
             cursor
         };
 
+        let mut messages = Vec::new();
+        let mut child_shell = shell.local(&mut messages);
+        if shell.is_event_captured() {
+            child_shell.capture_event();
+        }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
             layout.child(0),
             cursor,
             renderer,
-            shell,
+            &mut child_shell,
             clipped_viewport.as_ref().unwrap_or(viewport),
         );
+        if !matches!(event, Event::Window(window::Event::RedrawRequested(_)))
+            || child_shell.is_layout_invalid().is_some()
+            || child_shell.are_widgets_invalid()
+        {
+            tree.state.downcast_mut::<State>().child_layout = None;
+        }
+        shell.merge(child_shell, std::convert::identity);
     }
 
     fn draw(
@@ -695,6 +771,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         renderer: &Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        tree.state.downcast_mut::<State>().child_layout = None;
         if self.reveal.is_some_and(|(expanded, _)| !expanded) {
             // Collapsed fields retain their tree and editing state, but stay
             // out of focus traversal and cannot retain an invisible caret.
@@ -749,13 +826,19 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         if !self.interactive || self.reveal.is_some_and(|(expanded, _)| !expanded) {
             return None;
         }
-        self.content.as_widget_mut().overlay(
+        let overlay = self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout.child(0),
             renderer,
             viewport,
             translation,
-        )
+        );
+        // An overlay can mutate child state through its separate update path.
+        // Keep ordinary layout behavior while such an overlay is mounted.
+        if overlay.is_some() {
+            tree.state.downcast_mut::<State>().child_layout = None;
+        }
+        overlay
     }
 }
 
@@ -767,6 +850,8 @@ mod tests {
     use iced::advanced::widget::operation::{self, Operation, Outcome, focusable};
     use iced::widget::{Space, button, container, text_input};
     use iced::{Fill, Point};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     const VIEWPORT: Rectangle = Rectangle {
         x: 0.0,
@@ -825,6 +910,283 @@ mod tests {
         );
         let redraw = shell.redraw_request();
         (redraw, messages)
+    }
+
+    struct LayoutProbe {
+        content: Element<'static, Message>,
+        calls: Rc<Cell<usize>>,
+        invalidate_next_frame: Rc<Cell<bool>>,
+    }
+
+    impl Widget<Message, Theme, Renderer> for LayoutProbe {
+        fn size(&self) -> Size<Length> {
+            self.content.as_widget().size()
+        }
+
+        fn diff(&mut self, tree: &mut Tree) {
+            tree.diff_children(std::slice::from_mut(&mut self.content));
+        }
+
+        fn layout(
+            &mut self,
+            tree: &mut Tree,
+            renderer: &Renderer,
+            limits: &layout::Limits,
+        ) -> layout::Node {
+            self.calls.set(self.calls.get() + 1);
+            self.content
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, limits)
+        }
+
+        fn draw(
+            &self,
+            tree: &Tree,
+            renderer: &mut Renderer,
+            theme: &Theme,
+            style: &renderer::Style,
+            layout: Layout<'_>,
+            cursor: mouse::Cursor,
+            viewport: &Rectangle,
+        ) {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                viewport,
+            );
+        }
+
+        fn update(
+            &mut self,
+            tree: &mut Tree,
+            event: &Event,
+            layout: Layout<'_>,
+            cursor: mouse::Cursor,
+            renderer: &Renderer,
+            shell: &mut Shell<'_, Message>,
+            viewport: &Rectangle,
+        ) {
+            if matches!(event, Event::Window(window::Event::RedrawRequested(_)))
+                && self.invalidate_next_frame.replace(false)
+            {
+                shell.invalidate_layout();
+            }
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
+                event,
+                layout,
+                cursor,
+                renderer,
+                shell,
+                viewport,
+            );
+        }
+
+        fn operate(
+            &mut self,
+            tree: &mut Tree,
+            layout: Layout<'_>,
+            renderer: &Renderer,
+            operation: &mut dyn widget::Operation,
+        ) {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                operation,
+            );
+        }
+    }
+
+    fn measured_child(
+        calls: &Rc<Cell<usize>>,
+        invalidate_next_frame: &Rc<Cell<bool>>,
+    ) -> Element<'static, Message> {
+        Element::new(LayoutProbe {
+            content: button(Space::new().width(Fill).height(40))
+                .padding(0)
+                .width(Fill)
+                .on_press(Message::None)
+                .into(),
+            calls: calls.clone(),
+            invalidate_next_frame: invalidate_next_frame.clone(),
+        })
+    }
+
+    #[test]
+    fn local_entrance_reuses_child_layout_while_visible_and_click_bounds_move() {
+        let renderer = renderer();
+        let calls = Rc::new(Cell::new(0));
+        let invalidate = Rc::new(Cell::new(false));
+        let mut content = popup(measured_child(&calls, &invalidate));
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        let started = Instant::now();
+        let mut previous_y = Layout::new(&node).child(0).bounds().y;
+        assert_eq!(previous_y, 8.0);
+        for index in 0..=10 {
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    started + ENTRANCE_DURATION * index / 10,
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            node = relayout(&mut content, &mut tree, &renderer);
+            let y = Layout::new(&node).child(0).bounds().y;
+            assert!(y <= previous_y);
+            previous_y = y;
+        }
+        assert_eq!(previous_y, 0.0);
+        assert_eq!(calls.get(), 1, "twelve child layouts become one");
+
+        let point = Point::new(20.0, 20.0);
+        let mut messages = Vec::new();
+        for event in [
+            mouse::Event::ButtonPressed(mouse::Button::Left),
+            mouse::Event::ButtonReleased(mouse::Button::Left),
+        ] {
+            messages.extend(
+                dispatch(
+                    &mut content,
+                    &mut tree,
+                    &node,
+                    &renderer,
+                    Event::Mouse(event),
+                    mouse::Cursor::Available(point),
+                )
+                .1,
+            );
+        }
+        assert!(matches!(messages.as_slice(), [Message::None]));
+    }
+
+    #[test]
+    fn local_disclosure_reuses_intrinsic_child_layout_while_height_changes() {
+        let renderer = renderer();
+        let calls = Rc::new(Cell::new(0));
+        let invalidate = Rc::new(Cell::new(false));
+        let mut content = reveal(measured_child(&calls, &invalidate), true, |_| Color::WHITE);
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        let started = Instant::now();
+        assert_eq!(node.size().height, 0.0);
+        let mut previous_height = 0.0;
+        for index in 0..=10 {
+            dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    started + REVEAL_DURATION * index / 10,
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            node = relayout(&mut content, &mut tree, &renderer);
+            assert!(node.size().height >= previous_height);
+            assert_eq!(Layout::new(&node).child(0).bounds().height, 40.0);
+            previous_height = node.size().height;
+        }
+        assert_eq!(previous_height, 40.0);
+        assert_eq!(calls.get(), 1, "clip height does not remeasure the child");
+    }
+
+    #[test]
+    fn motion_child_layout_refreshes_for_diff_child_requests_operations_and_limits() {
+        let renderer = renderer();
+        let calls = Rc::new(Cell::new(0));
+        let invalidate = Rc::new(Cell::new(false));
+        let mut content = popup(measured_child(&calls, &invalidate));
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        let started = Instant::now();
+        invalidate.set(true);
+        dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(started)),
+            mouse::Cursor::Unavailable,
+        );
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(
+            calls.get(),
+            2,
+            "child invalidation reaches the cached layout"
+        );
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 2);
+
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut focusable::unfocus::<()>(),
+        );
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 3);
+
+        tree.diff(content.as_widget_mut());
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 4);
+
+        let narrower = layout::Limits::new(Size::ZERO, Size::new(200.0, 180.0));
+        node = content
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &narrower);
+        assert_eq!(calls.get(), 5);
+        assert_eq!(node.size().width, 200.0);
+    }
+
+    #[test]
+    fn motion_child_layout_refreshes_for_renderer_defaults_and_font_version() {
+        let renderer = renderer();
+        let calls = Rc::new(Cell::new(0));
+        let invalidate = Rc::new(Cell::new(false));
+        let mut content = popup(measured_child(&calls, &invalidate));
+        let (mut tree, _) = mount(&mut content, &renderer);
+
+        // Simulate prior contexts without requiring a GPU or changing the
+        // machine's fonts. The live renderer must replace each stale context.
+        let state = tree.state.downcast_mut::<State>();
+        state.child_layout.as_mut().unwrap().context.scale_factor = Some(2.0);
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 2);
+        tree.state
+            .downcast_mut::<State>()
+            .child_layout
+            .as_mut()
+            .unwrap()
+            .context
+            .default_size = iced::Pixels(1.0);
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 3);
+        tree.state
+            .downcast_mut::<State>()
+            .child_layout
+            .as_mut()
+            .unwrap()
+            .context
+            .default_font = iced::Font::MONOSPACE;
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 4);
+
+        // Owned bytes always advance the global version, even when the font
+        // was already registered by another renderer in this process.
+        iced::advanced::graphics::text::font_system()
+            .write()
+            .expect("Write font system")
+            .load_font(std::borrow::Cow::Owned(
+                include_bytes!("../../vendor/iced/graphics/fonts/Iced-Icons.ttf").to_vec(),
+            ));
+        let _ = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(calls.get(), 5);
     }
 
     #[test]

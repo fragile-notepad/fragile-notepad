@@ -266,6 +266,14 @@ impl State {
             self.statistics.direct_frames += 1;
             return None;
         }
+        if self.heuristics && broad_damage(always_dirty_region(layers, viewport), size) {
+            // Live editor text and large opaque primitives already guarantee
+            // broad repainting. Avoid allocating/comparing a scene snapshot
+            // only to choose the direct path. Quiet frames can capture afresh.
+            self.discard();
+            self.statistics.direct_frames += 1;
+            return None;
+        }
         let fonts = graphics::text::font_system()
             .read()
             .expect("Read font system")
@@ -294,15 +302,7 @@ impl State {
         let context_changed = self.size.is_some() && !stable_context;
         let broad = self.heuristics
             && ((context_changed && self.context_changed_last_frame)
-                || (stable_context
-                    && match changes {
-                        Damage::Full => true,
-                        Damage::Partial(bounds) => {
-                            u64::from(bounds.width) * u64::from(bounds.height)
-                                > u64::from(size.width) * u64::from(size.height) / 2
-                        }
-                        Damage::Reuse => false,
-                    }));
+                || (stable_context && broad_damage(changes, size)));
         self.context_changed_last_frame = context_changed;
         let damage = if full { Damage::Full } else { changes };
         self.last_snapshot = snapshot;
@@ -382,6 +382,49 @@ impl State {
         self.pending = false;
         self.context_changed_last_frame = false;
     }
+}
+
+fn broad_damage(damage: Damage, size: Size<u32>) -> bool {
+    match damage {
+        Damage::Full => true,
+        Damage::Partial(bounds) => {
+            u64::from(bounds.width) * u64::from(bounds.height)
+                > u64::from(size.width) * u64::from(size.height) / 2
+        }
+        Damage::Reuse => false,
+    }
+}
+
+fn always_dirty_region(layers: &layer::Stack, viewport: &Viewport) -> Damage {
+    let mut region = Region::new(viewport);
+    for layer in layers.iter().filter(|layer| !layer.is_empty()) {
+        for primitive in &layer.primitives {
+            region.add_clipped(primitive.bounds, layer.bounds);
+        }
+        if !layer.triangles.is_empty() {
+            region.add(layer.bounds);
+        }
+        for item in &layer.text {
+            match item {
+                text::Item::Group {
+                    transformation,
+                    text,
+                } => {
+                    for text in text {
+                        if matches!(
+                            text,
+                            graphics::Text::Editor { .. } | graphics::Text::Raw { .. }
+                        ) {
+                            region.add_text(text, *transformation, layer.bounds);
+                        }
+                    }
+                }
+                text::Item::Cached { cache, .. } if cache.is_dynamic() => region.add(layer.bounds),
+                _ => {}
+            }
+        }
+    }
+    region.finish(viewport)
 }
 
 fn worth_retaining(layers: &layer::Stack) -> bool {

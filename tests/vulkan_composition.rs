@@ -1033,3 +1033,55 @@ fn partial_clear_uses_the_background_that_settled_after_direct_frames() {
         }
     }
 }
+
+#[test]
+fn broad_live_text_bypasses_snapshots_and_quiet_paint_resumes_reuse() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new(wgpu::TextureFormat::Rgba8Unorm, None) else {
+        return;
+    };
+    let mut adaptive = iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
+    let mut direct = gpu.renderer(false);
+    for frame in 0..6 {
+        let viewport = begin(&mut adaptive, SIZE, 1.0);
+        begin(&mut direct, SIZE, 1.0);
+        for renderer in [&mut adaptive, &mut direct] {
+            for column in 0..32 {
+                fill(
+                    renderer,
+                    rect(column as f32 * 3.0, 60.0, 2.0, 2.0),
+                    Color::WHITE,
+                );
+            }
+            if frame < 4 {
+                simple_scene(renderer, frame % 2 == 1);
+                iced_wgpu::graphics::text::Renderer::fill_raw(
+                    renderer,
+                    iced_wgpu::graphics::text::Raw {
+                        buffer: std::sync::Weak::new(),
+                        position: Point::ORIGIN,
+                        color: Color::WHITE,
+                        clip_bounds: Rectangle::INFINITE,
+                    },
+                );
+            }
+        }
+        let before = adaptive.composition_cache_statistics();
+        assert_pixels(
+            &adaptive.screenshot(&viewport, Color::BLACK),
+            &direct.screenshot(&viewport, Color::BLACK),
+            SIZE,
+            "broad live text bypass and settled retention",
+        );
+        let after = adaptive.composition_cache_statistics();
+        match frame {
+            0..4 => {
+                assert_eq!(after.direct_frames, before.direct_frames + 1);
+                assert_eq!(after.bytes, 0);
+                assert_eq!(after.full_repaints, 0);
+            }
+            4 => assert_eq!(after.full_repaints, 1),
+            _ => assert_reused(before, after),
+        }
+    }
+}

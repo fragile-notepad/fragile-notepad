@@ -38,6 +38,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 - Retain a bounded final frame, repaint conservative scene damage, and copy
   completed pixels to each acquired target without relying on swapchain history.
   Sparse scenes and broad damage draw directly to avoid extra copy bandwidth.
+  Broad live text and primitives skip unnecessary scene snapshot construction.
 - Repeatedly invalidated surfaces paint live during scrolling and fades, then
   refresh once their paint keys and geometry settle.
 - Software-first handoff with offscreen warm-up, presentation checks, and rollback.

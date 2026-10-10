@@ -139,8 +139,7 @@ fn default_volatile_layers_draw_latest_pixels_then_refresh_and_hit_when_stable()
     let _guard = lock_vulkan_test();
     let Some(gpu) = Gpu::new() else { return };
     // Construct directly so the new policy keeps its default enabled value.
-    let mut cached =
-        iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
+    let mut cached = iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
     let mut direct = gpu.renderer();
     // Isolate layer retention from the independent final-frame policy.
     cached.set_composition_cache_budget(0);
@@ -193,13 +192,26 @@ fn default_volatile_layers_draw_latest_pixels_then_refresh_and_hit_when_stable()
         let actual = cached.screenshot(&viewport, Color::BLACK);
         let expected = direct.screenshot(&viewport, Color::BLACK);
         assert_pixels_match(&actual, &expected, &format!("volatile layer frame {frame}"));
-        assert!(pixel(&actual, x as u32 + 4, 12)[0] > 0, "latest layer paint missing");
+        assert!(
+            pixel(&actual, x as u32 + 4, 12)[0] > 0,
+            "latest layer paint missing"
+        );
         if x > 8.0 {
-            assert_eq!(pixel(&actual, 10, 10), [0, 0, 255, 255], "old position retained");
+            assert_eq!(
+                pixel(&actual, 10, 10),
+                [0, 0, 255, 255],
+                "old position retained"
+            );
         }
         let statistics = cached.raster_cache_statistics();
-        assert_eq!(statistics.rasterizations, [1, 1, 2, 2, 2, 2, 3, 3, 3][frame]);
-        assert_eq!(statistics.volatile_fallbacks, [0, 0, 0, 1, 2, 3, 3, 3, 3][frame]);
+        assert_eq!(
+            statistics.rasterizations,
+            [1, 1, 2, 2, 2, 2, 3, 3, 3][frame]
+        );
+        assert_eq!(
+            statistics.volatile_fallbacks,
+            [0, 0, 0, 1, 2, 3, 3, 3, 3][frame]
+        );
         assert_eq!(statistics.hits, [0, 1, 1, 1, 1, 1, 1, 2, 3][frame]);
         assert_eq!(calls.get(), [1, 1, 2, 3, 4, 5, 6, 6, 6][frame]);
         assert!(statistics.bytes <= DEFAULT_BUDGET);

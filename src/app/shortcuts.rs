@@ -282,20 +282,27 @@ pub fn event_to_message(event: Event, status: Status, window_id: window::Id) -> 
 }
 
 fn should_forward_runtime_event(event: &Event, status: Status) -> bool {
-    status == Status::Ignored
-        || matches!(
-            event,
-            Event::Keyboard(keyboard::Event::ModifiersChanged(_))
-                | Event::Keyboard(keyboard::Event::KeyPressed {
-                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                    ..
-                })
-                | Event::Mouse(mouse::Event::WheelScrolled { .. })
-                | Event::Window(window::Event::FileDropped(_))
-                | Event::Window(
-                    window::Event::Focused | window::Event::Unfocused | window::Event::Resized(_)
-                )
-        )
+    // The runtime already delivers every event to widgets. Only subscribe to
+    // events handled by update_runtime_event: even a no-op application message
+    // rebuilds every window's view. In particular, native movement and plain
+    // pointer motion must not invalidate the editor's paint and layout caches.
+    // Opening and closing use their own tasks/subscriptions; window geometry
+    // and scale are maintained by the runtime, not application settings.
+    match event {
+        Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
+            status == Status::Ignored || *key == keyboard::Key::Named(keyboard::key::Named::Escape)
+        }
+        Event::Keyboard(keyboard::Event::ModifiersChanged(_))
+        | Event::Mouse(mouse::Event::WheelScrolled { .. })
+        | Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+        | Event::Window(
+            window::Event::Focused
+            | window::Event::Unfocused
+            | window::Event::Resized(_)
+            | window::Event::FileDropped(_),
+        ) => true,
+        _ => false,
+    }
 }
 
 fn shortcut_for_scroll(delta: mouse::ScrollDelta) -> Option<ShortcutCommand> {
@@ -430,6 +437,139 @@ mod tests {
             &captured_key,
             iced::event::Status::Captured
         ));
+    }
+
+    #[test]
+    fn native_movement_and_widget_only_events_do_not_rebuild_application_views() {
+        use iced::advanced::graphics::core::{input_method, touch};
+        use iced::{Point, Size};
+
+        let id = window::Id::unique();
+        let events = [
+            Event::Window(window::Event::Moved(Point::new(100.0, 200.0))),
+            Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(40.0, 60.0),
+            }),
+            Event::Mouse(mouse::Event::CursorEntered),
+            Event::Mouse(mouse::Event::CursorLeft),
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            Event::Touch(touch::Event::FingerMoved {
+                id: touch::Finger(1),
+                position: Point::new(40.0, 60.0),
+            }),
+            Event::InputMethod(input_method::Event::Opened),
+            Event::Waken,
+            // These have dedicated window tasks/subscriptions or runtime state.
+            Event::Window(window::Event::Opened {
+                position: Some(Point::ORIGIN),
+                size: Size::new(800.0, 600.0),
+                scale_factor: 1.0,
+            }),
+            Event::Window(window::Event::CloseRequested),
+            Event::Window(window::Event::Closed),
+            Event::Window(window::Event::Rescaled(1.5)),
+            Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+                modified_key: keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+                physical_key: keyboard::key::Physical::Unidentified(
+                    keyboard::key::NativeCode::Unidentified,
+                ),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::empty(),
+            }),
+        ];
+        for event in events {
+            for status in [iced::event::Status::Ignored, iced::event::Status::Captured] {
+                assert!(
+                    event_to_message(event.clone(), status, id).is_none(),
+                    "widget-only event must not produce an app message: {event:?} ({status:?})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_filter_preserves_handled_events_status_and_window_identity() {
+        use iced::Size;
+
+        let id = window::Id::unique();
+        let events = [
+            Event::Window(window::Event::Focused),
+            Event::Window(window::Event::Unfocused),
+            Event::Window(window::Event::Resized(Size::new(960.0, 720.0))),
+            Event::Window(window::Event::FileDropped(PathBuf::from("dropped.txt"))),
+            Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::CTRL)),
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -16.0 },
+            }),
+            // A captured release must still clear the application's tab drag.
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ];
+        for event in events {
+            for status in [iced::event::Status::Ignored, iced::event::Status::Captured] {
+                assert!(matches!(
+                    event_to_message(event.clone(), status, id),
+                    Some(Message::RuntimeEvent(forwarded, forwarded_status, forwarded_id))
+                        if forwarded == event && forwarded_status == status && forwarded_id == id
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_filter_preserves_shortcuts_and_captured_escape() {
+        use iced::event::Status;
+        use keyboard::key::Named;
+
+        let id = window::Id::unique();
+        for key in [Named::ArrowDown, Named::F3, Named::Enter, Named::Tab] {
+            let event = search_key(key, keyboard::Modifiers::empty());
+            assert!(event_to_message(event.clone(), Status::Ignored, id).is_some());
+            assert!(event_to_message(event, Status::Captured, id).is_none());
+        }
+        let escape = search_key(Named::Escape, keyboard::Modifiers::empty());
+        assert!(event_to_message(escape.clone(), Status::Ignored, id).is_some());
+        assert!(event_to_message(escape, Status::Captured, id).is_some());
+    }
+
+    #[test]
+    fn runtime_filter_keeps_input_order_between_native_move_notifications() {
+        use iced::Point;
+        use iced::event::Status;
+
+        let id = window::Id::unique();
+        let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        });
+        let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        let events = vec![
+            Event::Window(window::Event::Moved(Point::new(0.0, 0.0))),
+            wheel.clone(),
+            Event::Window(window::Event::Moved(Point::new(10.0, 10.0))),
+            Event::Window(window::Event::Focused),
+            Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(40.0, 60.0),
+            }),
+            release.clone(),
+        ];
+        let forwarded: Vec<_> = events
+            .into_iter()
+            .filter_map(|event| event_to_message(event, Status::Ignored, id))
+            .map(|message| {
+                let Message::RuntimeEvent(event, status, window) = message else {
+                    panic!("unexpected message")
+                };
+                assert_eq!(status, Status::Ignored);
+                assert_eq!(window, id);
+                event
+            })
+            .collect();
+        assert_eq!(
+            forwarded,
+            vec![wheel, Event::Window(window::Event::Focused), release],
+        );
     }
 
     #[test]

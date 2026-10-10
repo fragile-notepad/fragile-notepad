@@ -1019,6 +1019,7 @@ mod tests {
 
     #[test]
     fn local_entrance_reuses_child_layout_while_visible_and_click_bounds_move() {
+        let _font_guard = crate::font_system_test_guard();
         let renderer = renderer();
         let calls = Rc::new(Cell::new(0));
         let invalidate = Rc::new(Cell::new(false));
@@ -1069,6 +1070,7 @@ mod tests {
 
     #[test]
     fn local_disclosure_reuses_intrinsic_child_layout_while_height_changes() {
+        let _font_guard = crate::font_system_test_guard();
         let renderer = renderer();
         let calls = Rc::new(Cell::new(0));
         let invalidate = Rc::new(Cell::new(false));
@@ -1099,6 +1101,7 @@ mod tests {
 
     #[test]
     fn motion_child_layout_refreshes_for_diff_child_requests_operations_and_limits() {
+        let _font_guard = crate::font_system_test_guard();
         let renderer = renderer();
         let calls = Rc::new(Cell::new(0));
         let invalidate = Rc::new(Cell::new(false));
@@ -1146,6 +1149,7 @@ mod tests {
 
     #[test]
     fn motion_child_layout_refreshes_for_renderer_defaults_and_font_version() {
+        let _font_guard = crate::font_system_test_guard();
         let renderer = renderer();
         let calls = Rc::new(Cell::new(0));
         let invalidate = Rc::new(Cell::new(false));

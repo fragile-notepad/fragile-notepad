@@ -1072,6 +1072,7 @@ mod tests {
 
     #[test]
     fn focused_redraws_retain_caret_shaping_and_update_ime_coordinates() {
+        let _font_guard = crate::font_system_test_guard();
         let mut editor = TestEditor::new("caf\u{e9}\t漢字\n".repeat(20).as_str());
         let cursor = EditorPosition::new(8, "caf\u{e9}\t漢".len());
         editor.selections = SelectionSet::new(EditorSelection::new(cursor, cursor));

@@ -813,6 +813,7 @@ fn span_key(line: usize) -> Vec<SyntaxSpanKey> {
 
 #[test]
 fn rich_paragraph_cache_reuses_page_rows_across_wheel_scroll_frames() {
+    let _font_guard = crate::font_system_test_guard();
     let mut cache = RichParagraphCache::default();
     let builds = Cell::new(0usize);
     let bounds = Size::new(360.0, 18.0);

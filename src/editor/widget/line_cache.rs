@@ -931,6 +931,7 @@ mod tests {
 
     #[test]
     fn cached_caret_geometry_survives_scroll_reversal_and_repositions_ime() {
+        let _font_guard = crate::font_system_test_guard();
         let buffer = EditorBuffer::from_text("caf\u{e9}\t漢字\n".repeat(40));
         let context = CjkContext::from_buffer(&buffer);
         let folds = FoldModel::default();
@@ -1011,6 +1012,7 @@ mod tests {
 
     #[test]
     fn cached_caret_geometry_preserves_wrap_affinity_and_reflow() {
+        let _font_guard = crate::font_system_test_guard();
         let buffer = EditorBuffer::from_text("abcdefghij\n漢字かな");
         let folds = FoldModel::default();
         let context = CjkContext::from_buffer(&buffer);
@@ -1104,6 +1106,7 @@ mod tests {
 
     #[test]
     fn cached_caret_geometry_invalidates_text_metrics_tabs_context_and_fonts() {
+        let _font_guard = crate::font_system_test_guard();
         let mut buffer = EditorBuffer::from_text("漢字");
         let folds = FoldModel::default();
         let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);
@@ -1186,6 +1189,7 @@ mod tests {
 
     #[test]
     fn geometry_cache_growth_and_smaller_pages_retain_recent_rows() {
+        let _font_guard = crate::font_system_test_guard();
         let mut cache = LineGeometryCache::<()>::default();
         let metrics = EditorMetrics::default();
         cache.ensure_capacity(37);
@@ -1243,6 +1247,7 @@ mod tests {
 
     #[test]
     fn wrapped_cache_keeps_fragments_of_same_line_separate_and_reflows_offsets() {
+        let _font_guard = crate::font_system_test_guard();
         let metrics = EditorMetrics::default();
         let mut cache = LineGeometryCache::<()>::default();
         cache.ensure_capacity(2);

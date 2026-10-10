@@ -10,6 +10,14 @@ const WIDTH: u32 = 256;
 const HEIGHT: u32 = 128;
 const CELLS: usize = 64 * 64;
 
+fn resource_renderer(engine: iced_wgpu::Engine) -> iced_wgpu::Renderer {
+    let mut renderer = iced_wgpu::Renderer::new(engine, renderer::Settings::default());
+    // These counters isolate image, quad, and mesh storage. Final-frame surface
+    // allocation and damage rendering have their own pixel/resource tests.
+    renderer.set_composition_cache_budget(0);
+    renderer
+}
+
 fn lock_vulkan_test() -> std::sync::MutexGuard<'static, ()> {
     // Serialize Vulkan device and image-worker lifetimes, including teardown.
     // The parallel suite has segfaulted under MoltenVK in macOS CI; keep these
@@ -54,7 +62,7 @@ fn vulkan_atlas_limits_spill_and_recover_without_losing_existing_images() {
         None,
         Shell::headless(),
     );
-    let mut renderer = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+    let mut renderer = resource_renderer(engine.clone());
     let rgba = |size: u32, color: [u8; 4]| {
         image::Handle::from_rgba(size, size, color.repeat((size * size) as usize))
     };
@@ -84,7 +92,7 @@ fn vulkan_atlas_limits_spill_and_recover_without_losing_existing_images() {
         "second full page must grow the shared texture, not spill due to leaked fragments"
     );
 
-    let mut icons = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+    let mut icons = resource_renderer(engine.clone());
     let icon_handles: Vec<_> = (0..12)
         .map(|index| rgba(96, [20 + index * 15, 80, 100, 255]))
         .collect();
@@ -250,8 +258,8 @@ fn vulkan_quad_buffers_grow_reuse_and_keep_windows_and_layers_independent() {
         None,
         Shell::headless(),
     );
-    let mut active = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
-    let mut idle = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+    let mut active = resource_renderer(engine.clone());
+    let mut idle = resource_renderer(engine.clone());
     let pipeline_count = || {
         instance
             .generate_report()
@@ -385,8 +393,8 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
                 .num_kept_from_user
         };
         let initial = pipelines();
-        let mut active = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
-        let mut other = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+        let mut active = resource_renderer(engine.clone());
+        let mut other = resource_renderer(engine.clone());
         let viewport = Viewport::with_physical_size(Size::new(WIDTH, HEIGHT), 1.0);
         record(&mut active, 1, false, false);
         active.screenshot(&viewport, Color::BLACK);
@@ -549,8 +557,8 @@ fn vulkan_image_storage_is_lazy_and_preserves_async_allocations_and_atlas_growth
         Shell::headless(),
     );
     let initial_textures = instance.generate_report().unwrap().hub.textures;
-    let mut renderer = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
-    let mut other = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+    let mut renderer = resource_renderer(engine.clone());
+    let mut other = resource_renderer(engine.clone());
     let pipeline_count = || {
         instance
             .generate_report()

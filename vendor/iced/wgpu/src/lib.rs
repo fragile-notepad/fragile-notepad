@@ -31,9 +31,12 @@ pub mod geometry;
 
 mod buffer;
 mod color;
+mod composition;
 mod engine;
 mod nudge;
 mod quad;
+mod raster;
+mod raster_cache;
 mod text;
 mod triangle;
 
@@ -53,9 +56,11 @@ pub use iced_graphics::core;
 
 pub use wgpu;
 
+pub use composition::Statistics as CompositionCacheStatistics;
 pub use engine::Engine;
 pub use layer::Layer;
 pub use primitive::Primitive;
+pub use raster_cache::Statistics as RasterCacheStatistics;
 
 #[cfg(feature = "geometry")]
 pub use geometry::Geometry;
@@ -82,13 +87,15 @@ pub struct Renderer {
     triangle: Option<triangle::State>,
     text: text::State,
     text_viewport: text::Viewport,
+    raster_cache: raster_cache::State,
+    composition: composition::State,
 
     #[cfg(any(feature = "svg", feature = "image"))]
     image: image::State,
 
     // TODO: Centralize all the image feature handling
     #[cfg(any(feature = "svg", feature = "image"))]
-    image_cache: std::cell::OnceCell<std::cell::RefCell<image::Cache>>,
+    image_cache: std::sync::Arc<std::sync::OnceLock<std::sync::Mutex<image::Cache>>>,
 
     staging_belt: wgpu::util::StagingBelt,
     offscreen_warm_up: Option<OffscreenWarmUp>,
@@ -146,12 +153,14 @@ impl Renderer {
             triangle: None,
             text: text::State::new(),
             text_viewport: engine.text_pipeline.create_viewport(&engine.device),
+            raster_cache: raster_cache::State::default(),
+            composition: composition::State::default(),
 
             #[cfg(any(feature = "svg", feature = "image"))]
             image: image::State::new(),
 
             #[cfg(any(feature = "svg", feature = "image"))]
-            image_cache: std::cell::OnceCell::new(),
+            image_cache: std::sync::Arc::new(std::sync::OnceLock::new()),
 
             // Small instance updates use a small chunk. The belt allocates
             // larger chunks on demand for writes up to MAX_WRITE_SIZE.
@@ -168,6 +177,32 @@ impl Renderer {
     /// Returns shared mask glyph cache occupancy and allocation/eviction counters.
     pub fn text_cache_statistics(&self) -> cryoglyph::CacheStatistics {
         self.engine.text_pipeline.cache_statistics()
+    }
+
+    /// Returns retained-surface counters and current texture occupancy.
+    pub fn raster_cache_statistics(&self) -> RasterCacheStatistics {
+        self.raster_cache.statistics()
+    }
+
+    /// Sets the retained texture budget (32 MiB by default). Zero disables caching.
+    /// Current frame surfaces are released at the next reset when necessary.
+    pub fn set_raster_cache_budget(&mut self, bytes: u64) {
+        self.raster_cache.set_budget(bytes);
+    }
+
+    /// Returns final-frame repaint activity and retained texture bytes.
+    pub fn composition_cache_statistics(&self) -> CompositionCacheStatistics {
+        self.composition.stats()
+    }
+
+    /// Sets the final-frame texture budget (32 MiB by default). Zero disables it.
+    pub fn set_composition_cache_budget(&mut self, bytes: u64) {
+        self.composition.set_budget(bytes);
+    }
+
+    /// Enables retained final-frame painting and conservative damage tracking.
+    pub fn set_composition_cache_enabled(&mut self, enabled: bool) {
+        self.composition.set_enabled(enabled);
     }
 
     /// Sets the shared mask atlas size to retain before evicting older glyphs.
@@ -195,27 +230,125 @@ impl Renderer {
                     label: Some("iced_wgpu encoder"),
                 });
 
-        self.prepare(&mut encoder, viewport);
-        self.render(&mut encoder, target, clear_color, viewport);
+        let retained_ready = self.raster_cache.prepare(&mut encoder);
+        self.layers.merge();
+        let texture = target.texture();
+        let eligible = texture.width() == viewport.physical_width()
+            && texture.height() == viewport.physical_height()
+            && texture.sample_count() == 1
+            && texture.format() == self.engine.format;
+        if let Some(plan) = self.composition.plan(
+            &self.engine,
+            &self.layers,
+            viewport,
+            if eligible { clear_color } else { None },
+        ) {
+            let complete = match plan.damage {
+                composition::Damage::Full => {
+                    self.encode(&mut encoder, clear_color, &plan.target.view, viewport)
+                }
+                composition::Damage::Partial(damage) => {
+                    let complete = self.prepare(&mut encoder, viewport, Some(damage));
+                    self.render(
+                        &mut encoder,
+                        &plan.target.view,
+                        None,
+                        viewport,
+                        Some((damage, &plan.clear)),
+                    );
+                    self.trim();
+                    complete
+                }
+                composition::Damage::Reuse => true,
+            };
+            self.composition.completed(complete && retained_ready);
+            self.copy_composition(&mut encoder, &plan.target, target, viewport);
+        } else {
+            let _ = self.encode(&mut encoder, clear_color, target, viewport);
+        }
+        // Shared glyph and primitive generations advance once per complete scene,
+        // after all cached surfaces and the main scene have been prepared.
+        self.engine.trim();
+        #[cfg(any(feature = "svg", feature = "image"))]
+        if let Some(cache) = self.image_cache.get() {
+            cache.lock().expect("Lock image cache").trim();
+        }
+        encoder
+    }
 
+    fn encode(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        clear_color: Option<Color>,
+        target: &wgpu::TextureView,
+        viewport: &Viewport,
+    ) -> bool {
+        let retained_ready = self.raster_cache.prepare(encoder);
+        // Accumulate omitted images across every layer. Later worker completion
+        // must not make an earlier incomplete paint eligible for reuse.
+        let assets_ready = self.prepare(encoder, viewport, None);
+        self.render(encoder, target, clear_color, viewport, None);
+        self.trim();
+        assets_ready && retained_ready
+    }
+
+    fn copy_composition(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &raster::Target,
+        target: &wgpu::TextureView,
+        viewport: &Viewport,
+    ) {
+        let texture = target.texture();
+        if texture.usage().contains(wgpu::TextureUsages::COPY_DST)
+            && texture.mip_level_count() == 1
+            && texture.depth_or_array_layers() == 1
+        {
+            encoder.copy_texture_to_texture(
+                source._texture.as_image_copy(),
+                texture.as_image_copy(),
+                wgpu::Extent3d {
+                    width: viewport.physical_width(),
+                    height: viewport.physical_height(),
+                    depth_or_array_layers: 1,
+                },
+            );
+        } else {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("iced_wgpu retained frame presentation"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.engine.raster_pipeline().draw_replace(
+                source,
+                Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size())),
+                &mut pass,
+            );
+        }
+    }
+
+    fn trim(&mut self) {
         self.quad.trim();
         if let Some(triangle) = &mut self.triangle {
             triangle.trim();
         }
         self.text.trim();
 
-        // TODO: Provide window id (?)
-        self.engine.trim();
-
         #[cfg(any(feature = "svg", feature = "image"))]
         {
             self.image.trim();
-            if let Some(cache) = self.image_cache.get() {
-                cache.borrow_mut().trim();
-            }
         }
-
-        encoder
     }
 
     pub fn present(
@@ -227,9 +360,9 @@ impl Renderer {
     ) -> wgpu::SubmissionIndex {
         let encoder = self.draw(clear_color, frame, viewport);
 
-        self.staging_belt.finish();
+        self.finish();
         let submission = self.engine.queue.submit([encoder.finish()]);
-        self.staging_belt.recall();
+        self.recall();
         submission
     }
 
@@ -292,9 +425,9 @@ impl Renderer {
 
         let encoder = self.draw(Some(background_color), &view, viewport);
 
-        self.staging_belt.finish();
+        self.finish();
         let submission = self.engine.queue.submit([encoder.finish()]);
-        self.staging_belt.recall();
+        self.recall();
 
         let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let signal = completed.clone();
@@ -398,6 +531,7 @@ impl Renderer {
             format: self.engine.format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -437,9 +571,9 @@ impl Renderer {
             texture_extent,
         );
 
-        self.staging_belt.finish();
+        self.finish();
         let index = self.engine.queue.submit([encoder.finish()]);
-        self.staging_belt.recall();
+        self.recall();
 
         let slice = output_buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
@@ -460,19 +594,27 @@ impl Renderer {
     }
 
     #[cfg(any(feature = "image", feature = "svg"))]
-    fn image_cache(&self) -> &std::cell::RefCell<image::Cache> {
+    fn image_cache(&self) -> &std::sync::Mutex<image::Cache> {
         self.image_cache
-            .get_or_init(|| std::cell::RefCell::new(self.engine.create_image_cache()))
+            .get_or_init(|| std::sync::Mutex::new(self.engine.create_image_cache()))
     }
 
-    fn prepare(&mut self, encoder: &mut wgpu::CommandEncoder, viewport: &Viewport) {
+    fn prepare(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        viewport: &Viewport,
+        damage: Option<Rectangle<u32>>,
+    ) -> bool {
+        #[allow(unused_mut)]
+        let mut complete = true;
         let scale_factor = viewport.scale_factor();
 
         self.text_viewport
             .update(&self.engine.queue, viewport.physical_size());
 
-        let physical_bounds =
-            Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size()));
+        let physical_bounds = Rectangle::<f32>::from(
+            damage.unwrap_or_else(|| Rectangle::with_size(viewport.physical_size())),
+        );
 
         self.layers.merge();
 
@@ -540,6 +682,7 @@ impl Renderer {
                         self.engine.format,
                         &instance.bounds,
                         viewport,
+                        encoder,
                     );
                 }
 
@@ -550,15 +693,16 @@ impl Renderer {
             if !layer.images.is_empty() {
                 let prepare_span = debug::prepare(debug::Primitive::Image);
 
-                self.image.prepare(
+                complete &= self.image.prepare(
                     self.engine.image_pipeline(),
                     &self.engine.device,
                     &mut self.staging_belt,
                     encoder,
                     &mut self
                         .image_cache
-                        .get_or_init(|| std::cell::RefCell::new(self.engine.create_image_cache()))
-                        .borrow_mut(),
+                        .get_or_init(|| std::sync::Mutex::new(self.engine.create_image_cache()))
+                        .lock()
+                        .expect("Lock image cache"),
                     &layer.images,
                     viewport.projection(),
                     scale_factor,
@@ -584,6 +728,7 @@ impl Renderer {
                 prepare_span.finish();
             }
         }
+        complete
     }
 
     fn render(
@@ -592,6 +737,7 @@ impl Renderer {
         frame: &wgpu::TextureView,
         clear_color: Option<Color>,
         viewport: &Viewport,
+        damage: Option<(Rectangle<u32>, &raster::Clear)>,
     ) {
         use std::mem::ManuallyDrop;
 
@@ -626,6 +772,11 @@ impl Renderer {
                 multiview_mask: None,
             }));
 
+        if let Some((bounds, clear)) = damage {
+            render_pass.set_scissor_rect(bounds.x, bounds.y, bounds.width, bounds.height);
+            self.engine.raster_pipeline().clear(clear, &mut render_pass);
+        }
+
         let mut quad_layer = 0;
         let mut mesh_layer = 0;
         let mut text_layer = 0;
@@ -634,8 +785,11 @@ impl Renderer {
         let mut image_layer = 0;
 
         let scale_factor = viewport.scale_factor();
-        let physical_bounds =
-            Rectangle::<f32>::from(Rectangle::with_size(viewport.physical_size()));
+        let physical_bounds = Rectangle::<f32>::from(
+            damage
+                .map(|(bounds, _)| bounds)
+                .unwrap_or_else(|| Rectangle::with_size(viewport.physical_size())),
+        );
 
         let scale = Transformation::scale(scale_factor);
 
@@ -645,6 +799,10 @@ impl Renderer {
             else {
                 continue;
             };
+
+            if nudge::snap(physical_bounds).is_none() {
+                continue;
+            }
 
             let Some(scissor_rect) = nudge::snap(physical_bounds) else {
                 continue;
@@ -789,6 +947,30 @@ impl Renderer {
                 render_span.finish();
             }
 
+            if !layer.rasters.is_empty() {
+                render_pass.set_scissor_rect(
+                    scissor_rect.x,
+                    scissor_rect.y,
+                    scissor_rect.width,
+                    scissor_rect.height,
+                );
+                for instance in &layer.rasters {
+                    self.engine.raster_pipeline().draw(
+                        &instance.target,
+                        instance.bounds * scale_factor,
+                        &mut render_pass,
+                    );
+                }
+                render_pass.set_viewport(
+                    0.0,
+                    0.0,
+                    viewport.physical_width() as f32,
+                    viewport.physical_height() as f32,
+                    0.0,
+                    1.0,
+                );
+            }
+
             #[cfg(any(feature = "svg", feature = "image"))]
             if !layer.images.is_empty() {
                 let render_span = debug::render(debug::Primitive::Image);
@@ -865,6 +1047,9 @@ impl Renderer {
     /// of [`Renderer::draw`] to a [`wgpu::Queue`].
     pub fn finish(&mut self) {
         self.staging_belt.finish();
+        for entry in self.raster_cache.entries.values_mut() {
+            entry.child.finish();
+        }
     }
 
     /// Recalls all of the closed buffers back to be reused.
@@ -876,10 +1061,26 @@ impl Renderer {
     /// of [`Renderer::draw`] to a [`wgpu::Queue`].
     pub fn recall(&mut self) {
         self.staging_belt.recall();
+        for entry in self.raster_cache.entries.values_mut() {
+            entry.child.recall();
+        }
     }
 }
 
 impl core::Renderer for Renderer {
+    fn start_cached_layer(&mut self, cache: &renderer::Cache, key: u64, bounds: Rectangle) -> bool {
+        let mut state = std::mem::take(&mut self.raster_cache);
+        let record = state.begin(self, cache, key, bounds);
+        self.raster_cache = state;
+        record
+    }
+
+    fn end_cached_layer(&mut self) {
+        let mut state = std::mem::take(&mut self.raster_cache);
+        state.end(self);
+        self.raster_cache = state;
+    }
+
     fn start_layer(&mut self, bounds: Rectangle) {
         self.layers.push_clip(bounds);
     }
@@ -908,7 +1109,8 @@ impl core::Renderer for Renderer {
     ) {
         #[cfg(feature = "image")]
         self.image_cache()
-            .borrow_mut()
+            .lock()
+            .expect("Lock image cache")
             .allocate_image(_handle, _callback);
     }
 
@@ -922,13 +1124,14 @@ impl core::Renderer for Renderer {
 
     fn tick(&mut self) {
         #[cfg(feature = "image")]
-        if let Some(cache) = self.image_cache.get_mut() {
-            cache.get_mut().receive();
+        if let Some(cache) = self.image_cache.get() {
+            cache.lock().expect("Lock image cache").receive();
         }
     }
 
     fn reset(&mut self, new_bounds: Rectangle) {
         self.layers.reset(new_bounds);
+        self.raster_cache.reset();
     }
 }
 
@@ -1005,12 +1208,16 @@ impl core::image::Renderer for Renderer {
         handle: &Self::Handle,
     ) -> Result<core::image::Allocation, core::image::Error> {
         self.image_cache()
-            .borrow_mut()
+            .lock()
+            .expect("Lock image cache")
             .load_image(&self.engine.device, &self.engine.queue, handle)
     }
 
     fn measure_image(&self, handle: &Self::Handle) -> Option<core::Size<u32>> {
-        self.image_cache().borrow_mut().measure_image(handle)
+        self.image_cache()
+            .lock()
+            .expect("Lock image cache")
+            .measure_image(handle)
     }
 
     fn draw_image(&mut self, image: core::Image, bounds: Rectangle, clip_bounds: Rectangle) {
@@ -1022,7 +1229,10 @@ impl core::image::Renderer for Renderer {
 #[cfg(feature = "svg")]
 impl core::svg::Renderer for Renderer {
     fn measure_svg(&self, handle: &core::svg::Handle) -> core::Size<u32> {
-        self.image_cache().borrow_mut().measure_svg(handle)
+        self.image_cache()
+            .lock()
+            .expect("Lock image cache")
+            .measure_svg(handle)
     }
 
     fn draw_svg(&mut self, svg: core::Svg, bounds: Rectangle, clip_bounds: Rectangle) {

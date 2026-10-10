@@ -22,6 +22,7 @@ pub struct Layer {
     pub quads: quad::Batch,
     pub triangles: triangle::Batch,
     pub primitives: primitive::Batch,
+    pub(crate) rasters: Vec<crate::raster::Instance>,
     pub images: image::Batch,
     pub text: text::Batch,
     pending_meshes: Vec<Mesh>,
@@ -33,6 +34,7 @@ impl Layer {
         self.quads.is_empty()
             && self.triangles.is_empty()
             && self.primitives.is_empty()
+            && self.rasters.is_empty()
             && self.images.is_empty()
             && self.text.is_empty()
             && self.pending_meshes.is_empty()
@@ -326,6 +328,7 @@ impl graphics::Layer for Layer {
         self.quads.clear();
         self.triangles.clear();
         self.primitives.clear();
+        self.rasters.clear();
         self.text.clear();
         self.images.clear();
         self.pending_meshes.clear();
@@ -345,12 +348,16 @@ impl graphics::Layer for Layer {
             return 3;
         }
 
-        if !self.images.is_empty() {
+        if !self.rasters.is_empty() {
             return 4;
         }
 
-        if !self.text.is_empty() {
+        if !self.images.is_empty() {
             return 5;
+        }
+
+        if !self.text.is_empty() {
+            return 6;
         }
 
         usize::MAX
@@ -358,10 +365,14 @@ impl graphics::Layer for Layer {
 
     fn end(&self) -> usize {
         if !self.text.is_empty() {
-            return 5;
+            return 6;
         }
 
         if !self.images.is_empty() {
+            return 5;
+        }
+
+        if !self.rasters.is_empty() {
             return 4;
         }
 
@@ -384,6 +395,7 @@ impl graphics::Layer for Layer {
         self.quads.append(&mut layer.quads);
         self.triangles.append(&mut layer.triangles);
         self.primitives.append(&mut layer.primitives);
+        self.rasters.append(&mut layer.rasters);
         self.images.append(&mut layer.images);
 
         // The stack only merges layers with matching clip bounds. Within
@@ -408,6 +420,7 @@ impl Default for Layer {
             quads: quad::Batch::default(),
             triangles: triangle::Batch::default(),
             primitives: primitive::Batch::default(),
+            rasters: Vec::new(),
             text: text::Batch::default(),
             images: image::Batch::default(),
             pending_meshes: Vec::new(),

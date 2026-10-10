@@ -62,6 +62,19 @@ where
         delegate!(self, renderer, renderer.end_layer());
     }
 
+    fn start_cached_layer(
+        &mut self,
+        cache: &renderer::Cache,
+        key: u64,
+        bounds: Rectangle,
+    ) -> bool {
+        delegate!(self, renderer, renderer.start_cached_layer(cache, key, bounds))
+    }
+
+    fn end_cached_layer(&mut self) {
+        delegate!(self, renderer, renderer.end_cached_layer());
+    }
+
     fn start_transformation(&mut self, transformation: Transformation) {
         delegate!(
             self,

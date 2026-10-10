@@ -334,10 +334,18 @@ impl graphics::Compositor for Compositor {
     }
 
     fn configure_surface(&mut self, surface: &mut Self::Surface, width: u32, height: u32) {
+        let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        if surface
+            .get_capabilities(&self.adapter)
+            .usages
+            .contains(wgpu::TextureUsages::COPY_DST)
+        {
+            usage |= wgpu::TextureUsages::COPY_DST;
+        }
         surface.configure(
             &self.engine.device,
             &wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage,
                 format: self.format,
                 present_mode: self.settings.present_mode,
                 width,

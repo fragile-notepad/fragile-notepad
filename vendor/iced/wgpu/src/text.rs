@@ -47,6 +47,17 @@ pub struct Cache {
 pub struct Id(u64);
 
 impl Cache {
+    pub(crate) fn is_dynamic(&self) -> bool {
+        self.text
+            .iter()
+            .any(|text| matches!(text, Text::Editor { .. } | Text::Raw { .. }))
+    }
+
+    pub(crate) fn stamp(&self) -> (Id, usize, usize) {
+        // Atlas generations affect uploads, not the retained scene's pixels.
+        (self.id, self.version, 0)
+    }
+
     pub fn new(group: cache::Group, text: Vec<Text>) -> Option<Self> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

@@ -25,6 +25,7 @@ pub struct Engine {
     pub(crate) quad_pipeline: quad::Pipeline,
     pub(crate) text_pipeline: text::Pipeline,
     triangle_pipeline: Arc<OnceLock<triangle::Pipeline>>,
+    raster_pipeline: Arc<OnceLock<crate::raster::Pipeline>>,
     antialiasing: Option<Antialiasing>,
     #[cfg(any(feature = "image", feature = "svg"))]
     image_pipeline: Arc<OnceLock<crate::image::Pipeline>>,
@@ -49,6 +50,7 @@ impl Engine {
             quad_pipeline: quad::Pipeline::new(&device, format),
             text_pipeline: text::Pipeline::new(&device, &queue, format),
             triangle_pipeline: Arc::new(OnceLock::new()),
+            raster_pipeline: Arc::new(OnceLock::new()),
             antialiasing,
 
             #[cfg(any(feature = "image", feature = "svg"))]
@@ -69,6 +71,11 @@ impl Engine {
     pub(crate) fn triangle_pipeline(&self) -> &triangle::Pipeline {
         self.triangle_pipeline
             .get_or_init(|| triangle::Pipeline::new(&self.device, self.format, self.antialiasing))
+    }
+
+    pub(crate) fn raster_pipeline(&self) -> &crate::raster::Pipeline {
+        self.raster_pipeline
+            .get_or_init(|| crate::raster::Pipeline::new(&self.device, self.format))
     }
 
     #[cfg(any(feature = "image", feature = "svg"))]

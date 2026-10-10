@@ -314,6 +314,7 @@ impl State {
         pipeline: &Pipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
+        bounds: crate::core::Rectangle,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("iced_wgpu::triangle::msaa render pass"),
@@ -332,6 +333,11 @@ impl State {
             multiview_mask: None,
         });
 
+        if let Some(bounds) = crate::nudge::snap(bounds) {
+            render_pass.set_scissor_rect(bounds.x, bounds.y, bounds.width, bounds.height);
+        } else {
+            return;
+        }
         render_pass.set_pipeline(&pipeline.raw);
         render_pass.set_bind_group(0, &self.constants, &[]);
         render_pass.set_bind_group(

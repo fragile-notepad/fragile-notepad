@@ -30,6 +30,13 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 
 - Join adjacent compatible quad runs and text groups after layer merging,
   preserving transformation, clip, and cached-text ordering boundaries.
+- Explicit cached-layer tokens and paint keys, with a 32 MiB per-window GPU
+  surface budget and ordinary clipped drawing on software. Cached surfaces
+  share the window's image atlas and the engine's pipelines; nested caches,
+  unsupported targets, and oversized allocations draw live.
+- Custom primitives can prepare offscreen passes in the existing frame encoder.
+- Retain a bounded final frame, repaint conservative scene damage, and copy
+  completed pixels to each acquired target without relying on swapchain history.
 - Software-first handoff with offscreen warm-up, presentation checks, and rollback.
 - Bounded software damage/scroll matching, retained frames, and reusable image/clip caches.
 - Vulkan portability, optional immediates, shared lazy resources, bounded atlases,

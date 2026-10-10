@@ -31,6 +31,23 @@ pub trait Primitive: Debug + MaybeSend + MaybeSync + 'static {
         viewport: &Viewport,
     );
 
+    /// Prepares this primitive in the frame's command encoder.
+    ///
+    /// Override this to rasterize a reusable offscreen surface before the main
+    /// pass. Work must use this encoder, without submitting or waiting on the
+    /// queue. Existing primitives keep their ordinary preparation behavior.
+    fn prepare_with_encoder(
+        &self,
+        pipeline: &mut Self::Pipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &Viewport,
+        _encoder: &mut wgpu::CommandEncoder,
+    ) {
+        self.prepare(pipeline, device, queue, bounds, viewport);
+    }
+
     /// Draws the [`Primitive`] in the given [`wgpu::RenderPass`].
     ///
     /// When possible, this should be implemented over [`render`](Self::render)
@@ -88,6 +105,7 @@ pub(crate) trait Stored: Debug + MaybeSend + MaybeSync + 'static {
         format: wgpu::TextureFormat,
         bounds: &Rectangle,
         viewport: &Viewport,
+        encoder: &mut wgpu::CommandEncoder,
     );
 
     fn draw(&self, storage: &Storage, render_pass: &mut wgpu::RenderPass<'_>) -> bool;
@@ -115,6 +133,7 @@ impl<P: Primitive> Stored for BlackBox<P> {
         format: wgpu::TextureFormat,
         bounds: &Rectangle,
         viewport: &Viewport,
+        encoder: &mut wgpu::CommandEncoder,
     ) {
         if !storage.has::<P>() {
             storage.store::<P, _>(P::Pipeline::new(device, queue, format));
@@ -127,7 +146,7 @@ impl<P: Primitive> Stored for BlackBox<P> {
             .expect("renderer should have the proper type");
 
         self.primitive
-            .prepare(renderer, device, queue, bounds, viewport);
+            .prepare_with_encoder(renderer, device, queue, bounds, viewport, encoder);
     }
 
     fn draw(&self, storage: &Storage, render_pass: &mut wgpu::RenderPass<'_>) -> bool {

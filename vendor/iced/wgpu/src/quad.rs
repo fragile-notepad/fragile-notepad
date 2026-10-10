@@ -310,6 +310,47 @@ pub struct Batch {
 type Order = Vec<(Kind, usize)>;
 
 impl Batch {
+    pub(crate) fn damage_snapshot(&self) -> Vec<(Vec<u8>, Rectangle)> {
+        let mut snapshot = Vec::with_capacity(self.solids.len() + self.gradients.len());
+        let mut solid = 0;
+        let mut gradient = 0;
+        for (kind, count) in &self.order {
+            for _ in 0..*count {
+                let (bytes, quad) = match kind {
+                    Kind::Solid => {
+                        let item = &self.solids[solid];
+                        solid += 1;
+                        (bytemuck::bytes_of(item), &item.quad)
+                    }
+                    Kind::Gradient => {
+                        let item = &self.gradients[gradient];
+                        gradient += 1;
+                        (bytemuck::bytes_of(item), &item.quad)
+                    }
+                };
+                let mut paint = Vec::with_capacity(bytes.len() + 1);
+                paint.push(*kind as u8);
+                paint.extend_from_slice(bytes);
+                // Match shadow_expanded_bounds in the quad vertex shaders.
+                let blur = quad.shadow_blur_radius;
+                let left = quad.shadow_offset[0].min(0.0) - blur;
+                let top = quad.shadow_offset[1].min(0.0) - blur;
+                let right = quad.shadow_offset[0].max(0.0) + blur;
+                let bottom = quad.shadow_offset[1].max(0.0) + blur;
+                snapshot.push((
+                    paint,
+                    Rectangle {
+                        x: quad.position[0] + left,
+                        y: quad.position[1] + top,
+                        width: quad.size[0] + right - left,
+                        height: quad.size[1] + bottom - top,
+                    },
+                ));
+            }
+        }
+        snapshot
+    }
+
     /// Returns true if there are no quads of any type in [`Quads`].
     pub fn is_empty(&self) -> bool {
         self.solids.is_empty() && self.gradients.is_empty()
@@ -358,7 +399,6 @@ impl Batch {
     pub fn append(&mut self, batch: &mut Batch) {
         self.solids.append(&mut batch.solids);
         self.gradients.append(&mut batch.gradients);
-
 
         // Each batch already contains maximal same-kind runs. Only the join
         // can introduce another compatible run; keep all other runs in order.

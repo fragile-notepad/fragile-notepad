@@ -338,7 +338,7 @@ fn render<'a>(
     }
 
     if let Some((state, pipeline)) = msaa {
-        state.render(pipeline, encoder, target);
+        state.render(pipeline, encoder, target, bounds);
     }
 }
 

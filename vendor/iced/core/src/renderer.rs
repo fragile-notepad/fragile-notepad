@@ -1,6 +1,10 @@
 //! Write your own renderer.
+mod cache;
+
 #[cfg(debug_assertions)]
 mod null;
+
+pub use cache::Cache;
 
 use crate::image;
 use crate::{
@@ -28,6 +32,55 @@ pub trait Renderer {
         self.start_layer(bounds);
         f(self);
         self.end_layer();
+    }
+
+    /// Starts a clipped layer whose painted pixels may be cached.
+    ///
+    /// The caller must change `key` whenever anything affecting painting changes,
+    /// including content and styling. Backends track layer size, transformation,
+    /// and scale factor separately.
+    ///
+    /// Returns `true` when the caller must draw the layer, or `false` when the
+    /// backend reuses retained texture pixels. Caching is opportunistic and
+    /// bounded: a backend may decline to cache a layer or evict it at any time,
+    /// requiring it to be drawn again even when `key` is unchanged.
+    ///
+    /// Cached pixels are composited into the current frame; this does not assume
+    /// that swapchain contents are preserved or rely on swapchain damage tracking.
+    ///
+    /// The default implementation performs ordinary clipped drawing, including
+    /// on software renderers. Every call must be paired with
+    /// [`end_cached_layer`](Self::end_cached_layer), even when it returns `false`.
+    fn start_cached_layer(&mut self, _cache: &Cache, _key: u64, bounds: Rectangle) -> bool {
+        self.start_layer(bounds);
+        true
+    }
+
+    /// Ends a layer started with [`start_cached_layer`](Self::start_cached_layer).
+    ///
+    /// This must be called whether the layer was drawn or reused cached pixels.
+    /// The default implementation ends an ordinary clipped layer.
+    fn end_cached_layer(&mut self) {
+        self.end_layer();
+    }
+
+    /// Draws a clipped layer using `f` whenever its cached pixels cannot be reused.
+    ///
+    /// The caller must change `key` for every painting change, as described in
+    /// [`start_cached_layer`](Self::start_cached_layer). The layer is ended both
+    /// when `f` is called and when cached pixels are reused.
+    fn with_cached_layer(
+        &mut self,
+        cache: &Cache,
+        key: u64,
+        bounds: Rectangle,
+        f: impl FnOnce(&mut Self),
+    ) {
+        if self.start_cached_layer(cache, key, bounds) {
+            f(self);
+        }
+
+        self.end_cached_layer();
     }
 
     /// Starts recording with a new [`Transformation`].

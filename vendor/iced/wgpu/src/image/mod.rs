@@ -247,7 +247,8 @@ impl State {
         images: &Batch,
         transformation: Transformation,
         scale: f32,
-    ) {
+    ) -> bool {
+        let mut complete = true;
         if self.layers.len() <= self.prepare_layer {
             self.layers.push(Layer::new(device, pipeline));
         }
@@ -307,6 +308,8 @@ impl State {
                                 }
                             },
                         );
+                    } else {
+                        complete = false;
                     }
                 }
                 #[cfg(not(feature = "image"))]
@@ -354,6 +357,8 @@ impl State {
                             atlas_entry,
                             &mut self.nearest_instances,
                         );
+                    } else {
+                        complete = false;
                     }
                 }
                 #[cfg(not(feature = "svg"))]
@@ -377,6 +382,7 @@ impl State {
         self.prepare_layer += 1;
         self.nearest_instances.clear();
         self.linear_instances.clear();
+        complete
     }
 
     pub fn render<'a>(

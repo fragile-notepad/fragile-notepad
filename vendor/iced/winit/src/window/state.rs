@@ -136,11 +136,12 @@ where
             WindowEvent::Resized(new_size) => {
                 let size = Size::new(new_size.width, new_size.height);
 
-                self.viewport = Viewport::with_physical_size(
+                update_viewport(
+                    &mut self.viewport,
+                    &mut self.surface_version,
                     size,
                     window.scale_factor() as f32 * self.scale_factor,
                 );
-                self.surface_version += 1;
             }
             WindowEvent::ScaleFactorChanged {
                 scale_factor: new_scale_factor,
@@ -148,11 +149,12 @@ where
             } => {
                 let size = self.viewport.physical_size();
 
-                self.viewport = Viewport::with_physical_size(
+                update_viewport(
+                    &mut self.viewport,
+                    &mut self.surface_version,
                     size,
                     *new_scale_factor as f32 * self.scale_factor,
                 );
-                self.surface_version += 1;
             }
             WindowEvent::CursorMoved { position, .. }
             | WindowEvent::Touch(Touch {
@@ -246,5 +248,87 @@ where
 
             self.theme_mode = new_mode;
         }
+    }
+}
+
+fn update_viewport(
+    viewport: &mut Viewport,
+    surface_version: &mut u64,
+    physical_size: Size<u32>,
+    scale_factor: f32,
+) {
+    // Native move/resize loops can repeat the current dimensions. Keep event
+    // delivery intact, but reconfigure the surface and relayout only when its
+    // physical size or effective scale actually changes.
+    if viewport.physical_size() == physical_size && viewport.scale_factor() == scale_factor {
+        return;
+    }
+
+    *viewport = Viewport::with_physical_size(physical_size, scale_factor);
+    *surface_version += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_resize_notifications_reuse_the_surface_and_projection() {
+        let size = Size::new(800, 600);
+        let mut viewport = Viewport::with_physical_size(size, 1.5);
+        let mut version = 7;
+        let projection = viewport.projection();
+        for _ in 0..64 {
+            update_viewport(&mut viewport, &mut version, size, 1.5);
+        }
+        assert_eq!(version, 7);
+        assert_eq!(viewport.projection(), projection);
+
+        let resized = Size::new(1200, 750);
+        update_viewport(&mut viewport, &mut version, resized, 1.5);
+        assert_eq!(version, 8);
+        assert_eq!(viewport.physical_size(), resized);
+        assert_eq!(viewport.logical_size(), Size::new(800.0, 500.0));
+        assert_eq!(
+            viewport.projection(),
+            Viewport::with_physical_size(resized, 1.5).projection(),
+        );
+        assert_ne!(viewport.projection(), projection);
+        update_viewport(&mut viewport, &mut version, resized, 1.5);
+        assert_eq!(version, 8);
+    }
+
+    #[test]
+    fn scale_changes_refresh_logical_geometry_once_even_at_the_same_size() {
+        let size = Size::new(1200, 900);
+        let mut viewport = Viewport::with_physical_size(size, 1.0);
+        let mut version = 0;
+        update_viewport(&mut viewport, &mut version, size, 1.5);
+        assert_eq!(version, 1);
+        assert_eq!(viewport.scale_factor(), 1.5);
+        assert_eq!(viewport.logical_size(), Size::new(800.0, 600.0));
+        update_viewport(&mut viewport, &mut version, size, 1.5);
+        assert_eq!(version, 1);
+
+        update_viewport(&mut viewport, &mut version, size, 1.0);
+        assert_eq!(version, 2);
+        assert_eq!(viewport.logical_size(), Size::new(1200.0, 900.0));
+    }
+
+    #[test]
+    fn zero_size_and_restoration_each_invalidate_once() {
+        let size = Size::new(800, 600);
+        let mut viewport = Viewport::with_physical_size(size, 1.0);
+        let mut version = 0;
+        update_viewport(&mut viewport, &mut version, Size::new(0, 0), 1.0);
+        update_viewport(&mut viewport, &mut version, Size::new(0, 0), 1.0);
+        assert_eq!(version, 1);
+        assert_eq!(viewport.physical_size(), Size::new(0, 0));
+
+        update_viewport(&mut viewport, &mut version, size, 1.0);
+        update_viewport(&mut viewport, &mut version, size, 1.0);
+        assert_eq!(version, 2);
+        assert_eq!(viewport.physical_size(), size);
+        assert_eq!(viewport.logical_size(), Size::new(800.0, 600.0));
     }
 }

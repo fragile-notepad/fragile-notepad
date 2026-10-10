@@ -101,10 +101,40 @@ impl Mul<Transformation> for Rectangle {
     type Output = Self;
 
     fn mul(self, transformation: Transformation) -> Self {
+        // An unbounded clip remains unbounded. Matrix arithmetic on infinity
+        // creates NaNs even for identity (0 * infinity), breaking clipping and
+        // equality of otherwise unchanged recorded scenes.
+        if self == Self::INFINITE {
+            return self;
+        }
         let position = self.position();
         let size = self.size();
 
         Self::new(position * transformation, size * transformation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unbounded_clips_survive_identity_translation_and_scaling() {
+        for transformation in [
+            Transformation::IDENTITY,
+            Transformation::translate(10.0, -20.0),
+            Transformation::scale(1.5),
+        ] {
+            assert_eq!(Rectangle::INFINITE * transformation, Rectangle::INFINITE);
+            let finite = Rectangle::new(Point::new(2.0, 3.0), Size::new(4.0, 5.0));
+            assert_eq!(
+                finite * transformation,
+                Rectangle::new(
+                    finite.position() * transformation,
+                    finite.size() * transformation
+                )
+            );
+        }
     }
 }
 

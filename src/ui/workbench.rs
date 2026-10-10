@@ -40,15 +40,29 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     } = model;
     // These transitions are driven by App messages, outside child redraw
     // deadlines. Capture settled pixels instead of rebuilding surfaces per frame.
-    let retain = ![
-        chrome_animation.find_progress,
-        chrome_animation.inline_replace_progress,
-        chrome_animation.function_list_progress,
-        chrome_animation.about_progress,
-        chrome_animation.dirty_close_progress,
+    let retain = [
+        (chrome_animation.find_progress, is_find_visible),
+        (
+            chrome_animation.inline_replace_progress,
+            is_inline_replace_visible,
+        ),
+        (
+            chrome_animation.function_list_progress,
+            is_function_list_visible,
+        ),
+        (
+            chrome_animation.about_progress,
+            chrome_animation.about_interactive,
+        ),
+        (
+            chrome_animation.dirty_close_progress,
+            chrome_animation.dirty_close_interactive,
+        ),
     ]
     .into_iter()
-    .any(|progress| progress > 0.0 && progress < 1.0);
+    // Compare the target too: the first closing frame still has opacity 1,
+    // and the first opening frame still has opacity 0.
+    .all(|(progress, visible)| progress == if visible { 1.0 } else { 0.0 });
     let active_document = workspace.active_document();
     let editor = if let Some(document) = active_document {
         // Wrap outside the context menu, whose child is the AdvancedEditor tree.

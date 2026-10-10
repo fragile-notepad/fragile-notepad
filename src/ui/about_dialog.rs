@@ -164,18 +164,19 @@ fn dialog(
         AboutTab::Debug => debug_content(rendering, progress),
         AboutTab::Licenses => licenses_content(progress),
     };
+    let retain = progress >= 1.0 && interactive;
 
     container(
         column![
             container(
                 column![
                     header(progress, interactive),
-                    raster_cache::cached(tabs(active_tab, progress), progress >= 1.0)
+                    raster_cache::cached(tabs(active_tab, progress), retain)
                 ]
                 .spacing(12)
             )
             .padding([20, 28]),
-            container(raster_cache::cached_animated(content, progress >= 1.0))
+            container(raster_cache::cached_animated(content, retain))
                 .padding([0, 28])
                 .height(Fill)
                 .width(Fill),
@@ -204,7 +205,7 @@ fn dialog(
                     .spacing(14)
                 )
                 .padding([16, 28]),
-                progress >= 1.0,
+                retain,
             ),
         ]
         .height(Fill)
@@ -246,7 +247,7 @@ fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
             .width(Fill)
             .height(info_vfx::HEADER_HEIGHT)
             .center_y(Fill),
-            progress >= 1.0,
+            progress >= 1.0 && effects_running,
         ),
     ]
     .into()

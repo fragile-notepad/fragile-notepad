@@ -88,6 +88,32 @@ impl FoldFade {
 }
 
 impl<Paragraph> AdvancedEditorState<Paragraph> {
+    /// Describes local paint state for an enclosing retained raster layer.
+    /// Document/view changes are invalidated by widget diffing; this key covers
+    /// the caret and the draw-time fold/scroll clocks between application updates.
+    /// Pointer gestures and IME composition stay live until they finish.
+    pub(crate) fn raster_cache_state(&self, now: Instant) -> (u64, bool) {
+        let fade = self.fold_fade.get();
+        let fast_text = self
+            .scroll_fast_until
+            .get()
+            .is_some_and(|until| now < until);
+        let key = u64::from(self.is_caret_visible() && self.text_drag.is_none())
+            | (u64::from(self.is_focused) << 1)
+            | (u64::from(self.is_window_focused) << 2)
+            | (u64::from(fast_text) << 3)
+            | (u64::from(self.fold_controls_hovered.get()) << 4)
+            | (u64::from(self.preedit.is_some()) << 5)
+            | (u64::from(fade.opacity(now).to_bits()) << 8);
+        let live = fade.animating(now)
+            || self.drag_anchor.is_some()
+            || self.text_drag.is_some()
+            || self.drag_scroll_at.is_some()
+            || self.scrollbar_grab_offset_y.is_some()
+            || self.preedit.is_some();
+        (key, live)
+    }
+
     pub(super) fn reset_caret_blink(&mut self) {
         let now = Instant::now();
 
@@ -193,6 +219,63 @@ pub(super) fn caret_visible_at(
 mod tests {
     use super::*;
     use iced::time::Duration;
+
+    #[test]
+    fn raster_state_changes_at_caret_and_fast_scroll_boundaries() {
+        let mut state: AdvancedEditorState<()> = AdvancedEditorState::default();
+        let now = state.caret_updated_at;
+        state.is_focused = true;
+        let (visible, live) = state.raster_cache_state(now);
+        assert!(!live, "a focused but settled editor remains cacheable");
+        state.caret_now.set(now + Duration::from_millis(499));
+        assert_eq!(state.raster_cache_state(now).0, visible);
+        state.caret_now.set(now + Duration::from_millis(500));
+        let (hidden, live) = state.raster_cache_state(now);
+        assert_ne!(visible, hidden);
+        assert!(!live);
+        state
+            .scroll_fast_until
+            .set(Some(now + Duration::from_millis(120)));
+        assert_ne!(state.raster_cache_state(now).0, hidden);
+        assert_eq!(
+            state.raster_cache_state(now + Duration::from_millis(120)).0,
+            hidden
+        );
+        state.is_window_focused = false;
+        assert_ne!(
+            state.raster_cache_state(now + Duration::from_millis(120)).0,
+            hidden
+        );
+    }
+
+    #[test]
+    fn raster_state_keeps_fades_dragging_and_ime_live_until_they_settle() {
+        let mut state: AdvancedEditorState<()> = AdvancedEditorState::default();
+        let now = Instant::now();
+        let initial = state.raster_cache_state(now).0;
+        state.fold_fade.set(FoldFade {
+            from: 0.0,
+            target: 1.0,
+            started: now,
+        });
+        assert!(state.raster_cache_state(now + Duration::from_millis(1)).1);
+        let (settled, live) = state.raster_cache_state(now + Duration::from_millis(150));
+        assert!(!live);
+        assert_ne!(initial, settled);
+        state.drag_anchor = Some(EditorPosition::new(1, 2));
+        assert!(state.raster_cache_state(now + Duration::from_millis(150)).1);
+        state.cancel_pointer_drag();
+        state.scrollbar_grab_offset_y = Some(3.0);
+        assert!(state.raster_cache_state(now + Duration::from_millis(150)).1);
+        state.cancel_pointer_drag();
+        state.preedit = Some(input_method::Preedit::new());
+        assert!(state.raster_cache_state(now + Duration::from_millis(150)).1);
+        state.preedit = None;
+        assert_eq!(
+            state.raster_cache_state(now + Duration::from_millis(150)),
+            (settled, false)
+        );
+    }
 
     #[test]
     fn fold_fade_reverses_without_jumping_and_settles() {

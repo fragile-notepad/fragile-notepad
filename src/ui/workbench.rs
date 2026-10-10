@@ -9,8 +9,8 @@ use crate::message::Message;
 
 use super::view_model::{ChromeAnimationInfo, WorkbenchView};
 use super::{
-    about_dialog, dirty_close_dialog, editor, find_panel, function_list_panel, motion, status_bar,
-    styles, tabs, toolbar, window_list_dialog,
+    about_dialog, dirty_close_dialog, editor, find_panel, function_list_panel, motion,
+    raster_cache, status_bar, styles, tabs, toolbar, window_list_dialog,
 };
 
 const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 46.0;
@@ -40,14 +40,15 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     } = model;
     let active_document = workspace.active_document();
     let editor = if let Some(document) = active_document {
-        background::editor(editor::view(document, settings))
+        // Wrap outside the context menu, whose child is the AdvancedEditor tree.
+        raster_cache::cached_editor(background::editor(editor::view(document, settings)))
     } else {
         editor::empty()
     };
 
     let mut workbench = column![
-        toolbar::menu_bar(active_menu),
-        toolbar::tool_bar(active_document),
+        raster_cache::cached(toolbar::menu_bar(active_menu)),
+        raster_cache::cached(toolbar::tool_bar(active_document)),
         tabs::view(workspace, dragged_tab, hovered_drop_tab),
     ];
 
@@ -113,14 +114,15 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         editor_surface.into()
     };
 
-    let shell = container(background::shell(
-        workbench
-            .push(main_area)
-            .push(status_bar::view(active_document, settings, file_status)),
-    ))
+    let shell = container(background::shell(workbench.push(main_area).push(
+        raster_cache::cached(status_bar::view(active_document, settings, file_status)),
+    )))
     .height(Fill)
     .width(Fill)
     .style(styles::app_shell);
+    // A quiet shell needs one composite. When any child has a pending redraw
+    // (caret, scrolling, or fade), draw it live and let the smaller caches help.
+    let shell = raster_cache::cached_animated(shell);
 
     let with_menu: Element<'a, Message> = if active_menu.is_some() {
         stack![

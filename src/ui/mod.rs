@@ -14,6 +14,7 @@ pub mod icons;
 pub mod info_vfx;
 pub mod menu;
 pub mod motion;
+pub(crate) mod raster_cache;
 pub mod settings_panel;
 pub mod status_bar;
 pub mod styles;

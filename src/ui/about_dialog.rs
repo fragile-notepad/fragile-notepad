@@ -4,7 +4,7 @@ use iced::{Center, Element, Fill, Length};
 use crate::message::{AboutTab, Message};
 use crate::ui::controls::{centered_button_label, centered_fill_button_label};
 use crate::ui::motion::{fade_button, fade_container};
-use crate::ui::{info_vfx, motion, styles};
+use crate::ui::{info_vfx, motion, raster_cache, styles};
 
 const APP_NAME: &str = "Fragile Notepad";
 
@@ -168,34 +168,43 @@ fn dialog(
     container(
         column![
             container(
-                column![header(progress, interactive), tabs(active_tab, progress)].spacing(12)
+                column![
+                    header(progress, interactive),
+                    raster_cache::cached(tabs(active_tab, progress))
+                ]
+                .spacing(12)
             )
             .padding([20, 28]),
-            container(content).padding([0, 28]).height(Fill).width(Fill),
-            container(
-                column![
-                    divider(progress),
-                    row![
-                        muted(
-                            text(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12),
-                            progress
-                        ),
-                        space::horizontal(),
-                        button(centered_button_label("Close", 13))
-                            .padding([8, 24])
-                            .style(move |theme, status| fade_button(
-                                styles::primary_command_button(theme, status),
+            container(raster_cache::cached_animated(content))
+                .padding([0, 28])
+                .height(Fill)
+                .width(Fill),
+            raster_cache::cached(
+                container(
+                    column![
+                        divider(progress),
+                        row![
+                            muted(
+                                text(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12),
                                 progress
-                            ))
-                            .on_press(Message::AboutClosed),
+                            ),
+                            space::horizontal(),
+                            button(centered_button_label("Close", 13))
+                                .padding([8, 24])
+                                .style(move |theme, status| fade_button(
+                                    styles::primary_command_button(theme, status),
+                                    progress
+                                ))
+                                .on_press(Message::AboutClosed),
+                        ]
+                        .spacing(10)
+                        .align_y(Center)
+                        .width(Fill),
                     ]
-                    .spacing(10)
-                    .align_y(Center)
-                    .width(Fill),
-                ]
-                .spacing(14)
-            )
-            .padding([16, 28]),
+                    .spacing(14)
+                )
+                .padding([16, 28])
+            ),
         ]
         .height(Fill)
         .width(Fill),
@@ -210,31 +219,33 @@ fn dialog(
 fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
     stack![
         info_vfx::view(progress, effects_running),
-        container(
-            row![
-                // The shared VFX widget draws and animates the logo in this slot.
-                space()
-                    .width(info_vfx::LOGO_SIZE)
-                    .height(info_vfx::LOGO_SIZE),
-                column![
-                    text(APP_NAME).size(23).font(iced::Font {
-                        weight: iced::font::Weight::Semibold,
-                        ..iced::Font::DEFAULT
-                    }),
-                    muted(
-                        text("A lightweight editor for everyday text.").size(13),
-                        progress
-                    ),
+        raster_cache::cached(
+            container(
+                row![
+                    // The shared VFX widget draws and animates the logo in this slot.
+                    space()
+                        .width(info_vfx::LOGO_SIZE)
+                        .height(info_vfx::LOGO_SIZE),
+                    column![
+                        text(APP_NAME).size(23).font(iced::Font {
+                            weight: iced::font::Weight::Semibold,
+                            ..iced::Font::DEFAULT
+                        }),
+                        muted(
+                            text("A lightweight editor for everyday text.").size(13),
+                            progress
+                        ),
+                    ]
+                    .spacing(6)
+                    .width(Fill),
                 ]
-                .spacing(6)
-                .width(Fill),
-            ]
-            .spacing(14)
-            .align_y(Center)
-        )
-        .width(Fill)
-        .height(info_vfx::HEADER_HEIGHT)
-        .center_y(Fill),
+                .spacing(14)
+                .align_y(Center)
+            )
+            .width(Fill)
+            .height(info_vfx::HEADER_HEIGHT)
+            .center_y(Fill)
+        ),
     ]
     .into()
 }

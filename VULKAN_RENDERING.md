@@ -30,6 +30,9 @@ worker. Pending asynchronous images prevent reuse until a complete paint.
 Cold paints add offscreen passes to the existing encoder and submission;
 warm paints need only a textured triangle. Glyph and image cache generations
 advance once after all child surfaces and the main scene are prepared.
+Surfaces invalidated on consecutive frames paint directly until their stamp
+settles. This avoids rebuilding offscreen textures on every scroll or fade frame;
+the settled paint refreshes once before later hits reuse its pixels.
 
 This follows [Chromium's retained rendering model](https://developer.chrome.com/docs/chromium/renderingng-architecture)
 and its [reuse of undamaged render passes](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/viz/service/display/direct_renderer.cc).
@@ -44,6 +47,15 @@ never assumed. DPI, dimensions, background, fonts, and pending image uploads for
 fresh painting. Custom primitives and meshes remain conservatively dirty. Calls
 that load an external target keep ordinary rendering. Dirty tiles and GPU scroll
 copying remain future work.
+
+Retention is opportunistic. Sparse decorations render directly; copying a whole
+window would cost more than their paint. Damage covering more than half the window
+also renders directly, avoiding an extra full-frame copy during rapid scrolling or
+large fades. Repeated viewport/background changes also bypass retention while
+resizing or transitioning. Once changes settle, a complete refresh restores valid retained
+pixels. Renderer counters expose direct frames alongside full/partial repaints
+and reuse. Offscreen pixel tests can disable this cost policy to exercise every
+retained path at small dimensions.
 
 ## Runtime and maintenance
 

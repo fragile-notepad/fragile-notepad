@@ -190,6 +190,11 @@ impl Renderer {
         self.raster_cache.set_budget(bytes);
     }
 
+    /// Controls the default bypass for surfaces invalidated on consecutive frames.
+    pub fn set_raster_cache_heuristics_enabled(&mut self, enabled: bool) {
+        self.raster_cache.set_heuristics(enabled);
+    }
+
     /// Returns final-frame repaint activity and retained texture bytes.
     pub fn composition_cache_statistics(&self) -> CompositionCacheStatistics {
         self.composition.stats()
@@ -203,6 +208,12 @@ impl Renderer {
     /// Enables retained final-frame painting and conservative damage tracking.
     pub fn set_composition_cache_enabled(&mut self, enabled: bool) {
         self.composition.set_enabled(enabled);
+    }
+
+    /// Controls the default sparse-scene and broad-damage bypass policy.
+    /// Disable for deterministic offscreen validation of retained pixels.
+    pub fn set_composition_cache_heuristics_enabled(&mut self, enabled: bool) {
+        self.composition.set_heuristics(enabled);
     }
 
     /// Sets the shared mask atlas size to retain before evicting older glyphs.

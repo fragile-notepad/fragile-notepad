@@ -5,6 +5,7 @@ use iced::advanced::renderer::{self, Renderer as _};
 use iced::advanced::text::{self, Renderer as _};
 use iced::{Color, Font, Pixels, Point, Rectangle, Size, Transformation, alignment};
 use iced_wgpu::graphics::{Antialiasing, Shell, Viewport, color, mesh};
+use iced_wgpu::primitive::{self, Renderer as _};
 use mesh::Renderer as _;
 
 const SIZE: Size<u32> = Size::new(128, 96);
@@ -57,6 +58,9 @@ impl Gpu {
     fn renderer(&self, enabled: bool) -> iced_wgpu::Renderer {
         let mut renderer =
             iced_wgpu::Renderer::new(self.engine.clone(), renderer::Settings::default());
+        // These small fixtures must exercise retention even when production
+        // heuristics would correctly choose direct painting for their cost.
+        renderer.set_composition_cache_heuristics_enabled(false);
         renderer.set_composition_cache_budget(if enabled { BUDGET } else { 0 });
         renderer
     }
@@ -803,4 +807,229 @@ fn pending_image_pixels_cannot_freeze_the_final_frame_before_upload_completion()
     record(&mut cached);
     assert_eq!(cached.screenshot(&viewport, Color::BLACK), expected);
     assert_reused(before, cached.composition_cache_statistics());
+}
+
+#[derive(Debug)]
+struct SparsePrimitive(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+struct SparsePipeline;
+
+impl primitive::Pipeline for SparsePipeline {
+    fn new(_: &wgpu::Device, _: &wgpu::Queue, _: wgpu::TextureFormat) -> Self {
+        Self
+    }
+}
+
+impl primitive::Primitive for SparsePrimitive {
+    type Pipeline = SparsePipeline;
+
+    fn prepare(
+        &self,
+        _: &mut SparsePipeline,
+        _: &wgpu::Device,
+        _: &wgpu::Queue,
+        _: &Rectangle,
+        _: &Viewport,
+    ) {
+    }
+
+    fn draw(&self, _: &SparsePipeline, _: &mut wgpu::RenderPass<'_>) -> bool {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        true
+    }
+}
+
+#[test]
+fn default_adaptive_policy_bypasses_sparse_and_scrolling_scenes_then_reuses_quiet_frames() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new(wgpu::TextureFormat::Rgba8Unorm, None) else {
+        return;
+    };
+    // Construct directly: the ordinary harness deliberately opts out above.
+    let mut adaptive = iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
+    let mut direct = gpu.renderer(false);
+    let calls = [
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    ];
+    for (frame, alpha) in [0.2, 0.6, 0.2].into_iter().enumerate() {
+        let viewport = begin(&mut adaptive, SIZE, 1.0);
+        begin(&mut direct, SIZE, 1.0);
+        for (renderer, calls) in [(&mut adaptive, &calls[0]), (&mut direct, &calls[1])] {
+            simple_scene(renderer, false);
+            fill(
+                renderer,
+                rect(8.0, 8.0, 8.0, 8.0),
+                Color::from_rgba(0.0, 1.0, 0.0, alpha),
+            );
+            renderer.draw_primitive(rect(4.0, 4.0, 20.0, 12.0), SparsePrimitive(calls.clone()));
+        }
+        let before = adaptive.composition_cache_statistics();
+        assert_pixels(
+            &adaptive.screenshot(&viewport, Color::BLACK),
+            &direct.screenshot(&viewport, Color::BLACK),
+            SIZE,
+            "default sparse bypass",
+        );
+        let after = adaptive.composition_cache_statistics();
+        assert_eq!(after.direct_frames, before.direct_frames + 1);
+        assert_eq!(after.bytes, 0);
+        assert_eq!(after.full_repaints, before.full_repaints);
+        assert_eq!(after.partial_repaints, before.partial_repaints);
+        assert_eq!(after.reused_frames, before.reused_frames);
+        assert_eq!(
+            calls[0].load(std::sync::atomic::Ordering::Relaxed),
+            frame + 1
+        );
+    }
+
+    // A dense editor-like scene is worth retaining while quiet. Scrolling
+    // changes over half the frame, so it should paint directly for that frame.
+    let dense = |renderer: &mut iced_wgpu::Renderer, scroll: f32| {
+        for row in 0..14 {
+            for column in 0..16 {
+                fill(
+                    renderer,
+                    rect(column as f32 * 8.0, row as f32 * 8.0 - scroll, 8.0, 8.0),
+                    if (row + column) % 2 == 0 {
+                        Color::from_rgb(1.0, 0.0, 0.0)
+                    } else {
+                        Color::from_rgb(0.0, 0.0, 1.0)
+                    },
+                );
+            }
+        }
+    };
+    for (frame, scroll) in [0.0, 0.0, 4.0, 4.0, 4.0].into_iter().enumerate() {
+        let viewport = begin(&mut adaptive, SIZE, 1.0);
+        begin(&mut direct, SIZE, 1.0);
+        dense(&mut adaptive, scroll);
+        dense(&mut direct, scroll);
+        let before = adaptive.composition_cache_statistics();
+        assert_pixels(
+            &adaptive.screenshot(&viewport, Color::BLACK),
+            &direct.screenshot(&viewport, Color::BLACK),
+            SIZE,
+            "default scroll bypass/recovery",
+        );
+        let after = adaptive.composition_cache_statistics();
+        match frame {
+            1 | 4 => assert_reused(before, after),
+            2 => {
+                assert_eq!(after.direct_frames, before.direct_frames + 1);
+                assert_eq!(after.full_repaints, before.full_repaints);
+                assert_eq!(after.partial_repaints, before.partial_repaints);
+                assert_eq!(after.reused_frames, before.reused_frames);
+                assert_eq!(after.damaged_pixels, before.damaged_pixels);
+            }
+            _ => {
+                assert_eq!(after.full_repaints, before.full_repaints + 1);
+                assert_eq!(after.direct_frames, before.direct_frames);
+            }
+        }
+    }
+
+    // One resize refreshes the retained target. A consecutive resize bypasses
+    // retention, leaving an older texture whose actual dimensions must be
+    // checked when the viewport settles and retention resumes.
+    for (frame, size) in [
+        SIZE,
+        Size::new(120, 88),
+        Size::new(112, 80),
+        Size::new(112, 80),
+        Size::new(112, 80),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let viewport = begin(&mut adaptive, size, 1.0);
+        begin(&mut direct, size, 1.0);
+        dense(&mut adaptive, 4.0);
+        dense(&mut direct, 4.0);
+        let before = adaptive.composition_cache_statistics();
+        assert_pixels(
+            &adaptive.screenshot(&viewport, Color::BLACK),
+            &direct.screenshot(&viewport, Color::BLACK),
+            size,
+            "default consecutive resize bypass/recovery",
+        );
+        let after = adaptive.composition_cache_statistics();
+        match frame {
+            0 | 4 => {
+                assert_reused(before, after);
+                assert_eq!(after.direct_frames, before.direct_frames);
+            }
+            2 => {
+                assert_eq!(after.direct_frames, before.direct_frames + 1);
+                assert_eq!(after.full_repaints, before.full_repaints);
+                assert_eq!(after.partial_repaints, before.partial_repaints);
+                assert_eq!(after.reused_frames, before.reused_frames);
+                assert_eq!(after.damaged_pixels, before.damaged_pixels);
+                assert_eq!(after.bytes, before.bytes, "bypass must avoid reallocating");
+            }
+            _ => {
+                assert_eq!(after.full_repaints, before.full_repaints + 1);
+                assert_eq!(after.direct_frames, before.direct_frames);
+                assert_eq!(after.partial_repaints, before.partial_repaints);
+                assert_eq!(after.reused_frames, before.reused_frames);
+                assert_eq!(
+                    after.damaged_pixels - before.damaged_pixels,
+                    u64::from(size.width) * u64::from(size.height),
+                );
+            }
+        }
+        if frame != 2 {
+            assert_eq!(
+                after.bytes,
+                u64::from(size.width) * u64::from(size.height) * 4
+            );
+        }
+    }
+}
+
+#[test]
+fn partial_clear_uses_the_background_that_settled_after_direct_frames() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new(wgpu::TextureFormat::Rgba8UnormSrgb, None) else {
+        return;
+    };
+    let mut adaptive = iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
+    let mut direct = gpu.renderer(false);
+    let blue = Color::from_rgb(0.1, 0.2, 0.7);
+    let green = Color::from_rgb(0.1, 0.7, 0.2);
+    for (frame, clear) in [Color::BLACK, blue, green, green, green, green]
+        .into_iter()
+        .enumerate()
+    {
+        let viewport = begin(&mut adaptive, SIZE, 1.0);
+        begin(&mut direct, SIZE, 1.0);
+        for renderer in [&mut adaptive, &mut direct] {
+            // Enough stable paint to retain, with a later removal exposing
+            // the background inside a small damage region.
+            for column in 0..32 {
+                fill(
+                    renderer,
+                    rect(column as f32 * 3.0, 60.0, 2.0, 2.0),
+                    Color::WHITE,
+                );
+            }
+            if frame < 4 {
+                simple_scene(renderer, false);
+            }
+        }
+        let before = adaptive.composition_cache_statistics();
+        assert_pixels(
+            &adaptive.screenshot(&viewport, clear),
+            &direct.screenshot(&viewport, clear),
+            SIZE,
+            "background transition bypass/recovery/partial clear",
+        );
+        let after = adaptive.composition_cache_statistics();
+        match frame {
+            2 => assert_eq!(after.direct_frames, before.direct_frames + 1),
+            4 => assert_partial(before, after),
+            5 => assert_reused(before, after),
+            _ => assert_eq!(after.full_repaints, before.full_repaints + 1),
+        }
+    }
 }

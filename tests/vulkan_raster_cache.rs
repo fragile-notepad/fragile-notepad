@@ -125,7 +125,84 @@ impl Gpu {
     }
 
     fn renderer(&self) -> iced_wgpu::Renderer {
-        iced_wgpu::Renderer::new(self.engine.clone(), renderer::Settings::default())
+        let mut renderer =
+            iced_wgpu::Renderer::new(self.engine.clone(), renderer::Settings::default());
+        // Keep the existing exact capture counters independent of the default
+        // policy that declines repeatedly changing layer stamps.
+        renderer.set_raster_cache_heuristics_enabled(false);
+        renderer
+    }
+}
+
+#[test]
+fn default_volatile_layers_draw_latest_pixels_then_refresh_and_hit_when_stable() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new() else { return };
+    // Construct directly so the new policy keeps its default enabled value.
+    let mut cached =
+        iced_wgpu::Renderer::new(gpu.engine.clone(), renderer::Settings::default());
+    let mut direct = gpu.renderer();
+    // Isolate layer retention from the independent final-frame policy.
+    cached.set_composition_cache_budget(0);
+    direct.set_composition_cache_budget(0);
+    let token = renderer::Cache::new();
+    let calls = Cell::new(0);
+    let frame_bounds = rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
+    for (frame, (key, x, alpha)) in [
+        (1, 8.0, 0.75),
+        (1, 8.0, 0.75),
+        (2, 16.0, 0.5),
+        (3, 24.0, 0.35),
+        (4, 32.0, 0.8),
+        (5, 40.0, 0.2),
+        (5, 40.0, 0.2),
+        (5, 40.0, 0.2),
+        (5, 40.0, 0.2),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let viewport = begin_frame(&mut cached, 1.0);
+        begin_frame(&mut direct, 1.0);
+        let bounds = rect(x, 8.0, 24.0, 16.0);
+        for renderer in [&mut cached, &mut direct] {
+            fill(renderer, frame_bounds, Color::from_rgb(0.0, 0.0, 1.0));
+        }
+        let paint = |renderer: &mut iced_wgpu::Renderer| {
+            fill(renderer, bounds, Color::from_rgba(1.0, 0.0, 0.0, alpha));
+            fill(
+                renderer,
+                rect(x + 12.0, 12.0, 4.0, 4.0),
+                Color::from_rgba(0.0, 1.0, 0.0, alpha),
+            );
+        };
+        cached.with_cached_layer(&token, key, bounds, |renderer| {
+            calls.set(calls.get() + 1);
+            paint(renderer);
+        });
+        direct.with_layer(bounds, paint);
+        for renderer in [&mut cached, &mut direct] {
+            renderer.with_layer(frame_bounds, |renderer| {
+                fill(
+                    renderer,
+                    rect(52.0, 16.0, 12.0, 12.0),
+                    Color::from_rgba(1.0, 1.0, 0.0, 0.5),
+                );
+            });
+        }
+        let actual = cached.screenshot(&viewport, Color::BLACK);
+        let expected = direct.screenshot(&viewport, Color::BLACK);
+        assert_pixels_match(&actual, &expected, &format!("volatile layer frame {frame}"));
+        assert!(pixel(&actual, x as u32 + 4, 12)[0] > 0, "latest layer paint missing");
+        if x > 8.0 {
+            assert_eq!(pixel(&actual, 10, 10), [0, 0, 255, 255], "old position retained");
+        }
+        let statistics = cached.raster_cache_statistics();
+        assert_eq!(statistics.rasterizations, [1, 1, 2, 2, 2, 2, 3, 3, 3][frame]);
+        assert_eq!(statistics.volatile_fallbacks, [0, 0, 0, 1, 2, 3, 3, 3, 3][frame]);
+        assert_eq!(statistics.hits, [0, 1, 1, 1, 1, 1, 1, 2, 3][frame]);
+        assert_eq!(calls.get(), [1, 1, 2, 3, 4, 5, 6, 6, 6][frame]);
+        assert!(statistics.bytes <= DEFAULT_BUDGET);
     }
 }
 

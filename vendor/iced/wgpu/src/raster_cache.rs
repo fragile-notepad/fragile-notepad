@@ -13,6 +13,7 @@ pub struct Statistics {
     pub hits: u64,
     pub misses: u64,
     pub live_fallbacks: u64,
+    pub volatile_fallbacks: u64,
     pub rasterizations: u64,
     pub bytes: u64,
     pub entries: usize,
@@ -70,6 +71,8 @@ impl Geometry {
 pub(super) struct Entry {
     owner: Weak<()>,
     stamp: Stamp,
+    observed_stamp: Stamp,
+    last_change_frame: Option<u64>,
     pub(super) target: Arc<raster::Target>,
     pub(super) child: Box<Renderer>,
     pub(super) dirty: bool,
@@ -94,6 +97,7 @@ pub(super) struct State {
     captures: Vec<Capture>,
     frame: u64,
     budget: u64,
+    heuristics: bool,
     statistics: Statistics,
 }
 
@@ -104,12 +108,21 @@ impl Default for State {
             captures: Vec::new(),
             frame: 0,
             budget: DEFAULT_BUDGET,
+            heuristics: true,
             statistics: Statistics::default(),
         }
     }
 }
 
 impl State {
+    pub(super) fn set_heuristics(&mut self, enabled: bool) {
+        self.heuristics = enabled;
+        for entry in self.entries.values_mut() {
+            entry.observed_stamp = entry.stamp;
+            entry.last_change_frame = None;
+        }
+    }
+
     pub(super) fn statistics(&self) -> Statistics {
         Statistics {
             bytes: self.bytes(),
@@ -198,6 +211,12 @@ impl State {
                 .version(),
         };
         if let Some(entry) = self.entries.get_mut(&owner.id()) {
+            let changing = entry.observed_stamp != stamp;
+            let volatile = changing && entry.last_change_frame == Some(self.frame.wrapping_sub(1));
+            if changing {
+                entry.observed_stamp = stamp;
+                entry.last_change_frame = Some(self.frame);
+            }
             if entry.stamp == stamp && entry.valid {
                 entry.used = self.frame;
                 renderer
@@ -219,8 +238,16 @@ impl State {
                 // A single texture cannot hold two different paints in one submission.
                 return self.live();
             }
+            if self.heuristics && volatile {
+                // Repeated invalidation makes an offscreen pass an extra cost,
+                // not reusable work. Paint the latest content directly until
+                // its stamp settles, then refresh the retained pixels once.
+                self.statistics.volatile_fallbacks += 1;
+                return self.live();
+            }
         }
         let old = self.entries.remove(&owner.id());
+        let last_change_frame = old.as_ref().and_then(|entry| entry.last_change_frame);
         let mut entry = match old {
             Some(mut entry) if entry.stamp.geometry.size == geometry.size => {
                 entry.stamp = stamp;
@@ -233,6 +260,8 @@ impl State {
                 Entry {
                     owner: owner.downgrade(),
                     stamp,
+                    observed_stamp: stamp,
+                    last_change_frame,
                     target: Arc::new(
                         renderer
                             .engine

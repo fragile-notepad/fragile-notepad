@@ -37,6 +37,9 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 - Custom primitives can prepare offscreen passes in the existing frame encoder.
 - Retain a bounded final frame, repaint conservative scene damage, and copy
   completed pixels to each acquired target without relying on swapchain history.
+  Sparse scenes and broad damage draw directly to avoid extra copy bandwidth.
+- Repeatedly invalidated surfaces paint live during scrolling and fades, then
+  refresh once their paint keys and geometry settle.
 - Software-first handoff with offscreen warm-up, presentation checks, and rollback.
 - Bounded software damage/scroll matching, retained frames, and reusable image/clip caches.
 - Vulkan portability, optional immediates, shared lazy resources, bounded atlases,

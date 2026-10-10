@@ -310,6 +310,10 @@ pub struct Batch {
 type Order = Vec<(Kind, usize)>;
 
 impl Batch {
+    pub(crate) fn len(&self) -> usize {
+        self.solids.len() + self.gradients.len()
+    }
+
     pub(crate) fn damage_snapshot(&self) -> Vec<(Vec<u8>, Rectangle)> {
         let mut snapshot = Vec::with_capacity(self.solids.len() + self.gradients.len());
         let mut solid = 0;

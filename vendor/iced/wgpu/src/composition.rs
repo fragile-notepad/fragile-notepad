@@ -19,6 +19,8 @@ pub struct Statistics {
     pub full_repaints: u64,
     pub partial_repaints: u64,
     pub reused_frames: u64,
+    /// Frames painted directly, including sparse scenes and broad damage.
+    pub direct_frames: u64,
     pub bytes: u64,
     /// Pixels repainted in the retained surface, excluding presentation copies.
     pub damaged_pixels: u64,
@@ -146,6 +148,7 @@ impl LayerSnapshot {
 /// Per-renderer root-frame retention; independent of the child-layer budget.
 pub(crate) struct State {
     enabled: bool,
+    heuristics: bool,
     budget: u64,
     surface: Option<SurfaceTarget>,
     last_snapshot: Vec<LayerSnapshot>,
@@ -155,6 +158,7 @@ pub(crate) struct State {
     fonts: Option<graphics::text::Version>,
     valid: bool,
     pending: bool,
+    context_changed_last_frame: bool,
     statistics: Statistics,
 }
 
@@ -162,6 +166,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             enabled: true,
+            heuristics: true,
             budget: MAX_BYTES,
             surface: None,
             last_snapshot: Vec::new(),
@@ -171,12 +176,20 @@ impl Default for State {
             fonts: None,
             valid: false,
             pending: false,
+            context_changed_last_frame: false,
             statistics: Statistics::default(),
         }
     }
 }
 
 impl State {
+    pub(crate) fn set_heuristics(&mut self, enabled: bool) {
+        if self.heuristics != enabled {
+            self.heuristics = enabled;
+            self.discard();
+        }
+    }
+
     /// The root frame has its own hard 32 MiB ceiling, independent of children.
     pub(crate) fn set_budget(&mut self, bytes: u64) {
         self.budget = bytes.min(MAX_BYTES);
@@ -207,7 +220,7 @@ impl State {
     }
 
     /// Plan from the complete, flushed/merged scene, before drawing its pixels.
-    /// None delegates to ordinary rendering and discards stale root retention.
+    /// None delegates to ordinary rendering; retained pixels remain invalid.
     pub(crate) fn plan(
         &mut self,
         engine: &Engine,
@@ -242,14 +255,25 @@ impl State {
                 && viewport.logical_size().height.is_finite()
         }) else {
             self.discard();
+            self.statistics.direct_frames += 1;
             return None;
         };
+        // Copying a full window costs more bandwidth than clearing and drawing
+        // a handful of changing decorations. Retain scenes with meaningful
+        // reusable paint; custom primitives already own their internal caches.
+        if self.heuristics && !worth_retaining(layers) {
+            self.discard();
+            self.statistics.direct_frames += 1;
+            return None;
+        }
         let fonts = graphics::text::font_system()
             .read()
             .expect("Read font system")
             .version();
         let new_target = self.surface.as_ref().is_none_or(|surface| {
-            self.size != Some(size) || surface.target._texture.format() != engine.format
+            surface.target._texture.width() != size.width
+                || surface.target._texture.height() != size.height
+                || surface.target._texture.format() != engine.format
         });
         let clear_changed = self.previous_clear != Some(clear);
         let full = !self.valid
@@ -257,33 +281,58 @@ impl State {
             || clear_changed
             || self.scale != Some(scale)
             || self.fonts != Some(fonts);
+        let snapshot: Vec<_> = layers
+            .iter()
+            .filter(|layer| !layer.is_empty())
+            .map(LayerSnapshot::new)
+            .collect();
+        let changes = changed_region(&self.last_snapshot, &snapshot, viewport);
+        let stable_context = self.size == Some(size)
+            && self.scale == Some(scale)
+            && self.fonts == Some(fonts)
+            && !clear_changed;
+        let context_changed = self.size.is_some() && !stable_context;
+        let broad = self.heuristics
+            && ((context_changed && self.context_changed_last_frame)
+                || (stable_context
+                    && match changes {
+                        Damage::Full => true,
+                        Damage::Partial(bounds) => {
+                            u64::from(bounds.width) * u64::from(bounds.height)
+                                > u64::from(size.width) * u64::from(size.height) / 2
+                        }
+                        Damage::Reuse => false,
+                    }));
+        self.context_changed_last_frame = context_changed;
+        let damage = if full { Damage::Full } else { changes };
+        self.last_snapshot = snapshot;
+        self.previous_clear = Some(clear);
+        self.size = Some(size);
+        self.scale = Some(scale);
+        self.fonts = Some(fonts);
+        if broad {
+            // Scrolling or large fades should not pay for both a near-complete
+            // repaint and a full-window copy. Keep the candidate scene, but
+            // never reuse old pixels after painting a frame directly. Once
+            // damage settles, a complete refresh makes retention valid again.
+            self.valid = false;
+            self.pending = false;
+            self.statistics.direct_frames += 1;
+            return None;
+        }
         if new_target {
             let pipeline = engine.raster_pipeline();
             self.surface = Some(SurfaceTarget {
                 target: Arc::new(pipeline.create_target(&engine.device, size)),
                 clear: pipeline.create_clear_binding(&engine.device, &clear),
             });
-        } else if clear_changed {
-            // Replace, rather than mutate, bindings that earlier work may use.
+        } else if full {
+            // Direct frames update the observed context without touching this
+            // binding. Refresh it when retention resumes, before partial clears.
             self.surface.as_mut().unwrap().clear = engine
                 .raster_pipeline()
                 .create_clear_binding(&engine.device, &clear);
         }
-        let snapshot: Vec<_> = layers
-            .iter()
-            .filter(|layer| !layer.is_empty())
-            .map(LayerSnapshot::new)
-            .collect();
-        let damage = if full {
-            Damage::Full
-        } else {
-            changed_region(&self.last_snapshot, &snapshot, viewport)
-        };
-        self.last_snapshot = snapshot;
-        self.previous_clear = Some(clear);
-        self.size = Some(size);
-        self.scale = Some(scale);
-        self.fonts = Some(fonts);
         // A plan is only reusable after the caller finishes its requested paint.
         // An abandoned plan or pending asset upload forces the next frame full.
         self.valid = false;
@@ -331,7 +380,28 @@ impl State {
         self.fonts = None;
         self.valid = false;
         self.pending = false;
+        self.context_changed_last_frame = false;
     }
+}
+
+fn worth_retaining(layers: &layer::Stack) -> bool {
+    let mut work = 0usize;
+    for layer in layers.iter().filter(|layer| !layer.is_empty()) {
+        if !layer.rasters.is_empty() {
+            return true;
+        }
+        work = work.saturating_add(layer.quads.len());
+        for item in &layer.text {
+            work = work.saturating_add(match item {
+                text::Item::Group { text, .. } => text.len().saturating_mul(4),
+                text::Item::Cached { .. } => 4,
+            });
+        }
+        if work >= 32 {
+            return true;
+        }
+    }
+    false
 }
 
 fn changed_region(

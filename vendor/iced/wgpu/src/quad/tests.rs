@@ -1,6 +1,165 @@
 use super::*;
 use crate::core::{Color, gradient};
 
+mod batching {
+    use super::*;
+
+    fn batch(kinds: &[Kind], start: usize) -> Batch {
+        let mut batch = Batch::default();
+        let color = Color::from_rgba(0.2, 0.4, 0.6, 0.5);
+        let gradient = gradient::Linear::new(0.0)
+            .add_stop(0.0, color)
+            .add_stop(1.0, Color::from_rgba(0.6, 0.4, 0.2, 0.5));
+
+        for (index, kind) in kinds.iter().enumerate() {
+            let quad = Quad {
+                // Overlapping translucent quads make order significant.
+                position: [(start + index) as f32, 0.0],
+                size: [32.0, 32.0],
+                ..Quad::zeroed()
+            };
+            let background = match kind {
+                Kind::Solid => Background::Color(color),
+                Kind::Gradient => Background::Gradient(gradient.into()),
+            };
+            batch.add(quad, &background);
+        }
+
+        batch
+    }
+
+    fn sequence(batch: &Batch) -> Vec<(Kind, f32)> {
+        let mut solids = batch.solids.iter();
+        let mut gradients = batch.gradients.iter();
+        let mut sequence = Vec::new();
+
+        for (kind, count) in &batch.order {
+            for _ in 0..*count {
+                let quad = match kind {
+                    Kind::Solid => &solids.next().expect("solid run instance").quad,
+                    Kind::Gradient => &gradients.next().expect("gradient run instance").quad,
+                };
+                sequence.push((*kind, quad.position[0]));
+            }
+        }
+
+        assert!(solids.next().is_none(), "all solid instances drawn");
+        assert!(gradients.next().is_none(), "all gradient instances drawn");
+        sequence
+    }
+
+    fn assert_drained(batch: &Batch) {
+        assert!(batch.is_empty());
+        assert!(batch.solids.is_empty());
+        assert!(batch.gradients.is_empty());
+        assert!(batch.order.is_empty());
+    }
+
+    #[test]
+    fn append_coalesces_matching_solid_and_gradient_boundaries() {
+        for (kind, other) in [(Kind::Solid, Kind::Gradient), (Kind::Gradient, Kind::Solid)] {
+            let mut target = batch(&[other, kind, kind], 0);
+            let mut donor = batch(&[kind, kind, other], 3);
+            let expected = [sequence(&target), sequence(&donor)].concat();
+            let solids: Vec<u8> = [
+                bytemuck::cast_slice(&target.solids),
+                bytemuck::cast_slice(&donor.solids),
+            ]
+            .concat();
+            let gradients: Vec<u8> = [
+                bytemuck::cast_slice(&target.gradients),
+                bytemuck::cast_slice(&donor.gradients),
+            ]
+            .concat();
+
+            target.append(&mut donor);
+
+            assert_eq!(target.order, [(other, 1), (kind, 4), (other, 1)]);
+            assert_eq!(sequence(&target), expected);
+            assert_eq!(bytemuck::cast_slice::<_, u8>(&target.solids), solids);
+            assert_eq!(bytemuck::cast_slice::<_, u8>(&target.gradients), gradients);
+            assert_drained(&donor);
+        }
+    }
+
+    #[test]
+    fn append_preserves_alternating_translucent_draw_order() {
+        let kinds = [Kind::Solid, Kind::Gradient, Kind::Solid, Kind::Gradient];
+        let mut target = batch(&kinds, 0);
+        let mut donor = batch(&kinds, 4);
+        let expected = [sequence(&target), sequence(&donor)].concat();
+
+        target.append(&mut donor);
+
+        assert_eq!(target.order.len(), 8);
+        assert!(target.order.iter().all(|(_, count)| *count == 1));
+        assert_eq!(sequence(&target), expected);
+        assert_drained(&donor);
+    }
+
+    #[test]
+    fn append_handles_empty_batches_and_retains_donor_allocations() {
+        let mut target = Batch::default();
+        let mut donor = batch(&[Kind::Solid, Kind::Gradient], 0);
+        let expected = sequence(&donor);
+        let capacities = (
+            donor.solids.capacity(),
+            donor.gradients.capacity(),
+            donor.order.capacity(),
+        );
+
+        target.append(&mut donor);
+        target.append(&mut donor);
+
+        assert_eq!(sequence(&target), expected);
+        assert_drained(&donor);
+        assert_eq!(
+            (
+                donor.solids.capacity(),
+                donor.gradients.capacity(),
+                donor.order.capacity(),
+            ),
+            capacities
+        );
+
+        target.clear();
+        target.append(&mut donor);
+        assert_drained(&target);
+    }
+
+    #[test]
+    fn repeated_appends_coalesce_only_adjacent_runs() {
+        let mut target = Batch::default();
+        let mut expected = Vec::new();
+        let chunks: &[&[Kind]] = &[
+            &[Kind::Solid, Kind::Solid],
+            &[Kind::Solid],
+            &[],
+            &[Kind::Gradient, Kind::Gradient],
+            &[Kind::Gradient, Kind::Solid],
+            &[Kind::Solid, Kind::Gradient],
+        ];
+
+        for chunk in chunks {
+            let mut donor = batch(chunk, expected.len());
+            expected.extend(sequence(&donor));
+            target.append(&mut donor);
+            assert_eq!(sequence(&target), expected);
+            assert_drained(&donor);
+        }
+
+        assert_eq!(
+            target.order,
+            [
+                (Kind::Solid, 3),
+                (Kind::Gradient, 3),
+                (Kind::Solid, 2),
+                (Kind::Gradient, 1),
+            ]
+        );
+    }
+}
+
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
     let instance = INSTANCE.get_or_init(|| {

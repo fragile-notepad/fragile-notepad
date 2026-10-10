@@ -11,6 +11,9 @@ use crate::quad::{self, Quad};
 use crate::text::{self, Text};
 use crate::triangle;
 
+#[cfg(test)]
+mod tests;
+
 pub type Stack = layer::Stack<Layer>;
 
 #[derive(Debug)]
@@ -224,10 +227,7 @@ impl Layer {
     pub fn draw_text_group(&mut self, text: Vec<Text>, transformation: Transformation) {
         self.flush_text();
 
-        self.text.push(text::Item::Group {
-            text,
-            transformation,
-        });
+        self.push_text_group(text, transformation);
     }
 
     pub fn draw_text_cache(&mut self, cache: text::Cache, transformation: Transformation) {
@@ -262,10 +262,39 @@ impl Layer {
 
     fn flush_text(&mut self) {
         if !self.pending_text.is_empty() {
-            self.text.push(text::Item::Group {
-                transformation: Transformation::IDENTITY,
-                text: self.pending_text.drain(..).collect(),
-            });
+            match self.text.last_mut() {
+                Some(text::Item::Group {
+                    transformation,
+                    text,
+                }) if *transformation == Transformation::IDENTITY => {
+                    // Reuse the group and retain the pending allocation for
+                    // later draws instead of allocating another group.
+                    text.append(&mut self.pending_text);
+                }
+                _ => {
+                    self.text.push(text::Item::Group {
+                        transformation: Transformation::IDENTITY,
+                        text: self.pending_text.drain(..).collect(),
+                    });
+                }
+            }
+        }
+    }
+
+    fn push_text_group(&mut self, mut text: Vec<Text>, transformation: Transformation) {
+        match self.text.last_mut() {
+            Some(text::Item::Group {
+                transformation: previous_transformation,
+                text: previous_text,
+            }) if *previous_transformation == transformation => {
+                previous_text.append(&mut text);
+            }
+            _ => {
+                self.text.push(text::Item::Group {
+                    text,
+                    transformation,
+                });
+            }
         }
     }
 }
@@ -356,7 +385,19 @@ impl graphics::Layer for Layer {
         self.triangles.append(&mut layer.triangles);
         self.primitives.append(&mut layer.primitives);
         self.images.append(&mut layer.images);
-        self.text.append(&mut layer.text);
+
+        // The stack only merges layers with matching clip bounds. Within
+        // those bounds, preserve cached items and transformation changes as
+        // barriers while joining adjacent compatible groups in draw order.
+        for item in layer.text.drain(..) {
+            match item {
+                text::Item::Group {
+                    text,
+                    transformation,
+                } => self.push_text_group(text, transformation),
+                item => self.text.push(item),
+            }
+        }
     }
 }
 

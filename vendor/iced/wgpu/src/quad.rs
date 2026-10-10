@@ -358,6 +358,20 @@ impl Batch {
     pub fn append(&mut self, batch: &mut Batch) {
         self.solids.append(&mut batch.solids);
         self.gradients.append(&mut batch.gradients);
+
+
+        // Each batch already contains maximal same-kind runs. Only the join
+        // can introduce another compatible run; keep all other runs in order.
+        if let (Some((last_kind, last_count)), Some((first_kind, first_count))) =
+            (self.order.last_mut(), batch.order.first())
+            && *last_kind == *first_kind
+        {
+            *last_count += *first_count;
+            self.order.extend(batch.order.drain(1..));
+            batch.order.clear();
+            return;
+        }
+
         self.order.append(&mut batch.order);
     }
 }

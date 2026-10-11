@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Service
+Name=Fragile Notepad
+MimeType=application/octet-stream;
+Actions=FragileNotepadEdit;
+ServiceTypes=KonqPopupMenu/Plugin
+# Singular filters visibility; plural prevents URL downloads before validation.
+X-KDE-Protocol=file
+X-KDE-Protocols=KIO
+X-KDE-MinNumberOfUrls=1
+X-KDE-MaxNumberOfUrls=4096
+X-KDE-Priority=TopLevel
+TryExec=@FRAGILE_SHELL_LAUNCHER_TRYEXEC@
+
+[Desktop Action FragileNotepadEdit]
+Name=Edit with Fragile Notepad
+Icon=accessories-text-editor
+Exec=@FRAGILE_SHELL_LAUNCHER_DESKTOP@ --file-urls -- %U

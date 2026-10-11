@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.fragilenotepad.finder-services</string>
+    <key>CFBundleName</key>
+    <string>Fragile Notepad</string>
+    <key>CFBundleDisplayName</key>
+    <string>Fragile Notepad Services</string>
+    <key>CFBundleExecutable</key>
+    <string>Fragile Notepad</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>FragileNotepadExecutable</key>
+    <string>@FRAGILE_NOTEPAD_EXECUTABLE_XML@</string>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Edit with Fragile Notepad</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>editFiles</string>
+            <key>NSPortName</key>
+            <string>FragileNotepadFinderServices</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>NSRequiredContext</key>
+            <dict>
+                <key>NSApplicationIdentifier</key>
+                <string>com.apple.finder</string>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>

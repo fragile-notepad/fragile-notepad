@@ -15,6 +15,10 @@ Preserve dependency/runtime notices. Icons and syntax resources are embedded.
 
 [The nightly workflow](.github/workflows/nightly.yml) defines targets and archives.
 
+Optional [file-manager integrations](components/README.md) are standalone and unused,
+excluded from app builds, CI, and portable archives. Build and install them separately;
+installer integration, including NSIS, is deferred.
+
 ## macOS runtime
 
 Install `molten-vk vulkan-loader vulkan-tools` with Homebrew, then:

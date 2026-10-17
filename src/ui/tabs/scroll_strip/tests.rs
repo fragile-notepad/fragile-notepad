@@ -181,6 +181,241 @@ fn hovering_a_tab_fades_in_and_reverses_without_jumping() {
 }
 
 #[test]
+fn fade_and_emphasis_reverse_in_both_directions_without_jumping() {
+    let start = Instant::now();
+    for (forward, backward) in [(FADE_IN, FADE_OUT), (EMPHASIS_DURATION, EMPHASIS_DURATION)] {
+        for initially_visible in [false, true] {
+            let initial = if initially_visible { 1.0 } else { 0.0 };
+            let (outbound, inbound) = if initially_visible {
+                (backward, forward)
+            } else {
+                (forward, backward)
+            };
+            // Include immediate reversal, intermediate frames, and both sides
+            // of the endpoint where advance clears the animation clock.
+            for elapsed in [
+                Duration::ZERO,
+                Duration::from_millis(1),
+                outbound / 2,
+                outbound - Duration::from_millis(1),
+                outbound,
+                outbound + FRAME,
+            ] {
+                let mut transition = Transition {
+                    value: initial,
+                    target: initial,
+                    ..Default::default()
+                };
+                transition.retarget(!initially_visible, start, outbound);
+                let reversed_at = start + elapsed;
+                transition.advance(reversed_at);
+                let before = transition.value;
+                transition.retarget(initially_visible, reversed_at, inbound);
+                close(transition.value, before);
+                close(transition.from, before);
+                close(transition.target, initial);
+                let mut previous = before;
+                for step in 1..=8 {
+                    transition.advance(reversed_at + inbound * step / 8);
+                    assert!((0.0..=1.0).contains(&transition.value));
+                    if initially_visible {
+                        assert!(transition.value >= previous);
+                    } else {
+                        assert!(transition.value <= previous);
+                    }
+                    previous = transition.value;
+                }
+                close(transition.value, initial);
+                assert!(transition.started.is_none());
+            }
+            // Repeated reversals must preserve the sampled value every time
+            // and eventually settle at whichever endpoint was requested last.
+            let mut transition = Transition {
+                value: initial,
+                target: initial,
+                ..Default::default()
+            };
+            let mut now = start;
+            let mut visible = initially_visible;
+            for index in 0..64 {
+                now += Duration::from_millis([0, 1, 7, 16, 40][index % 5]);
+                transition.advance(now);
+                let before = transition.value;
+                visible = !visible;
+                transition.retarget(visible, now, if visible { forward } else { backward });
+                close(transition.value, before);
+                close(transition.from, before);
+                assert!((0.0..=1.0).contains(&transition.value));
+            }
+            transition.advance(now + forward + backward);
+            close(transition.value, if visible { 1.0 } else { 0.0 });
+            assert!(transition.started.is_none());
+        }
+    }
+}
+
+#[test]
+fn rapid_input_during_fades_requests_a_frame_without_postponing_it() {
+    let renderer = renderer();
+    for visible in [true, false] {
+        let mut element = strip();
+        let (mut tree, node) = mount(&mut element, &renderer);
+        let point = Point::new(50.0, if visible { 15.0 } else { 50.0 });
+        let cursor = pointer(point);
+        // Establish the native Scrollable's status so its own hover redraw
+        // cannot mask a missing animation redraw in the strip.
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(Instant::now())),
+            cursor,
+        );
+        let initial = if visible { 0.0 } else { 1.0 };
+        tree.state.downcast_mut::<State>().reveal = Transition {
+            value: initial,
+            from: initial,
+            target: 1.0 - initial,
+            started: Some(Instant::now()),
+            duration: if visible { FADE_IN } else { FADE_OUT },
+        };
+        let mut requested_frames = 0;
+        for _ in 0..64 {
+            let before = tree.state.downcast_ref::<State>().reveal.value;
+            let (_, redraw, _) = dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Mouse(mouse::Event::CursorMoved { position: point }),
+                cursor,
+            );
+            let reveal = &tree.state.downcast_ref::<State>().reveal;
+            // Scheduling delays may complete the fade between input packets.
+            // Its final value still needs a frame; settled input can stay idle.
+            if reveal.started.is_some() || reveal.value != before {
+                assert_eq!(redraw, window::RedrawRequest::NextFrame);
+                requested_frames += 1;
+            } else {
+                assert_eq!(redraw, window::RedrawRequest::Wait);
+            }
+        }
+        assert!(requested_frames > 0);
+    }
+}
+
+#[test]
+fn fade_redraws_keep_frame_deadlines_and_stop_at_both_endpoints() {
+    let renderer = renderer();
+    let mut element = strip();
+    let (mut tree, node) = mount(&mut element, &renderer);
+    let now = Instant::now();
+    // Only redraw events advance this clock; input events use wall time.
+    for (cursor, start, duration, target) in [
+        (pointer(Point::new(50.0, 15.0)), now, FADE_IN, 1.0),
+        (
+            mouse::Cursor::Unavailable,
+            now + FADE_IN + FRAME,
+            FADE_OUT,
+            0.0,
+        ),
+    ] {
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(start)),
+            cursor,
+        );
+        for (elapsed, expected_value, expected_redraw) in [
+            (
+                duration / 2,
+                0.5,
+                window::RedrawRequest::At(start + duration / 2 + FRAME),
+            ),
+            (duration, target, window::RedrawRequest::Wait),
+        ] {
+            let (_, redraw, _) = dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(start + elapsed)),
+                cursor,
+            );
+            close(
+                tree.state.downcast_ref::<State>().reveal.value,
+                expected_value,
+            );
+            assert_eq!(redraw, expected_redraw);
+        }
+    }
+}
+
+#[test]
+fn input_completing_a_fade_still_requests_its_final_frame() {
+    let renderer = renderer();
+    for (revealed, emphasized, fading_reveal) in [
+        (false, false, true),
+        (true, false, true),
+        (true, true, false),
+        (true, false, false),
+    ] {
+        let mut element = strip();
+        let (mut tree, node) = mount(&mut element, &renderer);
+        let cursor = if revealed {
+            pointer(Point::new(50.0, if emphasized { 2.0 } else { 15.0 }))
+        } else {
+            mouse::Cursor::Unavailable
+        };
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(Instant::now())),
+            cursor,
+        );
+        let state = tree.state.downcast_mut::<State>();
+        for (transition, visible, fading) in [
+            (&mut state.reveal, revealed, fading_reveal),
+            (&mut state.emphasis, emphasized, !fading_reveal),
+        ] {
+            *transition = Transition {
+                value: if fading {
+                    0.5
+                } else if visible {
+                    1.0
+                } else {
+                    0.0
+                },
+                from: if visible { 0.0 } else { 1.0 },
+                target: if visible { 1.0 } else { 0.0 },
+                started: fading.then(|| Instant::now() - FADE_OUT),
+                duration: FADE_OUT,
+            };
+        }
+        let (_, redraw, _) = dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Keyboard(keyboard::Event::ModifiersChanged(
+                keyboard::Modifiers::empty(),
+            )),
+            cursor,
+        );
+        let state = tree.state.downcast_ref::<State>();
+        close(state.reveal.value, if revealed { 1.0 } else { 0.0 });
+        close(state.emphasis.value, if emphasized { 1.0 } else { 0.0 });
+        assert!(state.reveal.started.is_none() && state.emphasis.started.is_none());
+        assert_eq!(redraw, window::RedrawRequest::NextFrame);
+    }
+}
+
+#[test]
 fn dragging_preserves_the_grab_point_clamps_and_suppresses_tab_release() {
     let renderer = renderer();
     let mut element = strip();
@@ -390,6 +625,90 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         cursor,
     );
     close(tree.state.downcast_ref::<State>().metrics.offset, 102.5);
+}
+
+#[test]
+fn wheel_reverses_mid_scroll_in_both_directions_without_jumping() {
+    let renderer = renderer();
+    let cursor = pointer(Point::new(100.0, 2.0));
+    for direction in [-1.0, 1.0] {
+        let mut element = strip();
+        let (mut tree, node) = mount(&mut element, &renderer);
+        let initial = (CONTENT_WIDTH - WIDTH) / 2.0;
+        element.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut ScrollOperation {
+                offset: Some(initial),
+                ..Default::default()
+            },
+        );
+        let wheel = |x| {
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x, y: 0.0 },
+            })
+        };
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            wheel(direction * 4.0),
+            cursor,
+        );
+        close(tree.state.downcast_ref::<State>().metrics.offset, initial);
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(40),
+            )),
+            cursor,
+        );
+        let before = tree.state.downcast_ref::<State>().metrics.offset;
+        assert!((before - initial) * direction < 0.0);
+        assert!((before - initial).abs() < 240.0);
+
+        let (captured, redraw, _) = dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            wheel(-direction * 4.0),
+            cursor,
+        );
+        assert!(captured);
+        assert_ne!(redraw, window::RedrawRequest::Wait);
+        close(tree.state.downcast_ref::<State>().metrics.offset, before);
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(40),
+            )),
+            cursor,
+        );
+        let reversing = tree.state.downcast_ref::<State>().metrics.offset;
+        assert!((reversing - before) * direction > 0.0);
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(400),
+            )),
+            cursor,
+        );
+        let target = (before + direction * 240.0).clamp(0.0, CONTENT_WIDTH - WIDTH);
+        close(tree.state.downcast_ref::<State>().metrics.offset, target);
+        close(tree.state.downcast_ref::<State>().reveal.value, 1.0);
+    }
 }
 
 #[test]

@@ -506,13 +506,22 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
         let reveal = geometry.is_some() && (over_strip || dragging);
         let emphasis = dragging
             || (over_track && geometry.is_some_and(|g| cursor.is_over(g.thumb_hit_bounds())));
+        let previous_values = (state.reveal.value, state.emphasis.value);
         state
             .reveal
             .retarget(reveal, now, if reveal { FADE_IN } else { FADE_OUT });
         state.emphasis.retarget(emphasis, now, EMPHASIS_DURATION);
 
         let animating = state.reveal.started.is_some() || state.emphasis.started.is_some();
-        if animating {
+        let values_changed = previous_values != (state.reveal.value, state.emphasis.value);
+        // Repeated input must not keep pushing the next frame into the future.
+        // It can also advance a transition to its endpoint, which still needs
+        // painting even though neither transition is animating anymore.
+        if !matches!(event, Event::Window(window::Event::RedrawRequested(_)))
+            && (animating || values_changed)
+        {
+            shell.request_redraw();
+        } else if animating {
             shell.request_redraw_at(now + FRAME);
         }
         if offset.is_some() || was_dragging != dragging {

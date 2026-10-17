@@ -1,7 +1,7 @@
 //! Inputs required to render the workbench; independent of application state ownership.
 
 use super::{about_dialog, toolbar::WindowMenuState, window_list_dialog::WindowListEntry};
-use crate::core::{Document, DocumentId, EditorSettings, FindState, Workspace};
+use crate::core::{Document, DocumentId, EditorSettings, EditorWindowId, FindState, Workspace};
 use crate::editor::OutlineState;
 use crate::message::{AboutTab, Menu};
 
@@ -22,6 +22,7 @@ pub(crate) struct ChromeAnimationInfo {
 
 pub(crate) struct WorkbenchView<'a> {
     pub workspace: &'a Workspace,
+    pub editor_window: EditorWindowId,
     pub find: &'a FindState,
     pub settings: &'a EditorSettings,
     pub is_find_visible: bool,

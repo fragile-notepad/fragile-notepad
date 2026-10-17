@@ -45,6 +45,8 @@ pub enum PlatformSpecific {
 /// Describes an event specific to MacOS
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MacOS {
+    /// The running application was reopened from the Dock.
+    Reopened,
     /// Triggered when the app receives an URL from the system
     ///
     /// _**Note:** For this event to be triggered, the executable needs to be properly [bundled]!_

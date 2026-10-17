@@ -1,4 +1,5 @@
 //! Build window-based GUI applications.
+pub mod tab_drag;
 use crate::core::time::Instant;
 use crate::core::window::{
     Direction, Event, Icon, Id, Level, Mode, Screenshot, Settings, UserAttention,
@@ -29,6 +30,9 @@ pub enum Action {
     /// There's no guarantee that this will work unless the left mouse
     /// button was pressed immediately before this function is called.
     Drag(Id),
+
+    /// Control a continuous tab tear-off gesture.
+    TabDrag(tab_drag::Action),
 
     /// Resize the window with the left mouse button until the button is
     /// released.
@@ -63,6 +67,9 @@ pub enum Action {
 
     /// Get the current scale factor (DPI) of the window.
     GetScaleFactor(Id, oneshot::Sender<f32>),
+
+    /// Keep a reachable title strip on an available display.
+    EnsureVisible(Id),
 
     /// Move the window to the given logical coordinates.
     ///
@@ -253,6 +260,12 @@ pub fn close_requests() -> Subscription<Id> {
             None
         }
     })
+}
+
+/// Keeps at least a 64 by 32 logical-pixel title area on an available display.
+/// Reachable negative coordinates are preserved. Unsupported on Wayland.
+pub fn ensure_visible<T>(id: Id) -> Task<T> {
+    task::effect(crate::Action::Window(Action::EnsureVisible(id)))
 }
 
 /// Opens a new window with the given [`Settings`]; producing the [`Id`]

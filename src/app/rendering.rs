@@ -81,6 +81,10 @@ impl App {
     }
 
     pub(super) fn request_gpu_boost(&mut self) -> Task<Message> {
+        if self.tab_drag.is_some() {
+            self.pending_drag_gpu_boost = true;
+            return Task::none();
+        }
         let policy = render_backend_policy(
             &self.settings,
             std::env::var(RENDER_BACKEND_ENV).ok().as_deref(),

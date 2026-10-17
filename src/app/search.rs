@@ -6,7 +6,7 @@ use crate::core::{Document, PreparedSearch};
 use crate::editor::{
     EditorRange, EditorSelection, position_for_byte_offset, word_range_at_position,
 };
-use crate::message::{AdvancedSearchTab, Message};
+use crate::message::{AdvancedSearchTab, Message, SearchScope};
 use crate::ui::advanced_search_panel::QUERY_INPUT_ID;
 use crate::ui::find_panel::FIND_INPUT_ID;
 
@@ -226,6 +226,10 @@ impl App {
                 self.search_dialog.set_include_pattern(include_pattern);
                 self.schedule_search_preview()
             }
+            SearchMessage::AdvancedSearchScopeSelected(scope) => {
+                self.search_dialog.set_scope(scope);
+                self.schedule_search_preview()
+            }
             SearchMessage::AdvancedSearchPreviewDue(generation) => {
                 if generation == self.search_dialog.preview_generation
                     && self.pending_search.is_none()
@@ -243,22 +247,19 @@ impl App {
             }
             SearchMessage::AdvancedFindNextRun => self.advanced_find(true),
             SearchMessage::AdvancedFindPreviousRun => self.advanced_find(false),
-            SearchMessage::AdvancedFindAllCurrentRun => {
-                self.begin_pending_search(SearchScope::Current, SearchOperation::Find)
-            }
-            SearchMessage::AdvancedFindAllOpenRun => {
-                self.begin_pending_search(SearchScope::OpenDocuments, SearchOperation::Find)
+            SearchMessage::AdvancedFindAllCurrentRun | SearchMessage::AdvancedFindAllOpenRun => {
+                self.begin_pending_search(self.dialog_scope(), SearchOperation::Find)
             }
             SearchMessage::AdvancedReplaceRun => self.advanced_replace_current(),
             SearchMessage::AdvancedReplaceAllRun => self.advanced_replace_all(),
-            SearchMessage::AdvancedReplaceAllCurrentRun => {
-                self.replace_all_in(SearchScope::Current)
-            }
-            SearchMessage::AdvancedReplaceAllOpenRun => {
-                self.replace_all_in(SearchScope::OpenDocuments)
-            }
+            SearchMessage::AdvancedReplaceAllCurrentRun
+            | SearchMessage::AdvancedReplaceAllOpenRun => self.replace_all_in(self.dialog_scope()),
             SearchMessage::AdvancedSearchResultSelected(document_id, selection) => {
                 if self.workspace.document(document_id).is_some() {
+                    let Some(owner) = self.workspace.owner_of(document_id) else {
+                        return Task::none();
+                    };
+                    self.switch_editor(owner);
                     self.sync_find_from_dialog();
                     let auto_save = self.auto_save_before_switch(Some(document_id));
                     if !self.workspace.select(document_id) {
@@ -278,7 +279,19 @@ impl App {
                             result.document_id == document_id && result.selection == selection
                         });
                     self.synchronize_selected_find_match();
-                    return Task::batch([auto_save, editor_task]);
+                    self.last_active_editor = Some(owner);
+                    let focus = self
+                        .editor_windows
+                        .get(&owner)
+                        .map(|window| {
+                            self.focused_window_id = Some(window.native);
+                            iced::window::gain_focus(window.native).chain(
+                                operation::focus(crate::ui::editor::EDITOR_ID)
+                                    .scope_window(window.native),
+                            )
+                        })
+                        .unwrap_or_else(Task::none);
+                    return Task::batch([auto_save, editor_task, focus]);
                 }
                 Task::none()
             }
@@ -303,6 +316,7 @@ impl App {
 
     fn toggle_advanced_search_window(&mut self, tab: AdvancedSearchTab) -> Task<Message> {
         self.menu.close();
+        self.advanced_search_owner = Some(self.workspace.current_window_id());
         self.search_dialog.set_active_tab(tab);
         self.sync_dialog_from_find();
         self.refresh_search_results();
@@ -504,14 +518,7 @@ impl App {
     }
 
     fn dialog_scope(&self) -> SearchScope {
-        if matches!(
-            self.search_dialog.active_tab,
-            AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
-        ) {
-            SearchScope::OpenDocuments
-        } else {
-            SearchScope::Current
-        }
+        self.search_dialog.scope
     }
 
     fn begin_pending_search(
@@ -559,30 +566,20 @@ impl App {
     }
 
     fn refresh_search_results(&mut self) {
-        if matches!(
-            self.search_dialog.active_tab,
-            AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
-        ) {
-            self.search_dialog.refresh_from_workspace(&self.workspace);
-            return;
-        }
-
-        let Some(document) = self.workspace.active_document() else {
+        let ids = self.document_ids_for_scope(self.dialog_scope());
+        if ids.is_empty() && self.dialog_scope() == SearchScope::CurrentDocument {
             self.search_dialog.clear_results();
             self.search_dialog.status = String::from("No document");
             return;
-        };
-
-        self.search_dialog.refresh_from_documents([document]);
+        }
+        self.search_dialog
+            .refresh_from_documents(ids.into_iter().filter_map(|id| self.workspace.document(id)));
     }
 
     fn advanced_find(&mut self, forward: bool) -> Task<Message> {
         let Some(_search) = self.prepare_advanced_search() else {
             return Task::none();
         };
-        if matches!(self.dialog_scope(), SearchScope::OpenDocuments) {
-            return self.advanced_find_in_open_documents(forward);
-        }
         let Some(document) = self.workspace.active_document() else {
             self.search_dialog.clear_results();
             self.search_dialog.status = String::from("No document");
@@ -640,97 +637,6 @@ impl App {
         }
     }
 
-    fn advanced_find_in_open_documents(&mut self, forward: bool) -> Task<Message> {
-        if self.search_results_are_stale() || self.search_dialog.results.is_empty() {
-            self.refresh_search_results();
-        }
-        let active = self.workspace.active_document_id();
-        let selection = self
-            .workspace
-            .active_document()
-            .map(Document::main_selection);
-        let selected = self.search_dialog.results.iter().position(|result| {
-            result.document_id == active
-                && Some(result.selection) == selection
-                && (!result.selection.is_caret()
-                    || self.workspace.document(active).is_some_and(|document| {
-                        let range = result.selection.range();
-                        self.find.navigation_match
-                            == Some(crate::core::TextMatch::new(
-                                document.buffer.byte_offset(range.start),
-                                document.buffer.byte_offset(range.end),
-                            ))
-                    }))
-        });
-        let documents = self.workspace.documents();
-        let active_order = documents
-            .iter()
-            .position(|document| document.id == active)
-            .unwrap_or(0);
-        let eligible = |index: usize, result: &crate::search_dialog::SearchResult| {
-            if Some(index) == selected {
-                return false;
-            }
-            if result.document_id == active {
-                return selection.is_none_or(|selection| {
-                    if forward {
-                        result.selection.range().start >= selection.range().end
-                    } else {
-                        result.selection.range().end <= selection.range().start
-                    }
-                });
-            }
-            let order = documents
-                .iter()
-                .position(|document| document.id == result.document_id);
-            order.is_some_and(|order| {
-                if forward {
-                    order > active_order
-                } else {
-                    order < active_order
-                }
-            })
-        };
-        let results = &self.search_dialog.results;
-        let index = if forward {
-            results
-                .iter()
-                .enumerate()
-                .find(|(index, result)| eligible(*index, result))
-                .map(|(index, _)| index)
-                .or_else(|| (self.search_dialog.wrap_around && !results.is_empty()).then_some(0))
-        } else {
-            results
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(index, result)| eligible(*index, result))
-                .map(|(index, _)| index)
-                .or_else(|| {
-                    self.search_dialog
-                        .wrap_around
-                        .then(|| results.len().checked_sub(1))
-                        .flatten()
-                })
-        };
-        let Some(index) = index else {
-            self.search_dialog.status = if results.is_empty() {
-                String::from("No matches")
-            } else if forward {
-                String::from("Reached the last match")
-            } else {
-                String::from("Reached the first match")
-            };
-            return Task::none();
-        };
-        let result = results[index].clone();
-        self.search_dialog.status = format!("{} of {} displayed matches", index + 1, results.len());
-        self.update_search(SearchMessage::AdvancedSearchResultSelected(
-            result.document_id,
-            result.selection,
-        ))
-    }
-
     fn scoped_search_documents(&self) -> Vec<crate::search_dialog::SearchDocumentSnapshot> {
         self.document_ids_for_scope(self.dialog_scope())
             .into_iter()
@@ -759,21 +665,38 @@ impl App {
     }
 
     fn document_ids_for_scope(&self, scope: SearchScope) -> Vec<crate::core::DocumentId> {
-        match scope {
-            SearchScope::Current => vec![self.workspace.active_document_id()],
-            SearchScope::OpenDocuments => self
+        let owner = self
+            .advanced_search_owner
+            .filter(|id| {
+                self.advanced_search_window.is_some() && self.workspace.window(*id).is_some()
+            })
+            .unwrap_or(self.workspace.current_window_id());
+        let ids = match scope {
+            SearchScope::CurrentDocument => {
+                return self
+                    .workspace
+                    .active_document_in(owner)
+                    .map(|document| vec![document.id])
+                    .unwrap_or_default();
+            }
+            SearchScope::SelectedTabs => self
                 .workspace
-                .documents()
-                .iter()
-                .filter(|document| {
+                .window(owner)
+                .map(|window| window.selected_tabs.clone())
+                .unwrap_or_default(),
+            SearchScope::ThisWindow => self.workspace.window_tab_ids(owner).to_vec(),
+            SearchScope::AllWindows => self.workspace.all_document_ids(),
+        };
+        ids.into_iter()
+            .filter(|id| {
+                self.workspace.document(*id).is_some_and(|document| {
                     crate::search_dialog::include_filter_matches(
                         document,
                         &self.search_dialog.include_pattern,
                     )
                 })
-                .map(|document| document.id)
-                .collect(),
-        }
+            })
+            .collect()
     }
 
     fn replace_active_range_with(
@@ -952,12 +875,6 @@ impl App {
             self.find.navigation_match = Some(found);
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum SearchScope {
-    Current,
-    OpenDocuments,
 }
 
 fn current_selection_match(
@@ -1252,6 +1169,8 @@ pub(super) fn observe(
                 | W::LoadStateChanged(_)
                 | W::MetadataChanged(_)
                 | W::OrderChanged
+                | W::WindowTabsChanged(_)
+                | W::WindowClosed(_)
         )
     ) {
         work.request(Work::SearchPreview);

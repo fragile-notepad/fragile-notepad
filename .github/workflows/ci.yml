@@ -21,8 +21,6 @@ jobs:
         os:
           - windows-latest
           - ubuntu-latest
-          # Temporarily disabled:
-          # - macos-latest
 
     steps:
       - name: Checkout
@@ -112,3 +110,53 @@ jobs:
         run: |
           source scripts/setup-macos-vulkan.sh
           source scripts/ci.sh
+
+  macos-multiwindow:
+    name: macOS software windowing
+    runs-on: macos-latest
+    env:
+      CARGO_BUILD_JOBS: "1"
+      FRAGILE_FONT_CACHE: ${{ github.workspace }}/target/font-profiles
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install asset and font tooling
+        run: python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
+
+      - name: Cache Cargo and prepared fonts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macOS-software-multiwindow-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'scripts/*font_profiles*', 'scripts/font_families.py', 'scripts/requirements-font-profiles.txt') }}
+          restore-keys: |
+            macOS-software-multiwindow-
+
+      - name: Prepare macOS fonts and generated assets
+        run: |
+          python3 scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared --target-os macos --cache-dir target/font-profiles
+          bash scripts/generate_icon_assets.sh
+
+      - name: Compile native macOS windowing without Vulkan
+        env:
+          FRAGILE_FONT_OFFLINE: "1"
+        run: cargo check --locked --no-default-features -j 1
+
+      - name: Check tab ownership and window recovery
+        env:
+          FRAGILE_FONT_OFFLINE: "1"
+        run: |
+          cargo test --locked --no-default-features -j 1 --test core_workspace -- --test-threads=1
+          cargo test --locked --no-default-features -j 1 --lib app::windowing:: -- --test-threads=1

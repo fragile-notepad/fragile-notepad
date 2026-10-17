@@ -413,7 +413,16 @@ fn restores_one_active_file_and_keeps_99_tabs_deferred() {
             .count(),
         99
     );
-    assert_eq!(app.snapshot_session(), saved);
+    let snapshot = app.snapshot_session();
+    assert_eq!(snapshot.documents, saved.documents);
+    assert_eq!(snapshot.active_index, saved.active_index);
+    assert_eq!(snapshot.version, 2);
+    assert_eq!(snapshot.windows.len(), 1);
+    assert_eq!(snapshot.windows[0].active_index, saved.active_index);
+    assert_eq!(
+        snapshot.windows[0].document_indices,
+        (0..100).collect::<Vec<_>>()
+    );
     let id = app.workspace.documents()[4].id;
     let _ = app.update(Message::TabSelected(id));
     assert!(app.workspace.document(id).unwrap().is_loading());
@@ -448,15 +457,32 @@ fn preserves_inactive_unsaved_tabs_and_recovers_exact_text_on_selection() {
         ],
         ..Default::default()
     });
-    assert_eq!(app.snapshot_session().documents[1], unsaved);
-    let id = app.workspace.documents()[1].id;
+    let snapshot = app.snapshot_session();
+    let layout = &snapshot.windows[0];
+    let pinned_index = layout.document_indices[0];
+    assert_eq!(snapshot.documents[pinned_index], unsaved);
+    assert_eq!(
+        snapshot.documents[layout.document_indices[layout.active_index]]
+            .text
+            .as_deref(),
+        Some("active")
+    );
+    let id = app
+        .workspace
+        .window_tab_ids(app.workspace.current_window_id())[0];
+    assert_ne!(id, app.workspace.active_document_id());
+    assert!(app.workspace.document(id).unwrap().is_pinned);
     let _ = app.update(Message::TabSelected(id));
     let document = app.workspace.document(id).unwrap();
     assert_eq!(document.text(), "one\r\n二\r\n");
     assert!(document.is_dirty);
     assert_eq!(document.encoding, TextEncoding::Utf16LeBom);
     assert_eq!(document.main_selection().cursor, EditorPosition::new(1, 3));
-    assert_eq!(app.snapshot_session().documents[1].text, unsaved.text);
+    let snapshot = app.snapshot_session();
+    assert_eq!(
+        snapshot.documents[snapshot.windows[0].document_indices[0]].text,
+        unsaved.text
+    );
     let _ = app.update(Message::TabClosed(id));
     assert_eq!(app.close_prompt.document(), Some(id));
     let _ = app.update(Message::DirtyCloseResolved(id, DirtyCloseDecision::Cancel));
@@ -792,7 +818,18 @@ fn deferred_pin_changes_survive_activation_and_another_session() {
             ],
             ..Default::default()
         });
-        let id = app.workspace.documents()[1].id;
+        let active = app.workspace.active_document_id();
+        let id = app
+            .workspace
+            .window_tab_ids(app.workspace.current_window_id())
+            .iter()
+            .copied()
+            .find(|id| *id != active)
+            .unwrap();
+        assert_eq!(
+            app.workspace.document(id).unwrap().is_pinned,
+            originally_pinned
+        );
         let _ = app.update(Message::TabPinToggled(id));
         assert_eq!(
             app.workspace.document(id).unwrap().is_pinned,
@@ -803,7 +840,16 @@ fn deferred_pin_changes_survive_activation_and_another_session() {
             app.workspace.document(id).unwrap().is_pinned,
             !originally_pinned
         );
-        let restored = ready(app.snapshot_session());
+        let snapshot = app.snapshot_session();
+        let window = &snapshot.windows[0];
+        let entry = &snapshot.documents[window.document_indices[window.active_index]];
+        assert_eq!(entry.text.as_deref(), Some("deferred"));
+        assert_eq!(entry.is_pinned, !originally_pinned);
+        let restored = ready(snapshot);
+        assert_eq!(
+            restored.workspace.active_document().unwrap().text(),
+            "deferred"
+        );
         assert_eq!(
             restored.workspace.active_document().unwrap().is_pinned,
             !originally_pinned

@@ -44,7 +44,18 @@ impl App {
     }
 
     pub(super) fn needs_animation_frames(&self) -> bool {
-        self.chrome_animation.needs_frames()
+        self.editor_windows
+            .values()
+            .filter_map(|window| window.ui.as_ref())
+            .any(|ui| {
+                ui.chrome_animation.needs_frames()
+                    || ui.close_prompt.needs_frames()
+                    || ui
+                        .go_to_line_prompt
+                        .as_ref()
+                        .is_some_and(|p| p.animation.needs_frames())
+            })
+            || self.chrome_animation.needs_frames()
             || self.close_prompt.needs_frames()
             || self.settings_dialog.shortcut_notice_needs_frames()
             || self

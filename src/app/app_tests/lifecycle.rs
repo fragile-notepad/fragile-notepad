@@ -87,11 +87,13 @@ fn caption_preview_toggle_does_not_modify_settings_or_recovery() {
     let style = app.title_bar_style;
     app.session.set_enabled(true);
     let _ = app.update(Message::WindowMaximized(app.main_window_id.unwrap(), true));
-    assert!(!app.session.is_dirty());
+    let recovery = app.snapshot_session();
+    let was_dirty = app.session.is_dirty();
     let _ = app.update(Message::ToggleTitleBarStyle);
     assert_ne!(app.title_bar_style, style);
     assert_eq!(app.settings, settings);
-    assert!(!app.session.is_dirty());
+    assert_eq!(app.snapshot_session(), recovery);
+    assert_eq!(app.session.is_dirty(), was_dirty);
     let _ = app.update(Message::ToggleTitleBarStyle);
     assert_eq!(app.title_bar_style, style);
 }
@@ -213,7 +215,7 @@ fn default_startup_stays_software_first_until_loaded_settings_request_boost() {
 
     let task = app.update(Message::WindowOpened(main_window));
 
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "native geometry is captured on opening");
     assert!(!app.lifecycle.pending_startup_gpu_boost);
     assert_eq!(
         app.rendering,
@@ -229,7 +231,7 @@ fn secondary_window_open_does_not_consume_startup_gpu_boost() {
     app.lifecycle.pending_startup_gpu_boost = true;
     let task = app.update(Message::WindowOpened(secondary_window));
 
-    assert_eq!(task.units(), 0);
+    assert_eq!(task.units(), 1, "unregistered delayed windows are closed");
     assert!(app.lifecycle.pending_startup_gpu_boost);
     assert_eq!(
         app.rendering,

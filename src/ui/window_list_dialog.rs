@@ -83,7 +83,7 @@ fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
 
 fn window_row(entry: WindowListEntry) -> Element<'static, Message> {
     let (label, symbol) = match entry.target {
-        WindowTarget::Main => ("Editor", "Aa"),
+        WindowTarget::Main | WindowTarget::Editor(_) => ("Editor", "Aa"),
         WindowTarget::AdvancedSearch => ("Find & Replace", ".*"),
         WindowTarget::Settings => ("Preferences", "≡"),
     };

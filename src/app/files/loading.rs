@@ -27,6 +27,9 @@ impl App {
                         document.complete_loading(generation, opened.contents.as_ref().clone());
                         document.disk_revision = Some(opened.disk_revision);
                     }
+                    if let Some(owner) = self.workspace.owner_of(document_id) {
+                        self.switch_editor(owner);
+                    }
                     self.workspace.select(document_id);
                     let history = self.record_open_history(opened_path);
                     Task::batch([auto_save, history])
@@ -93,9 +96,17 @@ impl App {
             .map(|doc| doc.id)
         {
             let auto_save = self.auto_save_before_switch(Some(id));
+            if let Some(owner) = self.workspace.owner_of(id) {
+                self.switch_editor(owner);
+                self.last_active_editor = Some(owner);
+            }
             self.workspace.select(id);
             let activate = self.activate_document(id);
-            return Task::batch([auto_save, activate]);
+            let focus = self
+                .main_window_id
+                .map(window::gain_focus)
+                .unwrap_or_else(Task::none);
+            return Task::batch([auto_save, activate, focus]);
         }
         self.files.is_loading = true;
         self.file_status = None;

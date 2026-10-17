@@ -24,6 +24,22 @@ impl App {
 
     fn dispatch_application(&mut self, message: ApplicationMessage) -> Task<Message> {
         match message {
+            ApplicationMessage::ApplicationReopened => {
+                self.show_main_window(crate::ipc::ActivationRequest::default())
+            }
+            ApplicationMessage::ForWindow(id, message) => {
+                self.update(Message::ForWindow(id, message))
+            }
+            ApplicationMessage::TabStripGeometry(geometry) => self.update_tab_geometry(geometry),
+            ApplicationMessage::TabPressed(id, point, modifiers) => {
+                self.press_tab(id, point, modifiers)
+            }
+            ApplicationMessage::TabPointerMoved(point) => self.move_tab_pointer(point),
+            ApplicationMessage::TabPointerReleased => Task::none(),
+            ApplicationMessage::TabDragEvent(event) => self.native_tab_drag(event),
+            ApplicationMessage::TabDetachedReady(session, window) => {
+                self.detached_tab_ready(session, window)
+            }
             #[cfg(debug_assertions)]
             ApplicationMessage::ToggleTitleBarStyle => self.toggle_title_bar_style(),
             ApplicationMessage::SyntaxParsed(id, result) => self.complete_syntax_parse(id, result),
@@ -63,7 +79,22 @@ impl App {
             ApplicationMessage::ClipboardWritten(_result) => Task::none(),
             ApplicationMessage::BackendBoostRequested => self.request_gpu_boost(),
             ApplicationMessage::BackendBoostConfigured(result) => self.complete_gpu_boost(result),
-            ApplicationMessage::ChromeAnimationFrame(at) => self.update_chrome_animation_frame(at),
+            ApplicationMessage::ChromeAnimationFrame(at) => {
+                let original = self.workspace.current_window_id();
+                let mut tasks = Vec::new();
+                for id in self.workspace.window_ids() {
+                    self.switch_editor(id);
+                    let task = self.update_chrome_animation_frame(at);
+                    if let Some(native) = self.main_window_id {
+                        tasks.push(
+                            task.scope_window(native)
+                                .map(move |message| Message::ForWindow(native, Box::new(message))),
+                        );
+                    }
+                }
+                self.switch_editor(original);
+                Task::batch(tasks)
+            }
             ApplicationMessage::LanguageSelected(syntax_token) => {
                 self.update_language(syntax_token)
             }

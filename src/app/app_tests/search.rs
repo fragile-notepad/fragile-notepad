@@ -83,6 +83,8 @@ fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
         .map(|document| document.id)
         .collect::<Vec<_>>();
     app.search_dialog.query = "needle".into();
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedFindAllOpenRun);
     assert!(app.pending_search.is_some());
     assert!(
@@ -130,6 +132,8 @@ fn count_hydrates_matching_scope_and_clears_previously_displayed_results() {
     let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
     let (excluded, _) = deferred_search_document(&mut app, "excluded.rs", None);
     app.search_dialog.active_tab = crate::message::AdvancedSearchTab::FindInFiles;
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     app.search_dialog.include_pattern = "*.txt".into();
     let _ = app.update(Message::AdvancedCountRun);
     assert!(app.pending_search.is_some());
@@ -223,6 +227,8 @@ fn deferred_replace_all_uses_captured_options_scope_and_replacement() {
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
     app.search_dialog.case_sensitive = true;
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedReplaceAllOpenRun);
     assert_eq!(
         app.workspace.document(original_active).unwrap().text(),
@@ -256,6 +262,8 @@ fn deferred_replace_all_aborts_before_mutation_on_failed_or_closed_target() {
         let (disk, generation) = deferred_search_document(&mut app, "missing.txt", None);
         app.search_dialog.query = "old".into();
         app.search_dialog.replacement = "new".into();
+        app.search_dialog
+            .set_scope(crate::message::SearchScope::ThisWindow);
         let _ = app.update(Message::AdvancedReplaceAllOpenRun);
         if closed {
             app.workspace.close(disk);
@@ -278,6 +286,8 @@ fn changing_query_cancels_deferred_replacement() {
     let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedReplaceAllOpenRun);
     let _ = app.update(Message::AdvancedSearchQueryChanged("different".into()));
     finish_search_document(&mut app, disk, generation, "old");
@@ -292,7 +302,11 @@ fn new_find_operation_supersedes_deferred_replace_and_keeps_included_scope() {
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
     app.search_dialog.include_pattern = "*.txt".into();
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedFindAllOpenRun);
     finish_search_document(&mut app, disk, generation, "old");
     assert_eq!(app.workspace.document(disk).unwrap().text(), "old");
@@ -310,6 +324,8 @@ fn recovered_unsaved_document_is_included_in_replace_all() {
     let (recovered, _) = deferred_search_document(&mut app, "recovered.txt", Some("old old"));
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::AdvancedReplaceAllOpenRun);
     assert!(app.pending_search.is_none());
     assert_eq!(app.workspace.document(recovered).unwrap().text(), "new new");
@@ -723,6 +739,8 @@ fn closing_a_searched_document_invalidates_open_document_results() {
     );
     let second = app.workspace.insert_loaded_file("second.txt", "needle");
     let _ = app.update(Message::FindQueryChanged("needle".into()));
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::ToggleAdvancedSearch(
         crate::message::AdvancedSearchTab::FindInFiles,
     ));
@@ -762,24 +780,27 @@ fn fresh_replacement_and_count_status_survive_workspace_reactions() {
 }
 
 #[test]
-fn advanced_navigation_moves_between_open_documents_and_honors_wrap() {
+fn advanced_navigation_stays_in_current_document_and_honors_wrap() {
     let (mut app, _) = App::new();
     let first = app.workspace.active_document_id();
     set_active_document_text(
         &mut app,
-        "needle",
+        "needle needle",
         EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
     );
     let second = app.workspace.insert_loaded_file("second.txt", "x needle");
     app.workspace.select(first);
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::AllWindows);
     let _ = app.update(Message::FindQueryChanged("needle".into()));
     let _ = app.update(Message::ToggleAdvancedSearch(
         crate::message::AdvancedSearchTab::FindInFiles,
     ));
+    assert_eq!(app.search_dialog.results.len(), 3);
     let _ = app.update(Message::AdvancedFindNextRun);
     assert_eq!(app.workspace.active_document_id(), first);
     let _ = app.update(Message::AdvancedFindNextRun);
-    assert_eq!(app.workspace.active_document_id(), second);
+    assert_eq!(app.workspace.active_document_id(), first);
     assert_eq!(
         app.workspace
             .active_document()
@@ -788,16 +809,48 @@ fn advanced_navigation_moves_between_open_documents_and_honors_wrap() {
             .range()
             .start
             .column,
-        2
+        7
     );
     let _ = app.update(Message::AdvancedSearchWrapAroundToggled(false));
     let _ = app.update(Message::AdvancedFindNextRun);
-    assert_eq!(app.workspace.active_document_id(), second);
-    let _ = app.update(Message::AdvancedFindPreviousRun);
     assert_eq!(app.workspace.active_document_id(), first);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .range()
+            .start
+            .column,
+        7
+    );
+    let _ = app.update(Message::AdvancedFindPreviousRun);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .range()
+            .start
+            .column,
+        0
+    );
     let _ = app.update(Message::AdvancedSearchWrapAroundToggled(true));
     let _ = app.update(Message::AdvancedFindPreviousRun);
-    assert_eq!(app.workspace.active_document_id(), second);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .range()
+            .start
+            .column,
+        7
+    );
+    assert_eq!(
+        app.workspace.owner_of(second),
+        app.workspace.owner_of(first)
+    );
 }
 
 #[test]
@@ -1043,6 +1096,8 @@ fn pending_find_uses_latest_limit_while_count_and_replacement_remain_unbounded()
         app.search_dialog.query = "a".into();
         app.search_dialog.replacement = "aa".into();
         app.search_dialog.active_tab = crate::message::AdvancedSearchTab::FindInFiles;
+        app.search_dialog
+            .set_scope(crate::message::SearchScope::ThisWindow);
         let _ = app.update(match operation {
             0 => Message::AdvancedFindAllOpenRun,
             1 => Message::AdvancedCountRun,
@@ -1080,6 +1135,8 @@ fn capped_results_snapshot_unvisited_documents_without_repeated_refreshes() {
     );
     let later = app.workspace.insert_loaded_file("later.txt", "a");
     let _ = app.update(Message::FindQueryChanged("a".into()));
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
     let _ = app.update(Message::ToggleAdvancedSearch(
         crate::message::AdvancedSearchTab::FindInFiles,
     ));
@@ -1098,4 +1155,73 @@ fn capped_results_snapshot_unvisited_documents_without_repeated_refreshes() {
     let _ = app.update(Message::None);
     assert_eq!(app.search_dialog.preview_generation, generation);
     assert_eq!(app.search_dialog.results.len(), 500);
+}
+
+#[test]
+fn advanced_bulk_search_respects_selected_window_and_all_window_scopes() {
+    use crate::message::SearchScope;
+    let (mut app, _) = App::new();
+    let source = app.workspace.current_window_id();
+    let first = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let second = app.workspace.insert_loaded_file("second.txt", "needle");
+    let third = app.workspace.insert_loaded_file("third.txt", "needle");
+    let (target, _) = app.create_editor(true, None);
+    app.workspace.transfer_tabs(source, &[third], target, 0);
+    app.workspace.select(first);
+    app.search_dialog.set_query("needle");
+    for (scope, count) in [
+        (SearchScope::SelectedTabs, 1),
+        (SearchScope::ThisWindow, 2),
+        (SearchScope::AllWindows, 3),
+    ] {
+        let _ = app.update(Message::AdvancedSearchScopeSelected(scope));
+        let _ = app.update(Message::AdvancedFindAllCurrentRun);
+        assert_eq!(app.search_dialog.match_count, count);
+    }
+    let _ = app.update(Message::AdvancedSearchScopeSelected(
+        SearchScope::CurrentDocument,
+    ));
+    app.search_dialog.include_pattern = "*.md".into();
+    let _ = app.update(Message::AdvancedFindAllOpenRun);
+    assert_eq!(
+        app.search_dialog.match_count, 1,
+        "a current-document search ignores the bulk file filter"
+    );
+    assert_eq!(app.search_dialog.results[0].document_id, first);
+    assert_eq!(app.workspace.owner_of(second), Some(source));
+}
+
+#[test]
+fn selected_tab_replacement_keeps_captured_targets_after_a_window_transfer() {
+    use crate::message::SearchScope;
+    let (mut app, _) = App::new();
+    let source = app.workspace.current_window_id();
+    let first = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        "old",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let excluded = app.workspace.insert_loaded_file("excluded.txt", "old");
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    app.workspace.select_tabs(source, &[first, disk], first);
+    app.search_dialog.query = "old".into();
+    app.search_dialog.replacement = "new".into();
+    app.search_dialog.set_scope(SearchScope::SelectedTabs);
+    let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    assert!(app.pending_search.is_some());
+    let (target, _) = app.create_editor(true, None);
+    app.workspace.transfer_tabs(source, &[disk], target, 0);
+    app.switch_editor(target);
+    finish_search_document(&mut app, disk, generation, "old");
+    assert!(app.pending_search.is_none());
+    assert_eq!(app.workspace.document(first).unwrap().text(), "new");
+    assert_eq!(app.workspace.document(disk).unwrap().text(), "new");
+    assert_eq!(app.workspace.document(excluded).unwrap().text(), "old");
+    assert_eq!(app.workspace.owner_of(disk), Some(target));
 }

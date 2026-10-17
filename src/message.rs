@@ -81,8 +81,24 @@ pub enum AboutTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowTarget {
     Main,
+    Editor(window::Id),
     Settings,
     AdvancedSearch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulkScope {
+    SelectedTabs,
+    ThisWindow,
+    AllWindows,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchScope {
+    CurrentDocument,
+    SelectedTabs,
+    ThisWindow,
+    AllWindows,
 }
 
 // One catalog defines public messages, typed feature inputs, and routing.
@@ -115,6 +131,7 @@ macro_rules! message_catalog {
                 }
             }
             pub(crate) fn shutdown_delivery(&self) -> ShutdownDelivery {
+                if let Self::ForWindow(_, inner) = self { return inner.shutdown_delivery(); }
                 match self {
                     $( $( $(#[$attr])* Self::$variant $(($($arg),*))? => {
                         $( $(let _ = $arg;)* )?
@@ -142,6 +159,7 @@ message_catalog! {
         DraftWrapColumnChanged(arg0: String) => Reject,
         DraftWrapColumnPreset(arg0: usize) => Reject,
         DraftAutoSaveToggled(arg0: bool) => Reject,
+        DraftExitOnLastWindowCloseToggled(arg0: bool) => Reject,
         DraftNewFileEncodingSelected(arg0: TextEncoding) => Reject,
         DraftNewFileLineEndingSelected(arg0: iced::widget::text_editor::LineEnding) => Reject,
         DraftRecentFileLimitChanged(arg0: String) => Reject,
@@ -196,12 +214,15 @@ message_catalog! {
     Files(FileMessage) {
         TabSelected(arg0: DocumentId) => Reject,
         TabClosed(arg0: DocumentId) => Reject,
+        ResumeDocumentClose(arg0: DocumentId) => Defer,
         TabPinToggled(arg0: DocumentId) => Reject,
         TabDragStarted(arg0: DocumentId) => Reject,
         TabDragHovered(arg0: DocumentId) => Reject,
         TabDragLeft(arg0: DocumentId) => Reject,
         TabDragReleased(arg0: DocumentId) => Reject,
         NewFile => Reject,
+        SaveScoped(arg0: BulkScope) => Reject,
+        CloseScoped(arg0: BulkScope) => Reject,
         OpenFile => Reject,
         FileDropped(arg0: window::Id, arg1: PathBuf) => Reject,
         FilePicked(arg0: FileResult<PathBuf>) => Defer,
@@ -230,6 +251,7 @@ message_catalog! {
     }
     Search(SearchMessage) {
         AdvancedResultOptionsToggled => Reject,
+        AdvancedSearchScopeSelected(arg0: SearchScope) => Reject,
         AdvancedResultLimitChanged(arg0: String) => Reject,
         AdvancedPreviewCharsChanged(arg0: String) => Reject,
         AdvancedPreviewContextChanged(arg0: String) => Reject,
@@ -277,6 +299,14 @@ message_catalog! {
     }
     Window(WindowMessage) {
         WindowOpened(arg0: window::Id) => Defer,
+        NewWindow => Reject,
+        CloseWindow => Reject,
+        Quit => Reject,
+        MoveTabsToNewWindow => Reject,
+        MoveTabsToWindow(arg0: window::Id) => Reject,
+        WindowGeometry(arg0: window::Id, arg1: Option<iced::Point>, arg2: iced::Size) => Defer,
+        WindowPlacementChanged(arg0: window::Id) => Reject,
+        WindowOpenFailed(arg0: window::Id, arg1: String) => Defer,
         WindowMaximized(arg0: window::Id, arg1: bool) => Defer,
         WindowChrome(arg0: window::Id, arg1: crate::ui::title_bar::Action) => Reject,
         WindowCloseRequested(arg0: window::Id) => Reject,
@@ -300,6 +330,14 @@ message_catalog! {
     }
     Application(ApplicationMessage) {
         None => Reject,
+        ApplicationReopened => Reject,
+        TabStripGeometry(arg0: crate::ui::tabs::StripGeometry) => Reject,
+        TabPressed(arg0: DocumentId, arg1: iced::Point, arg2: iced::keyboard::Modifiers) => Reject,
+        TabPointerMoved(arg0: iced::Point) => Reject,
+        TabPointerReleased => Reject,
+        TabDragEvent(arg0: iced::window::tab_drag::Event) => Reject,
+        TabDetachedReady(arg0: iced::window::tab_drag::SessionId, arg1: window::Id) => Reject,
+        ForWindow(arg0: window::Id, arg1: Box<Message>) => Defer,
         OpenPaths(arg0: Vec<PathBuf>) => Reject,
         ForwardedFiles(arg0: Vec<PathBuf>, arg1: ActivationRequest, arg2: crate::ipc::AdmissionReceipt) => Reject,
         StartupReady => Defer,

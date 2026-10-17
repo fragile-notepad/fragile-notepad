@@ -17,6 +17,7 @@ pub(super) enum CloseGoal {
     #[default]
     KeepOpen,
     ExitApp,
+    CloseWindow(crate::core::EditorWindowId),
 }
 
 #[derive(Debug, Default)]
@@ -86,7 +87,39 @@ mod saving;
 
 impl App {
     pub(super) fn update_file(&mut self, message: FileMessage) -> Task<Message> {
+        if self.close_operation_pending()
+            && matches!(
+                &message,
+                FileMessage::TabClosed(_)
+                    | FileMessage::CloseFile
+                    | FileMessage::CloseScoped(_)
+                    | FileMessage::CloseAllFiles
+                    | FileMessage::CloseAllButActiveFile
+                    | FileMessage::CloseAllButPinnedFiles
+                    | FileMessage::CloseAllToLeft
+                    | FileMessage::CloseAllToRight
+                    | FileMessage::CloseAllUnchanged
+            )
+        {
+            return Task::none();
+        }
         match message {
+            FileMessage::ResumeDocumentClose(id) => self.close_request(id),
+            FileMessage::SaveScoped(scope) => {
+                if self.files.pending_save.is_some() {
+                    return Task::none();
+                }
+                self.files.pending_save_all = self
+                    .scoped_document_ids(scope)
+                    .into_iter()
+                    .filter(|id| self.workspace.document(*id).is_some_and(|d| d.is_dirty))
+                    .collect();
+                self.continue_save_all()
+            }
+            FileMessage::CloseScoped(scope) => {
+                let ids = self.scoped_document_ids(scope);
+                self.close_documents(ids)
+            }
             FileMessage::TabSelected(document_id) => {
                 self.menu.close();
                 if self.workspace.document(document_id).is_some() {
@@ -151,11 +184,20 @@ impl App {
                 Task::none()
             }
             FileMessage::NewFile => {
+                // Shortcuts dispatch here directly, bypassing App::update's
+                // structural-command guard. Restore the gesture before adding
+                // a tab, then return to the command's editor if it survived.
+                let editor = self.workspace.current_window_id();
+                let cancel = self.cancel_tab_drag();
+                self.switch_editor(editor);
                 self.menu.close();
+                if self.editor_windows.is_empty() {
+                    return Task::batch([cancel, self.new_editor_window()]);
+                }
                 let auto_save = self.auto_save_before_switch(None);
                 self.workspace.create_untitled();
 
-                auto_save
+                Task::batch([cancel, auto_save])
             }
             FileMessage::OpenFile => {
                 self.menu.close();
@@ -165,7 +207,7 @@ impl App {
                     self.files.is_loading = true;
                     self.file_status = None;
 
-                    window::oldest()
+                    Task::done(self.main_window_id)
                         .and_then(|id| window::run(id, services::file_dialogs::pick_file))
                         .then(Task::future)
                         .map(Message::FilePicked)

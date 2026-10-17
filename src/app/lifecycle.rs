@@ -61,7 +61,15 @@ impl App {
         if !receipt.try_accept() {
             return Task::none();
         }
-        Task::batch([self.open_paths(paths), self.show_main_window(request)])
+        let open = if self.editor_windows.is_empty() {
+            self.new_editor_window()
+        } else {
+            Task::none()
+        };
+        if let Some(id) = self.last_active_editor {
+            self.switch_editor(id);
+        }
+        Task::batch([open, self.open_paths(paths), self.show_main_window(request)])
     }
 
     pub(super) fn persist_before_exit(&mut self) -> Task<Message> {
@@ -136,11 +144,19 @@ impl App {
 
 impl App {
     pub(super) fn window_opened(&mut self, id: window::Id) -> Task<Message> {
+        if !self.owns_window(id) {
+            // A cancelled gesture can finish native creation after its
+            // registry entry was removed. Retire that delayed surface too.
+            return window::close(id);
+        }
         if self.main_window_id == Some(id) {
             self.lifecycle.main_window_opened = true;
         }
 
-        let startup_task = if self.main_window_id == Some(id) && (self.session.has_startup_work()) {
+        let startup_task = if !self.session.is_initialized()
+            && self.main_window_id == Some(id)
+            && self.session.has_startup_work()
+        {
             Task::perform(
                 async {
                     tokio::time::sleep(Duration::from_millis(16)).await;
@@ -156,7 +172,18 @@ impl App {
             } else {
                 Task::none()
             };
-        let window_task = Task::batch([self.register_opened_window(id), startup_task, probe_task]);
+        let visible = if self.tab_drag.is_none() {
+            window::ensure_visible(id)
+        } else {
+            Task::none()
+        };
+        let window_task = Task::batch([
+            self.register_opened_window(id),
+            startup_task,
+            probe_task,
+            visible,
+            self.capture_window_geometry(id),
+        ]);
 
         if self.main_window_id == Some(id) && self.lifecycle.pending_startup_gpu_boost {
             self.lifecycle.pending_startup_gpu_boost = false;

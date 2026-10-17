@@ -68,6 +68,7 @@ pub(super) fn drain(app: &mut App) -> Task<Message> {
             app.events.publish(Event::SettingsChanged);
         }
         while let Some(event) = app.events.pop() {
+            app.invalidate_other_editors(event);
             let active = app.workspace.active_document_id();
             super::settings::apply_to_workspace(event, &app.settings, &mut app.workspace);
             app.files.observe(event, &mut app.pending_work);

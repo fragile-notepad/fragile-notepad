@@ -19,23 +19,32 @@ impl App {
         status: Status,
         window_id: window::Id,
     ) -> Task<Message> {
-        if matches!(
-            event,
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-        ) && self.dragged_tab.is_some()
+        // Retain release cleanup for legacy reorder commands. Native tab
+        // sessions use their own physical release/capture events.
+        if self.tab_drag.is_none()
+            && self.dragged_tab.is_some()
+            && matches!(
+                event,
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            )
         {
             self.dragged_tab = None;
             self.hovered_drop_tab = None;
             return Task::none();
         }
-
         if let Event::Window(window::Event::FileDropped(path)) = event {
             return self.update_file(FileMessage::FileDropped(window_id, path));
         }
 
         if matches!(event, Event::Window(window::Event::Focused)) {
             self.focused_window_id = Some(window_id);
-            return self.refresh_window_state(window_id);
+            if let Some(id) = self.editor_id(window_id) {
+                self.last_active_editor = Some(id);
+            }
+            return Task::batch([
+                self.refresh_window_state(window_id),
+                self.capture_window_geometry(window_id),
+            ]);
         }
         if matches!(event, Event::Window(window::Event::Unfocused)) {
             if self.focused_window_id == Some(window_id) {
@@ -47,7 +56,10 @@ impl App {
             return Task::none();
         }
         if matches!(event, Event::Window(window::Event::Resized(_))) {
-            return self.refresh_window_state(window_id);
+            return Task::batch([
+                self.refresh_window_state(window_id),
+                self.capture_window_geometry(window_id),
+            ]);
         }
 
         if self.main_window_id == Some(window_id)
@@ -165,6 +177,8 @@ impl App {
             ShortcutCommand::ZoomIn => self.update_settings(SettingsMessage::ZoomIn),
             ShortcutCommand::ZoomOut => self.update_settings(SettingsMessage::ZoomOut),
             ShortcutCommand::ZoomReset => self.update_settings(SettingsMessage::ZoomReset),
+            ShortcutCommand::NewWindow => self.new_editor_window(),
+            ShortcutCommand::Quit => self.exit_request(),
             ShortcutCommand::NewFile => self.update_file(FileMessage::NewFile),
             ShortcutCommand::OpenFile => self.update_file(FileMessage::OpenFile),
             ShortcutCommand::SaveFile => self.update_file(FileMessage::SaveFile),

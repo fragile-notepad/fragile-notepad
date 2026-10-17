@@ -7,7 +7,7 @@ use iced::{Center, Element, Fill, Length};
 
 use crate::core::{Document, EditorSettings, ShortcutCommand, TextEncoding};
 use crate::editor::EditorAction;
-use crate::message::{Menu, Message};
+use crate::message::{BulkScope, Menu, Message};
 use crate::ui::controls::centered_button_content;
 use crate::ui::icons::colored::{self, ColoredIcon};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
@@ -28,13 +28,14 @@ const MENU_ITEMS: &[(Menu, &str)] = &[
     (Menu::Help, "?"),
 ];
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct WindowMenuState {
     pub open_window_count: usize,
+    pub editor_windows: Vec<(iced::window::Id, String)>,
 }
 
 impl WindowMenuState {
-    const fn can_cycle(self) -> bool {
+    const fn can_cycle(&self) -> bool {
         self.open_window_count > 1
     }
 }
@@ -144,9 +145,17 @@ pub fn tool_bar<'a>(document: Option<&Document>) -> Element<'a, Message> {
         icon_button(Icon::New, "New", Message::NewFile),
         icon_button(Icon::Open, "Open", Message::OpenFile),
         icon_button(Icon::Save, "Save", Message::SaveFile),
-        icon_button(Icon::SaveAll, "Save All", Message::SaveAllFiles),
+        icon_button(
+            Icon::SaveAll,
+            "Save all in this window",
+            Message::SaveScoped(BulkScope::ThisWindow)
+        ),
         icon_button(Icon::Close, "Close", Message::CloseFile),
-        icon_button(Icon::CloseAll, "Close All", Message::CloseAllFiles),
+        icon_button(
+            Icon::CloseAll,
+            "Close all in this window",
+            Message::CloseScoped(BulkScope::ThisWindow)
+        ),
         disabled_icon_button(Icon::Print, "Print"),
         separator(),
         editor_icon_button(Icon::Cut, "Cut", Message::Cut, document),
@@ -263,7 +272,7 @@ fn menu_tree(
             menu_width(menu_kind),
         ),
         Menu::Window => MenuTree::new(
-            window_menu_entries(window_menu_state),
+            window_menu_entries(window_menu_state, settings),
             menu_width(menu_kind),
         ),
         Menu::Help => MenuTree::new(
@@ -273,15 +282,42 @@ fn menu_tree(
     }
 }
 
-fn window_menu_entries(state: WindowMenuState) -> Vec<MenuNode> {
-    vec![
+fn window_menu_entries(state: WindowMenuState, settings: &EditorSettings) -> Vec<MenuNode> {
+    let mut entries = vec![
+        menu_item(
+            settings,
+            "New Window",
+            ShortcutCommand::NewWindow,
+            Message::NewWindow,
+        ),
+        menu::item("Close Window", Message::CloseWindow),
+        menu::separator(),
+        menu::item(
+            "Move Selected Tabs to New Window",
+            Message::MoveTabsToNewWindow,
+        ),
+    ];
+    if !state.editor_windows.is_empty() {
+        entries.push(menu::submenu(
+            "move-tabs-to-window",
+            "Move Selected Tabs to Window",
+            state
+                .editor_windows
+                .iter()
+                .map(|(id, title)| menu::item(title.clone(), Message::MoveTabsToWindow(*id)))
+                .collect(),
+        ));
+    }
+    entries.extend([
+        menu::separator(),
         menu::item("Windows...", Message::WindowListOpened),
-        window_cycle_item("Next Window", Message::WindowFocusNext, state),
-        window_cycle_item("Previous Window", Message::WindowFocusPrevious, state),
-    ]
+        window_cycle_item("Next Window", Message::WindowFocusNext, &state),
+        window_cycle_item("Previous Window", Message::WindowFocusPrevious, &state),
+    ]);
+    entries
 }
 
-fn window_cycle_item(label: &'static str, message: Message, state: WindowMenuState) -> MenuNode {
+fn window_cycle_item(label: &'static str, message: Message, state: &WindowMenuState) -> MenuNode {
     if state.can_cycle() {
         menu::item(label, message)
     } else {
@@ -292,6 +328,12 @@ fn window_cycle_item(label: &'static str, message: Message, state: WindowMenuSta
 fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
     let mut entries = vec![
         menu_item(settings, "New", ShortcutCommand::NewFile, Message::NewFile),
+        menu_item(
+            settings,
+            "New Window",
+            ShortcutCommand::NewWindow,
+            Message::NewWindow,
+        ),
         menu_item(
             settings,
             "Open...",
@@ -311,13 +353,49 @@ fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             Message::SaveFileAs,
         ),
         menu::item("Save a Copy As...", Message::SaveCopyAs),
-        menu::item("Save All", Message::SaveAllFiles),
+        menu::submenu(
+            "save-scoped",
+            "Save Multiple Documents",
+            vec![
+                menu::item(
+                    "Save Selected Tabs",
+                    Message::SaveScoped(BulkScope::SelectedTabs),
+                ),
+                menu::item(
+                    "Save This Window",
+                    Message::SaveScoped(BulkScope::ThisWindow),
+                ),
+                menu::item(
+                    "Save All Windows",
+                    Message::SaveScoped(BulkScope::AllWindows),
+                ),
+            ],
+        ),
         menu::separator(),
         menu::item("Reload from Disk", Message::ReloadFromDisk),
         menu::separator(),
         menu::item("Close", Message::CloseFile),
-        menu::item("Close All", Message::CloseAllFiles),
+        menu::submenu(
+            "close-scoped",
+            "Close Tabs",
+            vec![
+                menu::item(
+                    "Close Selected Tabs",
+                    Message::CloseScoped(BulkScope::SelectedTabs),
+                ),
+                menu::item(
+                    "Close This Window's Tabs",
+                    Message::CloseScoped(BulkScope::ThisWindow),
+                ),
+                menu::item(
+                    "Close All Windows' Tabs",
+                    Message::CloseScoped(BulkScope::AllWindows),
+                ),
+            ],
+        ),
         close_multiple_documents_menu(),
+        menu::separator(),
+        menu_item(settings, "Quit", ShortcutCommand::Quit, Message::Quit),
     ];
     if !settings.open_history.is_empty() {
         entries.push(menu::separator());

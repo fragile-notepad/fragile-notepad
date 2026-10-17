@@ -170,7 +170,7 @@ impl App {
         self.files.pending_save = Some(request.clone());
         let contents = request.snapshot.as_ref().clone();
 
-        window::oldest()
+        Task::done(self.main_window_id)
             .and_then(move |id| {
                 let contents = contents.clone();
                 let dialog_options = dialog_options.clone();
@@ -190,8 +190,7 @@ impl App {
 
         self.files.pending_save_all = self
             .workspace
-            .documents()
-            .iter()
+            .window_documents(self.workspace.current_window_id())
             .filter(|document| document.is_dirty)
             .map(|document| document.id)
             .collect();
@@ -220,6 +219,9 @@ impl App {
         document_id: DocumentId,
         force_save_as: bool,
     ) -> Task<Message> {
+        if let Some(owner) = self.workspace.owner_of(document_id) {
+            self.switch_editor(owner);
+        }
         if self
             .workspace
             .document(document_id)
@@ -278,7 +280,7 @@ impl App {
         let dialog_options = save_dialog_options(document);
         let contents = request.snapshot.as_ref().clone();
 
-        window::oldest()
+        Task::done(self.main_window_id)
             .and_then(move |id| {
                 let contents = contents.clone();
                 let dialog_options = dialog_options.clone();
@@ -354,6 +356,8 @@ impl App {
                 if self.should_exit() {
                     self.files.close_goal = CloseGoal::KeepOpen;
                     tasks.push(self.exit_after_settings());
+                } else {
+                    tasks.push(self.finish_close_goal());
                 }
             } else {
                 self.clear_close();

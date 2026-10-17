@@ -31,6 +31,7 @@ pub mod conversion;
 
 mod error;
 mod proxy;
+mod tab_drag;
 mod trace;
 mod window;
 
@@ -246,6 +247,15 @@ where
             );
         }
 
+        fn reopened(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.process_event(
+                event_loop,
+                Event::EventLoopAwakened(winit::event::Event::PlatformSpecific(
+                    winit::event::PlatformSpecific::MacOS(winit::event::MacOS::Reopened),
+                )),
+            );
+        }
+
         fn received_url(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, url: String) {
             self.process_event(
                 event_loop,
@@ -310,6 +320,7 @@ where
                                 let exit_on_close_request = settings.exit_on_close_request;
 
                                 let visible = settings.visible;
+                                let tab_drag = settings.tab_drag;
 
                                 #[cfg(target_arch = "wasm32")]
                                 let target = settings.platform_specific.target.clone();
@@ -342,9 +353,33 @@ where
                                 #[cfg(target_os = "macos")]
                                 let position = window_attributes.position.take();
 
-                                let window = event_loop
-                                    .create_window(window_attributes)
-                                    .expect("Create window");
+                                let window = match event_loop.create_window(window_attributes) {
+                                    Ok(window) => window,
+                                    Err(error) => {
+                                        log::error!("Could not create window {id:?}: {error}");
+                                        drop(on_open);
+                                        self.process_event(
+                                            event_loop,
+                                            Event::WindowCreationFailed {
+                                                id,
+                                                session: tab_drag.map(|(session, _)| session),
+                                                error: error.to_string(),
+                                            },
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                if let Some((session, offset)) = tab_drag {
+                                    let _ = winit::tab_drag::follow_surface(
+                                        &window,
+                                        session.0,
+                                        winit::dpi::LogicalPosition::new(
+                                            f64::from(offset.x),
+                                            f64::from(offset.y),
+                                        ),
+                                    );
+                                }
 
                                 #[cfg(target_os = "macos")]
                                 if let Some(position) = position {
@@ -454,6 +489,11 @@ enum Event<Message: 'static> {
         exit_on_close_request: bool,
         make_visible: bool,
         on_open: oneshot::Sender<window::Id>,
+    },
+    WindowCreationFailed {
+        id: window::Id,
+        session: Option<core::window::tab_drag::SessionId>,
+        error: String,
     },
     EventLoopAwakened(winit::event::Event<Message>),
     Exit,
@@ -979,6 +1019,16 @@ async fn run_instance<P>(
         );
 
         match event {
+            Event::WindowCreationFailed { id, session, error } => {
+                is_window_opening = false;
+                if let Some(session) = session {
+                    window_manager.tab_drag.native_failure(session, &mut events);
+                }
+                events.push((
+                    id,
+                    core::Event::Window(core::window::Event::OpenFailed { error }),
+                ));
+            }
             Event::WindowCreated {
                 id,
                 window,
@@ -1188,6 +1238,13 @@ async fn run_instance<P>(
                         }
                     }
                     event::Event::PlatformSpecific(event::PlatformSpecific::MacOS(
+                        event::MacOS::Reopened,
+                    )) => {
+                        runtime.broadcast(subscription::Event::PlatformSpecific(
+                            subscription::PlatformSpecific::MacOS(subscription::MacOS::Reopened),
+                        ));
+                    }
+                    event::Event::PlatformSpecific(event::PlatformSpecific::MacOS(
                         event::MacOS::ReceivedUrl(url),
                     )) => {
                         runtime.broadcast(subscription::Event::PlatformSpecific(
@@ -1232,6 +1289,9 @@ async fn run_instance<P>(
                             continue;
                         };
 
+                        if window.raw.is_visible() == Some(false) {
+                            continue;
+                        }
                         let physical_size = window.state.physical_size();
                         let mut logical_size = window.state.logical_size();
 
@@ -1708,6 +1768,12 @@ async fn run_instance<P>(
                             continue;
                         }
 
+                        window_manager.process_tab_drag_event(
+                            window_id,
+                            &window_event,
+                            &mut events,
+                        );
+
                         let Some((id, window)) = window_manager.get_mut_alias(window_id) else {
                             continue;
                         };
@@ -1766,6 +1832,10 @@ async fn run_instance<P>(
                         }
                     }
                     event::Event::AboutToWait => {
+                        if window_manager.tab_drag.is_active() {
+                            let windows = window_manager.drag_windows();
+                            window_manager.tab_drag.poll(&windows, &mut events);
+                        }
                         if actions > 0 {
                             proxy.free_slots(actions);
                             actions = 0;
@@ -3219,6 +3289,7 @@ fn run_action<'a, P, C>(
                 *is_window_opening = true;
             }
             window::Action::Close(id) => {
+                window_manager.tab_drag.window_closed(id, events);
                 let _ = ui_caches.remove(&id);
                 let _ = interfaces.remove(&id);
 
@@ -3257,6 +3328,15 @@ fn run_action<'a, P, C>(
                 let id = window_manager.iter_mut().last().map(|(id, _window)| id);
 
                 let _ = channel.send(id);
+            }
+            window::Action::TabDrag(action) => {
+                let windows = window_manager.drag_windows();
+                window_manager.tab_drag.action(action, &windows, events);
+            }
+            window::Action::EnsureVisible(id) => {
+                if let Some(window) = window_manager.get_mut(id) {
+                    ensure_window_visible(&window.raw);
+                }
             }
             window::Action::Drag(id) => {
                 if let Some(window) = window_manager.get_mut(id) {
@@ -3597,6 +3677,19 @@ fn run_action<'a, P, C>(
                 }
             }
         },
+        Action::WindowWidget(id, operation) => {
+            let mut current_operation = Some(operation);
+            if let (Some(ui), Some(window)) = (interfaces.get_mut(&id), window_manager.get_mut(id))
+            {
+                while let Some(mut operation) = current_operation.take() {
+                    ui.operate(&window.renderer, operation.as_mut());
+                    if let operation::Outcome::Chain(next) = operation.finish() {
+                        current_operation = Some(next);
+                    }
+                }
+                window.raw.request_redraw();
+            }
+        }
         Action::Widget(operation) => {
             let mut current_operation = Some(operation);
 
@@ -3980,4 +4073,68 @@ fn run_clipboard<Message: Send>(
             });
         });
     }
+}
+
+/// Restore placement in native desktop coordinates. Cocoa coordinates are
+/// desktop points; Windows and X11 coordinates are physical desktop pixels.
+fn ensure_window_visible(window: &winit::window::Window) {
+    let Ok(position) = window.outer_position() else {
+        return;
+    };
+    if window.fullscreen().is_some() {
+        return;
+    }
+    let size = window.outer_size();
+    #[cfg(target_os = "macos")]
+    let units = window.scale_factor();
+    #[cfg(not(target_os = "macos"))]
+    let units = 1.0;
+    let x = f64::from(position.x) / units;
+    let y = f64::from(position.y) / units;
+    let width = f64::from(size.width) / units;
+    let height = f64::from(size.height) / units;
+    let monitors = window.available_monitors().collect::<Vec<_>>();
+    for monitor in &monitors {
+        let origin = monitor.position();
+        let size = monitor.size();
+        #[cfg(target_os = "macos")]
+        let monitor_units = monitor.scale_factor();
+        #[cfg(not(target_os = "macos"))]
+        let monitor_units = 1.0;
+        let left = f64::from(origin.x) / monitor_units;
+        let top = f64::from(origin.y) / monitor_units;
+        let right = left + f64::from(size.width) / monitor_units;
+        let bottom = top + f64::from(size.height) / monitor_units;
+        let logical_pixel = monitor.scale_factor() / monitor_units;
+        let reachable_width = (64.0 * logical_pixel).min(width);
+        let reachable_height = (32.0 * logical_pixel).min(height);
+        if (x + width).min(right) - x.max(left) >= reachable_width
+            && (y + reachable_height).min(bottom) - y.max(top) >= reachable_height
+        {
+            return;
+        }
+    }
+    let Some(monitor) = window
+        .current_monitor()
+        .or_else(|| window.primary_monitor())
+        .or_else(|| monitors.into_iter().next())
+    else {
+        return;
+    };
+    let origin = monitor.position();
+    let screen = monitor.size();
+    #[cfg(target_os = "macos")]
+    let monitor_units = monitor.scale_factor();
+    #[cfg(not(target_os = "macos"))]
+    let monitor_units = 1.0;
+    let left = f64::from(origin.x) / monitor_units;
+    let top = f64::from(origin.y) / monitor_units;
+    let screen_width = f64::from(screen.width) / monitor_units;
+    let screen_height = f64::from(screen.height) / monitor_units;
+    let x = x.clamp(left, left + (screen_width - width).max(0.0));
+    let y = y.clamp(top, top + (screen_height - height).max(0.0));
+    window.set_outer_position(winit::dpi::PhysicalPosition::new(
+        (x * units) as i32,
+        (y * units) as i32,
+    ));
 }

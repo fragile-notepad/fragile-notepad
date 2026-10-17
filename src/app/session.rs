@@ -1,5 +1,5 @@
 use super::App;
-use crate::core::session::{Session, SessionDocument};
+use crate::core::session::{Session, SessionDocument, SessionWindow};
 use crate::core::{Document, DocumentId, DocumentLoadState};
 use crate::editor::{EditorBuffer, EditorPosition, EditorSelection};
 use crate::message::Message;
@@ -157,15 +157,19 @@ impl App {
         self.session.initialized = true;
         let mut tasks = Vec::new();
         if let Some(saved) = self.session.saved.take() {
+            let saved_windows = saved.normalized_windows();
+            let focused_window = saved.focused_window.unwrap_or(0);
             let untouched = self.workspace.documents().len() == 1
                 && self
                     .workspace
                     .active_document()
                     .is_some_and(|d| d.path.is_none() && !d.is_dirty && d.buffer.len_bytes() == 0);
             if !saved.documents.is_empty() {
+                let first_window = self.workspace.current_window_id();
                 if untouched {
                     self.workspace.clear_documents();
                 }
+                let existing_tab_count = self.workspace.window_tab_ids(first_window).len();
                 let mut ids = Vec::new();
                 for entry in saved.documents {
                     let id = self.workspace.generate_document_id();
@@ -181,9 +185,102 @@ impl App {
                     self.session.pending.insert(id, entry);
                     ids.push(id);
                 }
-                let id = ids[saved.active_index.min(ids.len() - 1)];
-                self.workspace.select(id);
-                tasks.push(self.activate_document(id));
+                let mut restored_windows = Vec::new();
+                for (index, saved_window) in saved_windows.iter().enumerate() {
+                    let id = if index == 0 {
+                        if let Some(native) = self
+                            .editor_windows
+                            .get(&first_window)
+                            .map(|window| window.native)
+                        {
+                            if let Some([x, y, width, height]) = saved_window.bounds {
+                                tasks.push(iced::window::resize(
+                                    native,
+                                    iced::Size::new(width.max(640.0), height.max(400.0)),
+                                ));
+                                tasks.push(
+                                    iced::window::move_to(native, iced::Point::new(x, y))
+                                        .chain(iced::window::ensure_visible(native)),
+                                );
+                            }
+                            if saved_window.fullscreen {
+                                tasks.push(iced::window::set_mode(
+                                    native,
+                                    iced::window::Mode::Fullscreen,
+                                ));
+                            } else if saved_window.maximized {
+                                tasks.push(iced::window::maximize(native, true));
+                            }
+                        }
+                        first_window
+                    } else {
+                        let mut settings = iced::window::Settings {
+                            min_size: Some(iced::Size::new(640.0, 400.0)),
+                            maximized: saved_window.maximized,
+                            fullscreen: saved_window.fullscreen,
+                            exit_on_close_request: false,
+                            ..Default::default()
+                        };
+                        if let Some([x, y, width, height]) = saved_window.bounds {
+                            settings.size = iced::Size::new(width.max(640.0), height.max(400.0));
+                            settings.position =
+                                iced::window::Position::Specific(iced::Point::new(x, y));
+                        }
+                        let (id, open) = self.create_editor(true, Some(settings));
+                        tasks.push(open);
+                        id
+                    };
+                    if let Some(window) = self.editor_windows.get_mut(&id) {
+                        window.bounds = saved_window.bounds;
+                        window.fullscreen = saved_window.fullscreen;
+                        self.maximized_windows
+                            .insert(window.native, saved_window.maximized);
+                    }
+                    let group: Vec<_> = saved_window
+                        .document_indices
+                        .iter()
+                        .filter_map(|index| ids.get(*index).copied())
+                        .collect();
+                    if group.is_empty() {
+                        continue;
+                    }
+                    self.workspace.transfer_tabs(
+                        first_window,
+                        &group,
+                        id,
+                        if index == 0 { existing_tab_count } else { 0 },
+                    );
+                    self.workspace.select_in_window(
+                        id,
+                        group[saved_window.active_index.min(group.len() - 1)],
+                    );
+                    restored_windows.push(id);
+                }
+                // Older in-memory callers may omit layout fields. Recovery on
+                // disk is validated before reaching this point.
+                if restored_windows.is_empty() {
+                    let id = ids[saved.active_index.min(ids.len() - 1)];
+                    self.workspace.select_in_window(first_window, id);
+                    restored_windows.push(first_window);
+                }
+                for &window in &restored_windows {
+                    self.switch_editor(window);
+                    if let Some(document) = self.workspace.active_document() {
+                        let id = document.id;
+                        let native = self.editor_windows[&window].native;
+                        tasks.push(
+                            self.activate_document(id)
+                                .scope_window(native)
+                                .map(move |message| Message::ForWindow(native, Box::new(message))),
+                        );
+                    }
+                }
+                let focused = restored_windows[focused_window.min(restored_windows.len() - 1)];
+                self.switch_editor(focused);
+                self.last_active_editor = Some(focused);
+                tasks.push(iced::window::gain_focus(
+                    self.editor_windows[&focused].native,
+                ));
             }
         }
         let paths = std::mem::take(&mut self.session.paths);
@@ -234,6 +331,52 @@ impl App {
 
     pub(super) fn snapshot_session(&self) -> Session {
         let mut session = Session::default();
+        session.version = 2;
+        let document_indices: HashMap<_, _> = self
+            .workspace
+            .documents()
+            .iter()
+            .enumerate()
+            .map(|(index, document)| (document.id, index))
+            .collect();
+        let window_ids: Vec<_> = self
+            .workspace
+            .window_ids()
+            .into_iter()
+            .filter(|id| !self.workspace.window_tab_ids(*id).is_empty())
+            .collect();
+        session.windows = self.drag_snapshot_windows().unwrap_or_else(|| {
+            window_ids
+                .iter()
+                .map(|id| {
+                    let window = self.workspace.window(*id).unwrap();
+                    let native = self.editor_windows.get(id);
+                    SessionWindow {
+                        document_indices: window
+                            .tabs
+                            .iter()
+                            .map(|id| document_indices[id])
+                            .collect(),
+                        active_index: window
+                            .active_document_id
+                            .and_then(|id| window.tabs.iter().position(|tab| *tab == id))
+                            .unwrap_or(0),
+                        bounds: native.and_then(|window| window.bounds),
+                        maximized: native.is_some_and(|window| {
+                            self.maximized_windows
+                                .get(&window.native)
+                                .copied()
+                                .unwrap_or(false)
+                        }),
+                        fullscreen: native.is_some_and(|window| window.fullscreen),
+                    }
+                })
+                .collect()
+        });
+        session.focused_window = self
+            .last_active_editor
+            .and_then(|id| window_ids.iter().position(|window| *window == id))
+            .filter(|index| *index < session.windows.len());
         session.active_index = self
             .workspace
             .documents()
@@ -352,6 +495,9 @@ impl SessionState {
             }
             Event::Workspace(
                 W::DocumentOpened(_)
+                | W::WindowOpened(_)
+                | W::WindowClosed(_)
+                | W::WindowTabsChanged(_)
                 | W::ActiveDocumentChanged(_)
                 | W::OrderChanged
                 | W::ContentChanged(_)

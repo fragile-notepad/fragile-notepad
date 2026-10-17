@@ -60,11 +60,15 @@ fn closing_a_loading_document_aborts_its_worker_through_a_subscriber() {
 }
 
 #[test]
-fn subscriber_mutations_apply_settings_to_the_replacement_for_the_last_tab() {
+fn new_window_after_last_tab_closure_receives_current_settings() {
     let mut app = ready();
+    app.settings.exit_on_last_window_close = false;
     let _ = app.update(Message::ToggleVisibleSpaces);
     let id = app.workspace.active_document_id();
     let _ = app.update(Message::TabClosed(id));
+    assert!(app.editor_windows.is_empty());
+    assert!(app.workspace.document(id).is_none());
+    let _ = app.update(Message::NewWindow);
     let replacement = app.workspace.active_document().unwrap();
     assert_ne!(replacement.id, id);
     assert!(replacement.decorations.settings.show_spaces);

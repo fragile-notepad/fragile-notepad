@@ -10,6 +10,33 @@ A desktop text editor for notes and source files. Written in Rust with
 
 > **Generative AI Notice:** Generative AI was used throughout the development of this project.
 
+## Windows and tabs
+
+Open another editor with **File → New Window** or **Ctrl+Shift+N**
+(**Cmd+Shift+N** on macOS). **Ctrl/Cmd+N** creates a tab in the current window.
+
+- Drag a tab along its strip to reorder it. Drag outside the strip to detach
+  it, then enter another window's tab strip to attach it there. Keep holding
+  the button to detach and attach again; release to finish or press **Escape**
+  to restore the original layout.
+- **Ctrl-click** (**Cmd-click** on macOS) toggles tabs in the selection;
+  **Shift-click** selects a range. Drag a selected tab to move the group.
+  Pinned tabs stay before ordinary tabs.
+- The **Window** menu also provides **Move Selected Tabs to New Window** and
+  **Move Selected Tabs to Window**. On Wayland compositors without the
+  toplevel drag extension, dragging supports transfer between existing windows;
+  use the menu command to create a separate window.
+
+Save and Close menus name their targets: selected tabs, this window, or all
+windows. Advanced Search has the same choices plus Current document, its
+default. Find Next and Previous search the current document.
+
+**Exit when the last editor window closes** is enabled by default in Settings.
+With session recovery enabled, Quit and closing the final window preserve open
+windows and unsaved text for the next launch. Closing another window asks about
+its unsaved tabs. Disable the setting to keep the application running after
+closing its final window; reopening the application creates a fresh editor.
+
 ## Build from source
 
 Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build tools;

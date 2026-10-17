@@ -90,3 +90,16 @@ pub fn listen_url() -> Subscription<String> {
         _ => None,
     })
 }
+
+/// Notifies when a running macOS application is reopened from its Dock icon.
+/// A daemon can use this to create a new editor after its last window closed.
+pub fn listen_reopen() -> Subscription<()> {
+    #[derive(Hash)]
+    struct ListenReopen;
+    subscription::filter_map(ListenReopen, |event| match event {
+        subscription::Event::PlatformSpecific(subscription::PlatformSpecific::MacOS(
+            subscription::MacOS::Reopened,
+        )) => Some(()),
+        _ => None,
+    })
+}

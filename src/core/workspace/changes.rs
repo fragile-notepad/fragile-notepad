@@ -1,6 +1,7 @@
 //! Mutation journal. Only documents borrowed mutably are inspected at a boundary.
 //! Stamps contain scalar metadata; document text and fold ranges are never copied.
 
+use super::EditorWindowId;
 use crate::core::{Document, DocumentId, DocumentIndexState, DocumentLoadState};
 use crate::editor::EditorSelection;
 use std::collections::{HashMap, VecDeque};
@@ -11,6 +12,9 @@ pub enum WorkspaceEvent {
     DocumentClosed(DocumentId),
     ActiveDocumentChanged(DocumentId),
     OrderChanged,
+    WindowOpened(EditorWindowId),
+    WindowClosed(EditorWindowId),
+    WindowTabsChanged(EditorWindowId),
     ContentChanged(DocumentId),
     PreviewChanged(DocumentId),
     ViewChanged(DocumentId),

@@ -169,7 +169,7 @@ impl<P: Program + 'static> Emulator<P> {
                 runtime::Action::Output(message) => {
                     self.update(program, message);
                 }
-                runtime::Action::Widget(operation) => {
+                runtime::Action::Widget(operation) | runtime::Action::WindowWidget(_, operation) => {
                     let mut user_interface = UserInterface::build(
                         program.view(&self.state, self.window),
                         self.size,

@@ -50,6 +50,13 @@ pub use subscriptions::register_single_instance;
 
 #[derive(Debug)]
 pub struct App {
+    editor_windows: HashMap<crate::core::EditorWindowId, windowing::editors::EditorWindow>,
+    last_active_editor: Option<crate::core::EditorWindowId>,
+    advanced_search_owner: Option<crate::core::EditorWindowId>,
+    tab_drag: Option<windowing::tabs::TabDragSession>,
+    next_drag_session: u64,
+    pending_drag_gpu_boost: bool,
+    tab_geometry: HashMap<window::Id, crate::ui::tabs::StripGeometry>,
     workspace: Workspace,
     events: bus::MessageBus<events::Event>,
     pending_work: events::PendingWork,
@@ -104,7 +111,79 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        update::run(self, message)
+        let Some(mut message) = self.lifecycle.admit(message) else {
+            return Task::none();
+        };
+        let mut origin_native = None;
+        while let Message::ForWindow(id, inner) = message {
+            origin_native = Some(id);
+            message = *inner;
+        }
+        let origin = origin_native.and_then(|id| {
+            self.editor_id(id).or_else(|| {
+                use windowing::managed::ManagedWindow;
+                self.advanced_search_window
+                    .filter(|window| window.id() == id)
+                    .and(self.advanced_search_owner)
+            })
+        });
+        let command_editor = self.message_editor(&message).or(origin);
+        if origin_native.is_some_and(|native| !self.owns_window(native))
+            && command_editor.is_none()
+            && (message.shutdown_delivery() == crate::message::ShutdownDelivery::Reject
+                || matches!(
+                    &message,
+                    Message::RefreshLoadingFind | Message::FilePicked(_)
+                ))
+        {
+            return Task::none();
+        }
+        if let Some(id) = command_editor {
+            self.switch_editor(id);
+        }
+        let cancel = if self.tab_drag.is_some()
+            && matches!(
+                &message,
+                Message::NewFile
+                    | Message::NewWindow
+                    | Message::TabSelected(_)
+                    | Message::TabClosed(_)
+                    | Message::TabPinToggled(_)
+                    | Message::CloseFile
+                    | Message::CloseAllFiles
+                    | Message::CloseAllButActiveFile
+                    | Message::CloseAllButPinnedFiles
+                    | Message::CloseAllToLeft
+                    | Message::CloseAllToRight
+                    | Message::CloseAllUnchanged
+                    | Message::CloseScoped(_)
+                    | Message::OpenPaths(_)
+                    | Message::ForwardedFiles(_, _, _)
+                    | Message::FilePicked(_)
+                    | Message::FileOpened(_)
+                    | Message::WindowCloseRequested(_)
+                    | Message::WindowClosed(_)
+                    | Message::CloseWindow
+                    | Message::Quit
+            ) {
+            self.cancel_tab_drag()
+        } else {
+            Task::none()
+        };
+        if let Some(id) = command_editor {
+            self.switch_editor(id);
+        }
+        let native = origin_native
+            .filter(|id| self.editor_id(*id).is_none())
+            .or(self.main_window_id);
+        let task = update::run(self, message);
+        let task = if let Some(id) = native {
+            task.scope_window(id)
+                .map(move |message| Message::ForWindow(id, Box::new(message)))
+        } else {
+            task
+        };
+        Task::batch([cancel, task, self.schedule_visible_editors()])
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

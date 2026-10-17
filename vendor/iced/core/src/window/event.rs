@@ -21,6 +21,15 @@ pub enum Event {
         scale_factor: f32,
     },
 
+    /// A continuous tab tear-off gesture changed.
+    TabDrag(super::tab_drag::Event),
+
+    /// Native window creation failed; its open task will not produce an ID.
+    OpenFailed {
+        /// Native error details.
+        error: String,
+    },
+
     /// A window was closed.
     Closed,
 

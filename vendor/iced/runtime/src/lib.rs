@@ -38,6 +38,9 @@ pub enum Action<T> {
     /// Run a widget operation.
     Widget(Box<dyn core::widget::Operation>),
 
+    /// Run a widget operation in one window only.
+    WindowWidget(core::window::Id, Box<dyn core::widget::Operation>),
+
     /// Run a clipboard action.
     Clipboard(clipboard::Action),
 
@@ -87,6 +90,7 @@ impl<T> Action<T> {
         match self {
             Action::Output(output) => Ok(output),
             Action::Widget(operation) => Err(Action::Widget(operation)),
+            Action::WindowWidget(window, operation) => Err(Action::WindowWidget(window, operation)),
             Action::Clipboard(action) => Err(Action::Clipboard(action)),
             Action::Window(action) => Err(Action::Window(action)),
             Action::System(action) => Err(Action::System(action)),
@@ -111,6 +115,7 @@ where
             Action::Widget { .. } => {
                 write!(f, "Action::Widget")
             }
+            Action::WindowWidget(window, _) => write!(f, "Action::WindowWidget({window:?})"),
             Action::Clipboard(action) => {
                 write!(f, "Action::Clipboard({action:?})")
             }

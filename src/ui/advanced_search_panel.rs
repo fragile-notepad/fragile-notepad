@@ -5,7 +5,7 @@ use iced::widget::{
 use iced::{Center, Color, Element, Fill, Font};
 
 use crate::core::SearchMode;
-use crate::message::{AdvancedSearchTab, Message};
+use crate::message::{AdvancedSearchTab, Message, SearchScope};
 use crate::search_dialog::{SearchCountSummary, SearchDialogState, SearchResult};
 use crate::ui::icons::hero::IconTone;
 use crate::ui::icons::search::{self, SearchIcon};
@@ -67,7 +67,7 @@ fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
 
 fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {
     let replace = replace_mode(dialog.active_tab);
-    let open = open_scope(dialog.active_tab);
+    let open = dialog.scope != SearchScope::CurrentDocument;
     let enabled = !dialog.query.is_empty() && !has_query_error(dialog);
     let query = container(
         row![
@@ -162,8 +162,14 @@ fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {
     );
 
     let scope = row![
-        scope_button("Current document", !open, search_tab(replace, false)),
-        scope_button("Open documents", open, search_tab(replace, true)),
+        scope_button(
+            "Current document",
+            dialog.scope,
+            SearchScope::CurrentDocument
+        ),
+        scope_button("Selected tabs", dialog.scope, SearchScope::SelectedTabs),
+        scope_button("This window", dialog.scope, SearchScope::ThisWindow),
+        scope_button("All windows", dialog.scope, SearchScope::AllWindows),
         space::horizontal(),
         checkbox(dialog.wrap_around)
             .style(styles::checkbox)
@@ -224,13 +230,13 @@ fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {
 
 fn scope_button(
     label: &'static str,
-    selected: bool,
-    tab: AdvancedSearchTab,
+    selected: SearchScope,
+    scope: SearchScope,
 ) -> Element<'static, Message> {
     button(text(label).size(12))
         .padding([6, 10])
-        .style(styles::search_option(selected))
-        .on_press(Message::AdvancedSearchTabSelected(tab))
+        .style(styles::search_option(selected == scope))
+        .on_press(Message::AdvancedSearchScopeSelected(scope))
         .into()
 }
 
@@ -280,7 +286,7 @@ fn icon_action(
 
 fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
     let enabled = !dialog.query.is_empty() && !has_query_error(dialog);
-    let open = open_scope(dialog.active_tab);
+    let open = dialog.scope != SearchScope::CurrentDocument;
     let find_all = if open {
         Message::AdvancedFindAllOpenRun
     } else {
@@ -553,7 +559,7 @@ fn count_results<'a>(
     if summary.total_matches > 0 {
         overview = overview.push(action(
             "Show matching lines",
-            if open_scope(dialog.active_tab) {
+            if dialog.scope != SearchScope::CurrentDocument {
                 Message::AdvancedFindAllOpenRun
             } else {
                 Message::AdvancedFindAllCurrentRun

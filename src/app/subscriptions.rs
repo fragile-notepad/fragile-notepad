@@ -18,10 +18,25 @@ impl App {
 
         Subscription::batch([
             single_instance_subscription(),
+            event::listen_reopen().map(|()| Message::ApplicationReopened),
             iced::system::theme_changes().map(Message::SystemColorModeChanged),
             event::listen_with(shortcuts::event_to_message),
+            event::listen_with(|event, _, id| {
+                matches!(
+                    event,
+                    iced::Event::Window(window::Event::Moved(_) | window::Event::Rescaled(_))
+                )
+                .then_some(Message::WindowPlacementChanged(id))
+            }),
+            event::listen_with(|event, _, id| match event {
+                iced::Event::Window(window::Event::OpenFailed { error }) => {
+                    Some(Message::WindowOpenFailed(id, error))
+                }
+                _ => None,
+            }),
             window::close_requests().map(Message::WindowCloseRequested),
             window::close_events().map(Message::WindowClosed),
+            window::tab_drag::events().map(Message::TabDragEvent),
             chrome_animation,
         ])
     }

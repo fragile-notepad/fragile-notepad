@@ -264,14 +264,18 @@ fn loading_and_applying_new_file_defaults_preserves_existing_and_recovered_metad
 }
 
 #[test]
-fn closing_last_clean_tab_creates_a_document_with_current_new_file_defaults() {
+fn reopening_a_window_after_last_tab_close_uses_current_new_file_defaults() {
     let (mut app, _) = App::new();
     let _ = app.update(Message::SettingsLoaded(Ok(None)));
     let _ = app.update(Message::DraftNewFileEncodingSelected(TextEncoding::Utf8Bom));
     let _ = app.update(Message::DraftNewFileLineEndingSelected(LineEnding::CrLf));
     let _ = app.update(Message::ApplySettings);
+    app.settings.exit_on_last_window_close = false;
     let old_id = app.workspace.active_document_id();
     let _ = app.update(Message::CloseFile);
+    assert!(app.editor_windows.is_empty());
+    assert!(app.workspace.document(old_id).is_none());
+    let _ = app.update(Message::NewWindow);
     let document = app.workspace.active_document().unwrap();
     assert_ne!(document.id, old_id);
     assert_eq!(document.encoding, TextEncoding::Utf8Bom);

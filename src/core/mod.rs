@@ -18,7 +18,7 @@ pub use document::{
 pub use encoding::{DecodedText, EncodingError, TextEncoding, decode_bytes, encode_text};
 pub use file_revision::FileRevision;
 pub use search::{FindState, PreparedSearch, SearchError, SearchMode, SearchOptions, TextMatch};
-pub use session::{Session, SessionDocument};
+pub use session::{Session, SessionDocument, SessionWindow};
 pub use settings::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, SearchResultSettings,
 };
@@ -27,4 +27,4 @@ pub use shortcuts::{
     ShortcutEntry, ShortcutGroup, ShortcutKey, ShortcutMap, ShortcutModifierIcon,
     ShortcutModifiers,
 };
-pub use workspace::Workspace;
+pub use workspace::{EditorWindow, EditorWindowId, Workspace};

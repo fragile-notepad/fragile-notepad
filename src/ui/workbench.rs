@@ -19,6 +19,7 @@ const FIND_PANEL_EXPANDED_HEIGHT: f32 = 86.0;
 pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     let WorkbenchView {
         workspace,
+        editor_window,
         find,
         settings,
         is_find_visible,
@@ -63,7 +64,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     // Compare the target too: the first closing frame still has opacity 1,
     // and the first opening frame still has opacity 0.
     .all(|(progress, visible)| progress == if visible { 1.0 } else { 0.0 });
-    let active_document = workspace.active_document();
+    let active_document = workspace.active_document_in(editor_window);
     let editor = if let Some(document) = active_document {
         // Wrap outside the context menu, whose child is the AdvancedEditor tree.
         raster_cache::cached_editor(background::editor(editor::view(document, settings)), retain)
@@ -74,7 +75,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     let mut workbench = column![
         raster_cache::cached(toolbar::menu_bar(active_menu), retain),
         raster_cache::cached(toolbar::tool_bar(active_document), retain),
-        tabs::view(workspace, dragged_tab, hovered_drop_tab),
+        tabs::view_for_window(workspace, editor_window, dragged_tab, hovered_drop_tab),
     ];
 
     if chrome_animation.find_rendered_visible || is_find_visible {

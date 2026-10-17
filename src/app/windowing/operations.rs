@@ -27,10 +27,60 @@ pub(crate) fn custom_chrome(mut settings: window::Settings) -> window::Settings 
 impl App {
     pub(crate) fn update_window(&mut self, message: WindowMessage) -> Task<Message> {
         match message {
+            WindowMessage::NewWindow => self.new_editor_window(),
+            WindowMessage::CloseWindow => {
+                self.close_editor_request(self.workspace.current_window_id())
+            }
+            WindowMessage::Quit => self.exit_request(),
+            WindowMessage::MoveTabsToNewWindow => self.move_selected_to_new_window(),
+            WindowMessage::MoveTabsToWindow(id) => self.move_selected_to_window(id),
+            WindowMessage::WindowPlacementChanged(id) => self.capture_window_geometry(id),
+            WindowMessage::WindowOpenFailed(id, error) => {
+                if self.settings_window.is_some_and(|window| window.is(id)) {
+                    self.settings_window = None;
+                }
+                if self
+                    .advanced_search_window
+                    .is_some_and(|window| window.is(id))
+                {
+                    self.advanced_search_window = None;
+                    self.advanced_search_owner = None;
+                    self.pending_search = None;
+                }
+                self.editor_open_failed(id, error)
+            }
+            WindowMessage::WindowGeometry(id, point, size) => {
+                let mut changed = false;
+                if let Some(editor) = self.editor_id(id)
+                    && let Some(state) = self.editor_windows.get_mut(&editor)
+                {
+                    if !self.maximized_windows.get(&id).copied().unwrap_or(false)
+                        && !state.fullscreen
+                    {
+                        let bounds = Some([
+                            point.map_or(0.0, |p| p.x),
+                            point.map_or(0.0, |p| p.y),
+                            size.width,
+                            size.height,
+                        ]);
+                        changed = state.bounds != bounds;
+                        state.bounds = bounds;
+                    }
+                }
+                if changed {
+                    self.request_session_save()
+                } else {
+                    Task::none()
+                }
+            }
             WindowMessage::WindowOpened(id) => self.window_opened(id),
             WindowMessage::WindowMaximized(id, maximized) => {
                 if self.owns_window(id) {
-                    self.maximized_windows.insert(id, maximized);
+                    if self.maximized_windows.insert(id, maximized) != Some(maximized)
+                        && self.editor_id(id).is_some()
+                    {
+                        return self.request_session_save();
+                    }
                 }
                 Task::none()
             }
@@ -59,8 +109,8 @@ impl App {
                     && search_window.is(id)
                 {
                     search_window.close_requested()
-                } else if self.main_window_id == Some(id) {
-                    self.exit_request()
+                } else if let Some(editor) = self.editor_id(id) {
+                    self.close_editor_request(editor)
                 } else {
                     Task::none()
                 }
@@ -85,9 +135,15 @@ impl App {
                 {
                     self.advanced_search_window = None;
                     Task::none()
-                } else if self.main_window_id == Some(id) {
-                    self.focused_window_id = None;
-                    iced::exit()
+                } else if let Some(editor) = self.editor_id(id) {
+                    if self.workspace.window_tab_ids(editor).is_empty() {
+                        self.remove_editor_window(editor);
+                        Task::none()
+                    } else {
+                        // Unexpected destruction must not strand live buffers
+                        // in an editor that can no longer be activated.
+                        self.editor_open_failed(id, "The native window closed unexpectedly.".into())
+                    }
                 } else {
                     Task::none()
                 }
@@ -102,8 +158,8 @@ impl App {
         Task::none()
     }
 
-    fn owns_window(&self, id: window::Id) -> bool {
-        self.main_window_id == Some(id)
+    pub(in crate::app) fn owns_window(&self, id: window::Id) -> bool {
+        self.editor_id(id).is_some()
             || self.settings_window.is_some_and(|window| window.is(id))
             || self
                 .advanced_search_window
@@ -121,12 +177,20 @@ impl App {
     pub(crate) fn show_main_window(&mut self, request: ActivationRequest) -> Task<Message> {
         self.menu.close();
 
+        let open = if self.editor_windows.is_empty() {
+            self.new_editor_window()
+        } else {
+            Task::none()
+        };
+        if let Some(id) = self.last_active_editor {
+            self.switch_editor(id);
+        }
         let Some(main_window_id) = self.main_window_id else {
-            return Task::none();
+            return open;
         };
 
         platform_activation::prepare_for_presentation(&request);
-        window::minimize(main_window_id, false)
+        open.chain(window::minimize(main_window_id, false))
             .chain(window::gain_focus(main_window_id))
             .chain(window::request_user_attention(
                 main_window_id,
@@ -154,6 +218,7 @@ impl App {
     }
 
     pub(crate) fn open_advanced_search_window(&mut self) -> Task<Message> {
+        self.advanced_search_owner = Some(self.workspace.current_window_id());
         if let Some(search_window) = self.advanced_search_window {
             return iced::window::gain_focus(search_window.id());
         }
@@ -170,9 +235,18 @@ impl App {
             .unwrap_or_else(Task::none)
     }
 
-    pub(crate) fn window_menu_state(&self) -> WindowMenuState {
+    pub(crate) fn window_menu_state_for(&self, source: window::Id) -> WindowMenuState {
         WindowMenuState {
             open_window_count: self.open_window_targets().len(),
+            editor_windows: self
+                .workspace
+                .window_ids()
+                .into_iter()
+                .filter_map(|id| {
+                    let native = self.editor_windows.get(&id)?.native;
+                    (native != source).then(|| (native, self.title(native)))
+                })
+                .collect(),
         }
     }
 
@@ -231,8 +305,10 @@ impl App {
     fn open_window_targets(&self) -> Vec<WindowTarget> {
         let mut targets = Vec::new();
 
-        if self.main_window_id.is_some() {
-            targets.push(WindowTarget::Main);
+        for id in self.workspace.window_ids() {
+            if let Some(window) = self.editor_windows.get(&id) {
+                targets.push(WindowTarget::Editor(window.native));
+            }
         }
         if self.settings_window.is_some() {
             targets.push(WindowTarget::Settings);
@@ -255,6 +331,7 @@ impl App {
     fn window_id(&self, target: WindowTarget) -> Option<iced::window::Id> {
         match target {
             WindowTarget::Main => self.main_window_id,
+            WindowTarget::Editor(id) => self.editor_id(id).map(|_| id),
             WindowTarget::Settings => self.settings_window.map(|window| window.id()),
             WindowTarget::AdvancedSearch => self.advanced_search_window.map(|window| window.id()),
         }

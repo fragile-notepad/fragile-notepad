@@ -3,7 +3,7 @@ use crate::core::{
     TextMatch, Workspace,
 };
 use crate::editor::EditorSelection;
-use crate::message::AdvancedSearchTab;
+use crate::message::{AdvancedSearchTab, SearchScope};
 
 pub(crate) fn parse_result_settings(
     result_limit_input: &str,
@@ -41,6 +41,7 @@ pub(crate) fn parse_result_settings(
 #[derive(Debug, Clone)]
 pub struct SearchDialogState {
     pub active_tab: AdvancedSearchTab,
+    pub scope: SearchScope,
     pub query: String,
     pub replacement: String,
     pub case_sensitive: bool,
@@ -109,6 +110,7 @@ impl SearchDialogState {
     pub fn new() -> Self {
         Self {
             active_tab: AdvancedSearchTab::Find,
+            scope: SearchScope::CurrentDocument,
             query: String::new(),
             replacement: String::new(),
             case_sensitive: false,
@@ -143,6 +145,7 @@ impl SearchDialogState {
     pub fn request_snapshot(&self) -> Self {
         Self {
             active_tab: self.active_tab,
+            scope: self.scope,
             query: self.query.clone(),
             replacement: self.replacement.clone(),
             case_sensitive: self.case_sensitive,
@@ -171,6 +174,14 @@ impl SearchDialogState {
             self.count_summary = None;
         }
         self.active_tab = tab;
+    }
+
+    pub fn set_scope(&mut self, scope: SearchScope) {
+        if self.scope != scope {
+            self.scope = scope;
+            self.clear_results();
+            self.update_ready_status();
+        }
     }
 
     pub fn set_query(&mut self, query: impl Into<String>) {
@@ -516,6 +527,22 @@ mod tests {
     const MAX_PREVIEW_CHARS: usize = SearchResultSettings::DEFAULT_PREVIEW_CHARS;
     use crate::core::{Document, DocumentId, DocumentIndexState, SearchMode};
     use crate::editor::{EditorPosition, EditorSelection};
+    use crate::message::SearchScope;
+
+    #[test]
+    fn scope_changes_clear_results_and_are_retained_in_request_snapshots() {
+        let mut dialog = SearchDialogState::new();
+        assert_eq!(dialog.scope, SearchScope::CurrentDocument);
+        let document = Document::from_path(DocumentId::new(1), "main.rs", "needle");
+        dialog.set_query("needle");
+        dialog.refresh_from_documents([&document]);
+        assert_eq!(dialog.match_count, 1);
+        dialog.set_scope(SearchScope::AllWindows);
+        assert!(dialog.results.is_empty());
+        assert_eq!(dialog.match_count, 0);
+        assert_eq!(dialog.status, "Ready");
+        assert_eq!(dialog.request_snapshot().scope, SearchScope::AllWindows);
+    }
 
     #[test]
     fn include_filter_accepts_empty_and_star_patterns() {

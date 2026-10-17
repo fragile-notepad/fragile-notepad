@@ -3,10 +3,12 @@ use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Layout, Renderer as _, Shell, Widget};
-use iced::widget::{button, container, image, mouse_area, row, text, tooltip};
-use iced::{Background, Border, Center, Color, Element, Event, Fill, Length, Rectangle, Size};
+use iced::widget::{button, container, image, row, text, tooltip};
+use iced::{
+    Background, Border, Center, Color, Element, Event, Fill, Length, Point, Rectangle, Size,
+};
 
-use crate::core::{Document, DocumentId, Workspace};
+use crate::core::{Document, DocumentId, EditorWindowId, Workspace};
 use crate::message::Message;
 use crate::ui::controls::centered_button_content;
 use crate::ui::icons::colored::{self, ColoredIcon};
@@ -28,6 +30,46 @@ const TOOLTIP_TEXT_SIZE: u32 = 13;
 
 mod scroll_strip;
 
+/// Tab rectangles in client coordinates, including tabs clipped by scrolling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StripGeometry {
+    pub bounds: Rectangle,
+    pub tabs: Vec<(DocumentId, Rectangle)>,
+}
+
+impl StripGeometry {
+    pub fn contains(&self, point: Point) -> bool {
+        Rectangle {
+            y: self.bounds.y - 15.0,
+            height: self.bounds.height + 30.0,
+            ..self.bounds
+        }
+        .contains(point)
+    }
+
+    pub fn insertion(&self, point: Point) -> usize {
+        self.tabs
+            .iter()
+            .position(|(_, bounds)| point.x < bounds.center_x())
+            .unwrap_or(self.tabs.len())
+    }
+
+    fn body_at(&self, point: Point) -> Option<DocumentId> {
+        if !self.bounds.contains(point) {
+            return None;
+        }
+        self.tabs.iter().find_map(|(id, bounds)| {
+            let body = Rectangle {
+                width: (bounds.width - 19.0 - TAB_CLOSE_WIDTH).max(0.0),
+                ..*bounds
+            };
+            body.contains(point).then_some(*id)
+        })
+    }
+}
+
+struct TabMarker(DocumentId);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragVisual {
     Idle,
@@ -47,19 +89,39 @@ pub fn view(
     dragged_tab: Option<DocumentId>,
     hovered_drop_tab: Option<DocumentId>,
 ) -> Element<'_, Message> {
+    view_for_window(
+        workspace,
+        workspace.current_window_id(),
+        dragged_tab,
+        hovered_drop_tab,
+    )
+}
+
+pub fn view_for_window(
+    workspace: &Workspace,
+    editor_window: EditorWindowId,
+    dragged_tab: Option<DocumentId>,
+    hovered_drop_tab: Option<DocumentId>,
+) -> Element<'_, Message> {
+    let window = workspace.window(editor_window);
     let tabs = workspace
-        .documents()
-        .iter()
+        .window_documents(editor_window)
         .fold(row![].spacing(0).align_y(Center), |tabs, document| {
+            let selected = window.is_some_and(|window| window.selected_tabs.contains(&document.id));
             tabs.push(tab(
                 document,
-                document.id == workspace.active_document_id(),
-                drag_visual(workspace, document, dragged_tab, hovered_drop_tab),
+                window.and_then(|window| window.active_document_id) == Some(document.id),
+                selected,
+                if selected && dragged_tab.is_some() {
+                    DragVisual::Dragged
+                } else {
+                    drag_visual(workspace, document, dragged_tab, hovered_drop_tab)
+                },
             ))
         })
         .push(new_file_button());
 
-    container(scroll_strip::view(tabs))
+    container(scroll_strip::view_tracked(tabs, dragged_tab.is_some()))
         .height(TAB_HEIGHT + 1.0)
         .width(Fill)
         .style(styles::tab_strip)
@@ -89,33 +151,32 @@ fn new_file_button() -> Element<'static, Message> {
     .into()
 }
 
-fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element<'_, Message> {
+fn tab(
+    document: &Document,
+    is_active: bool,
+    is_selected: bool,
+    drag_visual: DragVisual,
+) -> Element<'_, Message> {
     let title = tab_title(document);
     let compact_title = compact_tab_title(&title);
     let label_width = tab_label_width(&compact_title);
 
-    let title_area = mouse_area(
-        container(
-            row![
-                image::Image::new(tab_state_icon(TabFileState::from_document(document)))
-                    .width(14)
-                    .height(14)
-                    .filter_method(image::FilterMethod::Linear),
-                text(compact_title)
-                    .size(TAB_TEXT_SIZE)
-                    .width(Length::Fixed(label_width)),
-            ]
-            .spacing(5)
-            .align_y(Center),
-        )
-        .padding([3, 7])
-        .height(23)
-        .style(styles::tab_title_area(is_active, drag_visual.is_dragged())),
+    let title_area = container(
+        row![
+            image::Image::new(tab_state_icon(TabFileState::from_document(document)))
+                .width(14)
+                .height(14)
+                .filter_method(image::FilterMethod::Linear),
+            text(compact_title)
+                .size(TAB_TEXT_SIZE)
+                .width(Length::Fixed(label_width)),
+        ]
+        .spacing(5)
+        .align_y(Center),
     )
-    .on_press(Message::TabDragStarted(document.id))
-    .on_enter(Message::TabDragHovered(document.id))
-    .on_exit(Message::TabDragLeft(document.id))
-    .on_release(Message::TabDragReleased(document.id));
+    .padding([3, 7])
+    .height(23)
+    .style(styles::tab_title_area(is_active, drag_visual.is_dragged()));
 
     let pin_button = button(centered_button_content(shortcut::icon_with_color(
         if document.is_pinned {
@@ -148,7 +209,9 @@ fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element
         row![title_area, pin_button, close_button]
             .spacing(0)
             .align_y(Center),
+        document.id,
         is_active,
+        is_selected,
         drag_visual_style(drag_visual),
         drag_visual.is_dragged(),
     )
@@ -169,6 +232,8 @@ struct MaskedTab<'a> {
     content: Element<'a, Message>,
     height: Length,
     is_active: bool,
+    document_id: DocumentId,
+    is_selected: bool,
     drag_visual: styles::TabDragVisual,
     is_dragged: bool,
 }
@@ -176,7 +241,9 @@ struct MaskedTab<'a> {
 impl<'a> MaskedTab<'a> {
     fn new(
         content: impl Into<Element<'a, Message>>,
+        document_id: DocumentId,
         is_active: bool,
+        is_selected: bool,
         drag_visual: styles::TabDragVisual,
         is_dragged: bool,
     ) -> Self {
@@ -184,6 +251,8 @@ impl<'a> MaskedTab<'a> {
             content: content.into(),
             height: Length::Fit,
             is_active,
+            document_id,
+            is_selected,
             drag_visual,
             is_dragged,
         }
@@ -243,6 +312,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MaskedTab<'_> {
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
+        operation.custom(None, layout.bounds(), &mut TabMarker(self.document_id));
         operation.container(None, layout.bounds());
         operation.traverse(&mut |operation| {
             self.content.as_widget_mut().operate(
@@ -303,7 +373,15 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MaskedTab<'_> {
         viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        let tab_style = styles::tab_container_style(theme, self.is_active, self.drag_visual);
+        let visual = if self.is_selected
+            && !self.is_active
+            && matches!(self.drag_visual, styles::TabDragVisual::Idle)
+        {
+            styles::TabDragVisual::Dragged
+        } else {
+            self.drag_visual
+        };
+        let tab_style = styles::tab_container_style(theme, self.is_active, visual);
         let top_bar_style = styles::tab_top_bar_style(theme, self.is_active, self.is_dragged);
 
         if bounds.intersection(viewport).is_some() {
@@ -476,9 +554,64 @@ fn close_icon() -> image::Handle {
 
 #[cfg(test)]
 mod tests {
-    use super::{TAB_TOP_BAR_HEIGHT, TabFileState, masked_top_bar_geometry, tab_title};
+    use super::{
+        StripGeometry, TAB_TOP_BAR_HEIGHT, TabFileState, masked_top_bar_geometry, tab_title,
+    };
     use crate::core::{Document, DocumentId};
-    use iced::{Border, Color, Rectangle};
+    use iced::{Border, Color, Point, Rectangle};
+
+    #[test]
+    fn strip_geometry_retains_clipped_tabs_and_accepts_empty_strip_space() {
+        let bounds = Rectangle {
+            x: 20.0,
+            y: 40.0,
+            width: 300.0,
+            height: 27.0,
+        };
+        let geometry = StripGeometry {
+            bounds,
+            tabs: vec![
+                (
+                    DocumentId::new(1),
+                    Rectangle {
+                        x: -50.0,
+                        y: 40.0,
+                        width: 100.0,
+                        height: 27.0,
+                    },
+                ),
+                (
+                    DocumentId::new(2),
+                    Rectangle {
+                        x: 50.0,
+                        y: 40.0,
+                        width: 100.0,
+                        height: 27.0,
+                    },
+                ),
+            ],
+        };
+        assert!(geometry.contains(Point::new(300.0, 30.0)));
+        assert!(!geometry.contains(Point::new(300.0, 24.0)));
+        assert!(!geometry.contains(Point::new(321.0, 50.0)));
+        assert_eq!(geometry.insertion(Point::new(-20.0, 50.0)), 0);
+        assert_eq!(geometry.insertion(Point::new(20.0, 50.0)), 1);
+        assert_eq!(geometry.insertion(Point::new(300.0, 50.0)), 2);
+        assert_eq!(geometry.body_at(Point::new(30.0, 50.0)), None);
+        assert_eq!(
+            geometry.body_at(Point::new(70.0, 50.0)),
+            Some(DocumentId::new(2))
+        );
+        assert_eq!(geometry.body_at(Point::new(140.0, 50.0)), None);
+        assert_eq!(
+            StripGeometry {
+                bounds,
+                tabs: Vec::new()
+            }
+            .insertion(Point::new(30.0, 50.0)),
+            0
+        );
+    }
 
     #[test]
     fn tab_state_and_title_follow_edits_and_saves() {

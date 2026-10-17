@@ -113,6 +113,23 @@ impl<T> Task<T> {
         }
     }
 
+    /// Restricts this task's widget operations (focus, scroll, and selection)
+    /// to one window. Explicitly scoped operations retain their own target.
+    pub fn scope_window(self, window: crate::core::window::Id) -> Self
+    where
+        T: 'static,
+    {
+        Self {
+            stream: self.stream.map(|stream| {
+                boxed_stream(stream.map(move |action| match action {
+                    Action::Widget(operation) => Action::WindowWidget(window, operation),
+                    other => other,
+                }))
+            }),
+            units: self.units,
+        }
+    }
+
     /// Maps the output of a [`Task`] with the given closure.
     pub fn map<O>(self, mut f: impl FnMut(T) -> O + MaybeSend + 'static) -> Task<O>
     where

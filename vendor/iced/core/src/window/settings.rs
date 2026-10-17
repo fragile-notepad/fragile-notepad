@@ -32,6 +32,10 @@ pub use platform::PlatformSpecific;
 /// The window settings of an application.
 #[derive(Debug, Clone)]
 pub struct Settings {
+    /// Attach to an ongoing tab gesture before first presentation.
+    /// Required by compositor-driven tear-off on Wayland.
+    pub tab_drag: Option<(super::tab_drag::SessionId, crate::Vector)>,
+
     /// The initial logical dimensions of the window.
     pub size: Size,
 
@@ -103,6 +107,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            tab_drag: None,
             size: Size::new(1024.0, 768.0),
             maximized: false,
             fullscreen: false,

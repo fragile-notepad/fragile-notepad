@@ -117,6 +117,10 @@ impl App {
 
     fn dispatch_settings(&mut self, message: SettingsMessage) -> Task<Message> {
         match message {
+            SettingsMessage::DraftExitOnLastWindowCloseToggled(value) => {
+                self.settings_dialog.draft.exit_on_last_window_close = value;
+                Task::none()
+            }
             SettingsMessage::DraftThemeSelected(theme) => {
                 self.settings_dialog.draft.set_syntax_theme(theme);
                 Task::none()

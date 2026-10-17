@@ -200,6 +200,15 @@ fn files_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             )
         ),
         section(
+            "Windows",
+            described_toggle(
+                "Exit when the last editor window closes",
+                "Turn this off to keep the app running after closing its final editor window.",
+                settings.exit_on_last_window_close,
+                Message::DraftExitOnLastWindowCloseToggled,
+            )
+        ),
+        section(
             "Recent files",
             described_row(
                 "History limit",

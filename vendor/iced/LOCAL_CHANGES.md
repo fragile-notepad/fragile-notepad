@@ -26,6 +26,21 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 | `ee455ef9bb` | Render gradient quad shadows with shared solid-quad shadow logic |
 | `ba94c520a1` | Render single-stop gradients correctly |
 
+## Continuous tab gestures
+
+- Expose session-tagged `window::tab_drag` actions/events, native desktop hit
+  testing, and pointer-following without entering an OS move loop.
+- Retain the original native source and hand capture to a visible target through
+  tab attachment; check
+  physical release before handling delayed window-open tasks.
+- Attach Wayland toplevels before first presentation when requested in window
+  settings, using the existing winit connection and event queue.
+- Recover from native creation failures with an explicit OpenFailed event and
+  a session-tagged drag cancellation. Restore reachable window placement through
+  `window::ensure_visible`, preserving negative desktop coordinates.
+- Scope focus, selection, and scroll widget operations to one window with
+  `Task::scope_window`, preserving explicit operation targets.
+
 ## Application patches
 
 - Join adjacent compatible quad runs and text groups after layer merging,

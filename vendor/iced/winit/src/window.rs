@@ -32,6 +32,7 @@ where
     C: Compositor<Renderer = P::Renderer>,
     P::Theme: theme::Base,
 {
+    pub tab_drag: crate::tab_drag::Tracker,
     aliases: BTreeMap<winit::window::WindowId, Id>,
     entries: BTreeMap<Id, Window<P, C>>,
 }
@@ -44,6 +45,7 @@ where
 {
     pub fn new() -> Self {
         Self {
+            tab_drag: crate::tab_drag::Tracker::default(),
             aliases: BTreeMap::new(),
             entries: BTreeMap::new(),
         }
@@ -105,15 +107,23 @@ where
     }
 
     pub fn is_idle(&self) -> bool {
-        self.entries
-            .values()
-            .all(|window| window.redraw_at.is_none())
+        !self.tab_drag.is_active()
+            && self
+                .entries
+                .values()
+                .all(|window| window.raw.is_visible() == Some(false) || window.redraw_at.is_none())
     }
 
     pub fn redraw_at(&self) -> Option<Instant> {
+        let drag_tick = self
+            .tab_drag
+            .is_active()
+            .then(|| Instant::now() + std::time::Duration::from_millis(16));
         self.entries
             .values()
+            .filter(|window| window.raw.is_visible() != Some(false))
             .filter_map(|window| window.redraw_at)
+            .chain(drag_tick)
             .min()
     }
 
@@ -131,6 +141,33 @@ where
 
     pub fn get_mut(&mut self, id: Id) -> Option<&mut Window<P, C>> {
         self.entries.get_mut(&id)
+    }
+
+    pub fn drag_windows(&self) -> Vec<crate::tab_drag::WindowInfo> {
+        self.entries
+            .iter()
+            .map(|(id, window)| (*id, window.raw.clone(), window.state.scale_factor()))
+            .collect()
+    }
+
+    pub fn process_tab_drag_event(
+        &mut self,
+        native: winit::window::WindowId,
+        event: &winit::event::WindowEvent,
+        events: &mut Vec<(Id, core::Event)>,
+    ) {
+        if let Some(id) = self.aliases.get(&native).copied() {
+            let scale = self
+                .entries
+                .get(&id)
+                .map(|window| window.state.scale_factor())
+                .unwrap_or(1.0);
+            self.tab_drag.window_event(id, event, scale, events);
+            if self.tab_drag.is_active() {
+                let windows = self.drag_windows();
+                self.tab_drag.poll(&windows, events);
+            }
+        }
     }
 
     pub fn get_mut_alias(

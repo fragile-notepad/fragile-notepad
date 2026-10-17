@@ -99,6 +99,7 @@ pub struct EditorSettings {
     pub word_wrap: bool,
     pub wrap_column_limit: Option<usize>,
     pub auto_save: bool,
+    pub exit_on_last_window_close: bool,
     pub new_file_encoding: TextEncoding,
     pub new_file_line_ending: LineEnding,
     pub recent_file_limit: usize,
@@ -312,6 +313,7 @@ impl EditorSettings {
                         hardware_acceleration_key(self.hardware_acceleration),
                     )
                     .attribute("auto-save", self.auto_save)
+                    .attribute("exit-on-last-window-close", self.exit_on_last_window_close)
                     .attribute("syntax-theme", self.syntax_theme.to_string()),
             )
             .child(
@@ -388,6 +390,12 @@ impl EditorSettings {
             }
             if let Some(auto_save) = general.attribute("auto-save").and_then(parse_bool) {
                 settings.auto_save = auto_save;
+            }
+            if let Some(exit) = general
+                .attribute("exit-on-last-window-close")
+                .and_then(parse_bool)
+            {
+                settings.exit_on_last_window_close = exit;
             }
         }
 
@@ -518,6 +526,25 @@ impl EditorSettings {
                 }
             }
 
+            // Defaults added after a settings file was written must not steal a
+            // binding that the user already assigned to another command.
+            for command in [ShortcutCommand::NewWindow, ShortcutCommand::Quit] {
+                let explicitly_assigned = shortcuts.children().any(|node| {
+                    node.has_tag_name("shortcut")
+                        && node.attribute("command") == Some(command.key())
+                });
+                if !explicitly_assigned
+                    && let Some(binding) = shortcut_map.binding(command)
+                    && shortcut_map.entries().iter().any(|entry| {
+                        entry.command != command
+                            && entry
+                                .binding
+                                .is_some_and(|candidate| candidate.matches(binding))
+                    })
+                {
+                    shortcut_map.clear(command);
+                }
+            }
             settings.shortcuts = shortcut_map;
         }
 
@@ -540,6 +567,7 @@ impl Default for EditorSettings {
             word_wrap: true,
             wrap_column_limit: None,
             auto_save: false,
+            exit_on_last_window_close: true,
             new_file_encoding: TextEncoding::Utf8,
             new_file_line_ending: Self::DEFAULT_NEW_FILE_LINE_ENDING,
             recent_file_limit: Self::DEFAULT_RECENT_FILE_LIMIT,
@@ -744,4 +772,105 @@ fn escape_xml_attr(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod multiwindow_settings_tests {
+    use super::*;
+
+    #[test]
+    fn final_window_exit_defaults_and_round_trips() {
+        assert!(EditorSettings::default().exit_on_last_window_close);
+        let legacy = EditorSettings::from_xml_str("<fragile-notepad-settings />");
+        assert!(legacy.exit_on_last_window_close);
+        for exit in [false, true] {
+            let settings = EditorSettings {
+                exit_on_last_window_close: exit,
+                ..EditorSettings::default()
+            };
+            let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+            assert_eq!(restored.exit_on_last_window_close, exit);
+        }
+    }
+
+    #[test]
+    fn newly_added_window_shortcuts_preserve_existing_custom_bindings() {
+        let xml = r#"<fragile-notepad-settings><shortcuts>
+            <shortcut command="open_file" binding="primary+shift+n" />
+            <shortcut command="save_file" binding="primary+q" />
+        </shortcuts></fragile-notepad-settings>"#;
+        let settings = EditorSettings::from_xml_str(xml);
+        assert_eq!(settings.shortcuts.binding(ShortcutCommand::NewWindow), None);
+        assert_eq!(settings.shortcuts.binding(ShortcutCommand::Quit), None);
+        assert_eq!(
+            settings
+                .shortcuts
+                .command_for_binding(KeyBinding::parse("primary+shift+n").unwrap()),
+            Some(ShortcutCommand::OpenFile)
+        );
+        assert_eq!(
+            settings
+                .shortcuts
+                .command_for_binding(KeyBinding::parse("primary+q").unwrap()),
+            Some(ShortcutCommand::SaveFile)
+        );
+    }
+
+    #[test]
+    fn custom_new_file_primary_shift_n_keeps_priority_over_new_window_default() {
+        for binding in [
+            "primary+shift+n",
+            if cfg!(target_os = "macos") {
+                "logo+shift+n"
+            } else {
+                "ctrl+shift+n"
+            },
+        ] {
+            let settings = EditorSettings::from_xml_str(&format!(
+                r#"<fragile-notepad-settings><shortcuts>
+                    <shortcut command="new_file" binding="{binding}" />
+                </shortcuts></fragile-notepad-settings>"#,
+            ));
+            assert_eq!(
+                settings.shortcuts.binding(ShortcutCommand::NewFile),
+                KeyBinding::parse(binding)
+            );
+            assert_eq!(settings.shortcuts.binding(ShortcutCommand::NewWindow), None);
+            let key = iced::keyboard::Key::Character("n".into());
+            assert_eq!(
+                settings.shortcuts.resolve(
+                    &key,
+                    &key,
+                    iced::keyboard::Modifiers::COMMAND | iced::keyboard::Modifiers::SHIFT
+                ),
+                Some(ShortcutCommand::NewFile),
+            );
+            let saved = settings.to_xml_string();
+            let reloaded = EditorSettings::from_xml_str(&saved);
+            assert_eq!(reloaded.shortcuts.binding(ShortcutCommand::NewWindow), None);
+            assert_eq!(
+                reloaded.shortcuts.binding(ShortcutCommand::NewFile),
+                KeyBinding::parse(binding)
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_window_shortcuts_and_unassigned_choices_survive_reload() {
+        let settings = EditorSettings::from_xml_str(
+            r#"<fragile-notepad-settings><shortcuts>
+                <shortcut command="new_window" binding="primary+alt+n" />
+                <shortcut command="quit" />
+            </shortcuts></fragile-notepad-settings>"#,
+        );
+        assert_eq!(
+            settings.shortcuts.binding(ShortcutCommand::NewWindow),
+            KeyBinding::parse("primary+alt+n")
+        );
+        assert_eq!(settings.shortcuts.binding(ShortcutCommand::Quit), None);
+        assert_eq!(
+            EditorSettings::from_xml_str(&settings.to_xml_string()).shortcuts,
+            settings.shortcuts
+        );
+    }
 }

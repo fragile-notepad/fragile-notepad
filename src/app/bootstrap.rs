@@ -19,8 +19,17 @@ impl App {
                 ..window::Settings::default()
             }));
 
+        let workspace = Workspace::new();
+        let editor_id = workspace.current_window_id();
         let mut app = Self {
-            workspace: Workspace::new(),
+            editor_windows: windowing::editors::initial_registry(editor_id, main_window_id),
+            last_active_editor: Some(editor_id),
+            advanced_search_owner: None,
+            tab_drag: None,
+            next_drag_session: 1,
+            pending_drag_gpu_boost: false,
+            tab_geometry: HashMap::new(),
+            workspace,
             events: super::bus::MessageBus::default(),
             pending_work: super::events::PendingWork::default(),
             files: super::files::FileOperations::default(),

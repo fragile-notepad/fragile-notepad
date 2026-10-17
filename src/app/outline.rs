@@ -18,6 +18,7 @@ use crate::editor::{
 pub(super) struct OutlineParsing {
     states: HashMap<DocumentId, OutlineState>,
     handles: HashMap<DocumentId, iced::task::Handle>,
+    in_flight: Option<OutlineSnapshotMetadata>,
     registry_hash: u64,
 }
 
@@ -26,6 +27,7 @@ impl OutlineParsing {
         Self {
             states: HashMap::new(),
             handles: HashMap::new(),
+            in_flight: None,
             registry_hash: outline_registry_hash(),
         }
     }
@@ -46,20 +48,18 @@ impl OutlineParsing {
 
     pub(super) fn schedule(&mut self, document: &Document) -> Task<OutlineParseResult> {
         let document_id = document.id;
-        let inactive = self
-            .handles
-            .keys()
-            .copied()
-            .filter(|id| *id != document_id)
-            .collect::<Vec<_>>();
-        for id in inactive {
-            self.remove(id);
-        }
 
         let metadata = OutlineSnapshotMetadata::from_document(document, self.registry_hash);
         if !document.can_run_full_document_analysis() {
             if let Some(handle) = self.handles.remove(&document_id) {
                 handle.abort();
+            }
+            if self
+                .in_flight
+                .as_ref()
+                .is_some_and(|request| request.document_id == document_id)
+            {
+                self.in_flight = None;
             }
             let state = if document.has_complete_text_index()
                 || matches!(document.load_state, DocumentLoadState::Failed { .. })
@@ -84,9 +84,17 @@ impl OutlineParsing {
             return Task::none();
         }
 
+        // Visible windows share one worker slot. A different active document
+        // must not abort the work of another editor window.
+        if !self.handles.is_empty() {
+            self.states
+                .insert(document_id, OutlineState::pending_metadata(metadata));
+            return Task::none();
+        }
         let request = outline_request_for_document(document, self.registry_hash);
         self.states
             .insert(document_id, OutlineState::pending(&request));
+        self.in_flight = Some(metadata);
         let (task, handle) =
             Task::perform(parse_outline_request(request), std::convert::identity).abortable();
         if let Some(previous) = self.handles.insert(document_id, handle) {
@@ -97,23 +105,26 @@ impl OutlineParsing {
 
     pub(super) fn complete(&mut self, document: Option<&Document>, result: OutlineParseResult) {
         let metadata = OutlineSnapshotMetadata::from_result(&result);
+        let matches_request = self.in_flight.as_ref() == Some(&metadata);
+        // A stale result still finishes its worker slot. A newer request for
+        // this document may exist after an explicit abort; retain that handle.
+        if matches_request {
+            self.handles.remove(&metadata.document_id);
+            self.in_flight = None;
+        }
         let Some(document) = document else {
             self.remove(metadata.document_id);
             return;
         };
         if !document.can_run_full_document_analysis()
             || !metadata.matches_document(document, self.registry_hash)
-            || !self
-                .states
-                .get(&metadata.document_id)
-                .is_some_and(|state| state.matches_metadata(&metadata))
+            || !matches_request
         {
             return;
         }
 
         self.states
             .insert(metadata.document_id, OutlineState::ready(result));
-        self.handles.remove(&metadata.document_id);
     }
 
     pub(super) fn remove(&mut self, document: DocumentId) {
@@ -121,10 +132,18 @@ impl OutlineParsing {
         if let Some(handle) = self.handles.remove(&document) {
             handle.abort();
         }
+        if self
+            .in_flight
+            .as_ref()
+            .is_some_and(|request| request.document_id == document)
+        {
+            self.in_flight = None;
+        }
     }
 }
 
 impl App {
+    #[cfg(test)]
     pub(super) fn active_outline_state(&self) -> Option<&OutlineState> {
         self.workspace
             .active_document()
@@ -280,6 +299,61 @@ mod tests {
         assert_eq!(
             parsing.state_for(&document).unwrap().status,
             OutlineStatus::Unavailable
+        );
+    }
+
+    #[test]
+    fn stale_completion_releases_shared_worker_slot_for_other_windows() {
+        let mut document = Document::from_path(DocumentId::new(1), "first.rs", "fn leaf() {}");
+        let other = Document::from_path(DocumentId::new(2), "second.rs", "fn next() {}");
+        let mut parsing = OutlineParsing::new();
+        assert_eq!(parsing.schedule(&document).units(), 1);
+        let result = crate::editor::parse_outline_snapshot(outline_request_for_document(
+            &document,
+            parsing.registry_hash,
+        ));
+        document.buffer = crate::editor::EditorBuffer::from_text("fn edited() {}");
+        document.refresh_after_text_change();
+        assert_eq!(parsing.schedule(&document).units(), 0);
+        assert_eq!(parsing.schedule(&other).units(), 0);
+        assert_eq!(
+            parsing.state_for(&document).unwrap().status,
+            OutlineStatus::Pending
+        );
+        assert_eq!(
+            parsing.state_for(&other).unwrap().status,
+            OutlineStatus::Pending
+        );
+        parsing.complete(Some(&document), result);
+        assert!(parsing.handles.is_empty());
+        assert_eq!(parsing.schedule(&other).units(), 1);
+    }
+
+    #[test]
+    fn repeated_stale_completion_cannot_release_a_newer_request() {
+        let mut document = Document::from_path(DocumentId::new(1), "first.rs", "fn old() {}");
+        let mut parsing = OutlineParsing::new();
+        assert_eq!(parsing.schedule(&document).units(), 1);
+        let stale = crate::editor::parse_outline_snapshot(outline_request_for_document(
+            &document,
+            parsing.registry_hash,
+        ));
+        document.buffer = crate::editor::EditorBuffer::from_text("fn edited() {}");
+        document.refresh_after_text_change();
+        assert_eq!(parsing.schedule(&document).units(), 0);
+        parsing.complete(Some(&document), stale.clone());
+        assert_eq!(parsing.schedule(&document).units(), 1);
+        parsing.complete(Some(&document), stale);
+        assert!(parsing.handles.contains_key(&document.id));
+        let result = crate::editor::parse_outline_snapshot(outline_request_for_document(
+            &document,
+            parsing.registry_hash,
+        ));
+        parsing.complete(Some(&document), result);
+        assert!(parsing.handles.is_empty());
+        assert_eq!(
+            parsing.state_for(&document).unwrap().status,
+            OutlineStatus::Ready
         );
     }
 }

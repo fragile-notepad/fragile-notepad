@@ -9,6 +9,12 @@ pub struct Session {
     pub version: u32,
     pub documents: Vec<SessionDocument>,
     pub active_index: usize,
+    /// Version 2 layout. Document entries remain process-wide so recovery text
+    /// is serialized once even while a tab is moving between native windows.
+    #[serde(default)]
+    pub windows: Vec<SessionWindow>,
+    #[serde(default)]
+    pub focused_window: Option<usize>,
 }
 
 impl Default for Session {
@@ -17,8 +23,22 @@ impl Default for Session {
             version: 1,
             documents: Vec::new(),
             active_index: 0,
+            windows: Vec::new(),
+            focused_window: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionWindow {
+    pub document_indices: Vec<usize>,
+    /// Index within this window's `document_indices`.
+    pub active_index: usize,
+    /// Last normal logical bounds: x, y, width, height.
+    pub bounds: Option<[f32; 4]>,
+    pub maximized: bool,
+    pub fullscreen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,8 +95,23 @@ impl Default for SessionDocument {
 }
 
 impl Session {
+    /// Return a uniform layout without mutating legacy recovery metadata.
+    pub fn normalized_windows(&self) -> Vec<SessionWindow> {
+        if self.version == 1 {
+            if self.documents.is_empty() {
+                return Vec::new();
+            }
+            return vec![SessionWindow {
+                document_indices: (0..self.documents.len()).collect(),
+                active_index: self.active_index,
+                ..SessionWindow::default()
+            }];
+        }
+        self.windows.clone()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        if self.version != 1 {
+        if !matches!(self.version, 1 | 2) {
             return Err(format!("Unsupported session version: {}", self.version));
         }
         if self.documents.len() > 10_000 {
@@ -86,6 +121,45 @@ impl Session {
             || (self.documents.is_empty() && self.active_index != 0)
         {
             return Err("Invalid active session document".into());
+        }
+        if self.version == 2 {
+            if self.windows.len() > 1_000 {
+                return Err("Session has too many windows".into());
+            }
+            if self
+                .focused_window
+                .is_some_and(|index| index >= self.windows.len())
+            {
+                return Err("Invalid focused session window".into());
+            }
+            let mut assigned = vec![false; self.documents.len()];
+            for window in &self.windows {
+                if window.document_indices.is_empty()
+                    || window.active_index >= window.document_indices.len()
+                {
+                    return Err("Invalid active window document".into());
+                }
+                if let Some([x, y, width, height]) = window.bounds {
+                    if ![x, y, width, height].iter().all(|value| value.is_finite())
+                        || width <= 0.0
+                        || height <= 0.0
+                    {
+                        return Err("Invalid session window placement".into());
+                    }
+                }
+                for &index in &window.document_indices {
+                    let Some(seen) = assigned.get_mut(index) else {
+                        return Err("Window references an invalid session document".into());
+                    };
+                    if *seen {
+                        return Err("Session document belongs to several windows".into());
+                    }
+                    *seen = true;
+                }
+            }
+            if assigned.contains(&false) {
+                return Err("Session document has no window".into());
+            }
         }
         for doc in &self.documents {
             if doc.path.is_none() && doc.text.is_none() {
@@ -114,7 +188,75 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::SessionDocument;
+    use super::{Session, SessionDocument, SessionWindow};
+
+    fn recovery_document(text: &str) -> SessionDocument {
+        SessionDocument {
+            text: Some(text.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn legacy_layout_migrates_to_one_window_without_losing_active_document() {
+        let session = Session {
+            documents: vec![recovery_document("first"), recovery_document("second")],
+            active_index: 1,
+            ..Default::default()
+        };
+        assert!(session.validate().is_ok());
+        let windows = session.normalized_windows();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].document_indices, vec![0, 1]);
+        assert_eq!(windows[0].active_index, 1);
+    }
+
+    #[test]
+    fn multiwindow_session_round_trips_layout_and_native_placement() {
+        let session = Session {
+            version: 2,
+            documents: vec![recovery_document("first"), recovery_document("second")],
+            windows: vec![
+                SessionWindow {
+                    document_indices: vec![1],
+                    bounds: Some([-500.0, 40.0, 800.0, 600.0]),
+                    ..Default::default()
+                },
+                SessionWindow {
+                    document_indices: vec![0],
+                    maximized: true,
+                    ..Default::default()
+                },
+            ],
+            focused_window: Some(1),
+            ..Default::default()
+        };
+        assert!(session.validate().is_ok());
+        let restored: Session =
+            serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored, session);
+    }
+
+    #[test]
+    fn multiwindow_session_rejects_duplicate_unowned_or_invalid_document_indices() {
+        let mut session = Session {
+            version: 2,
+            documents: vec![recovery_document("first"), recovery_document("second")],
+            windows: vec![SessionWindow {
+                document_indices: vec![0, 0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(session.validate().is_err());
+        session.windows[0].document_indices = vec![0];
+        assert!(session.validate().is_err());
+        session.windows[0].document_indices = vec![0, 2];
+        assert!(session.validate().is_err());
+        session.windows[0].document_indices = vec![0, 1];
+        session.windows[0].active_index = 2;
+        assert!(session.validate().is_err());
+    }
 
     #[test]
     fn legacy_session_scroll_metadata_defaults_to_saved_screen_row() {

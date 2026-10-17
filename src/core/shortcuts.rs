@@ -3,6 +3,8 @@ use iced::keyboard::{self, key};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ShortcutCommand {
     NewFile,
+    NewWindow,
+    Quit,
     OpenFile,
     SaveFile,
     SaveFileAs,
@@ -43,8 +45,10 @@ pub enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 40] = [
         Self::NewFile,
+        Self::NewWindow,
+        Self::Quit,
         Self::OpenFile,
         Self::SaveFile,
         Self::SaveFileAs,
@@ -87,6 +91,8 @@ impl ShortcutCommand {
     pub const fn key(self) -> &'static str {
         match self {
             Self::NewFile => "new_file",
+            Self::NewWindow => "new_window",
+            Self::Quit => "quit",
             Self::OpenFile => "open_file",
             Self::SaveFile => "save_file",
             Self::SaveFileAs => "save_file_as",
@@ -130,6 +136,8 @@ impl ShortcutCommand {
     pub const fn label(self) -> &'static str {
         match self {
             Self::NewFile => "New file",
+            Self::NewWindow => "New window",
+            Self::Quit => "Quit",
             Self::OpenFile => "Open file",
             Self::SaveFile => "Save file",
             Self::SaveFileAs => "Save file as",
@@ -172,9 +180,12 @@ impl ShortcutCommand {
 
     pub const fn group(self) -> ShortcutGroup {
         match self {
-            Self::NewFile | Self::OpenFile | Self::SaveFile | Self::SaveFileAs => {
-                ShortcutGroup::File
-            }
+            Self::NewFile
+            | Self::NewWindow
+            | Self::Quit
+            | Self::OpenFile
+            | Self::SaveFile
+            | Self::SaveFileAs => ShortcutGroup::File,
             Self::ToggleFind
             | Self::AdvancedFind
             | Self::AdvancedReplace
@@ -207,6 +218,8 @@ impl ShortcutCommand {
     fn default_binding(self) -> Option<KeyBinding> {
         match self {
             Self::NewFile => Some(KeyBinding::primary(ShortcutKey::character('n'))),
+            Self::NewWindow => Some(KeyBinding::primary_shift(ShortcutKey::character('n'))),
+            Self::Quit => Some(KeyBinding::primary(ShortcutKey::character('q'))),
             Self::OpenFile => Some(KeyBinding::primary(ShortcutKey::character('o'))),
             Self::SaveFile => Some(KeyBinding::primary(ShortcutKey::character('s'))),
             Self::SaveFileAs => Some(KeyBinding::primary_shift(ShortcutKey::character('s'))),
@@ -508,7 +521,19 @@ impl KeyBinding {
         }
     }
 
-    fn matches(self, other: Self) -> bool {
+    pub(crate) fn matches(self, other: Self) -> bool {
+        // A lookup can receive either a captured physical key or a persisted
+        // binding. Resolve the symbolic primary modifier before comparing;
+        // persisted primary+N has no Ctrl/Logo bit of its own.
+        let mut other = other;
+        if other.modifiers.primary {
+            other.modifiers.primary = false;
+            if cfg!(target_os = "macos") {
+                other.modifiers.logo = true;
+            } else {
+                other.modifiers.ctrl = true;
+            }
+        }
         let key_matches = self.key == other.key
             || matches!(
                 (self.key, other.key),

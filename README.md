@@ -31,10 +31,6 @@ Save and Close menus name their targets: selected tabs, this window, or all
 windows. Advanced Search has the same choices plus Current document, its
 default. Find Next and Previous search the current document.
 
-When tabs overflow, hovering over the strip fades in a scrollbar along its top
-edge. It fades out when the pointer leaves, including after rapid scrolling.
-Moving in or out again reverses an unfinished fade smoothly.
-
 **Exit when the last editor window closes** is enabled by default in Settings.
 With session recovery enabled, Quit and closing the final window preserve open
 windows and unsaved text for the next launch. Closing another window asks about

@@ -28,6 +28,7 @@ const MAX_DRAG_SCROLL_LINES: i32 = 8;
 const TEXT_DRAG_THRESHOLD: f32 = 4.0;
 
 pub(super) struct InteractionContext<'a, Message> {
+    pub(super) now: Instant,
     pub(super) buffer: &'a EditorBuffer,
     pub(super) viewport: &'a ViewportModel,
     pub(super) decorations: &'a DecorationModel,
@@ -228,7 +229,7 @@ where
                 HitTarget::Text(position) => {
                     state.is_focused = true;
                     state.reset_caret_blink();
-                    let is_double_click = state.record_text_click(position, state.caret_now.get());
+                    let is_double_click = state.record_text_click(position, context.now);
                     if !is_double_click
                         && selection_contains_pointer(
                             &context,
@@ -280,7 +281,7 @@ where
                     state.is_focused = true;
                     state.reset_caret_blink();
                     let position = EditorPosition::new(line, 0);
-                    let is_double_click = state.record_text_click(position, state.caret_now.get());
+                    let is_double_click = state.record_text_click(position, context.now);
                     if is_double_click {
                         state.clear_text_click();
                     }
@@ -941,6 +942,7 @@ mod tests {
         caret_row: Option<usize>,
         shortcuts: ShortcutMap,
         state: AdvancedEditorState<()>,
+        now: Instant,
         layout: EditorLayout,
         bounds: Rectangle,
         last_redraw: window::RedrawRequest,
@@ -975,6 +977,7 @@ mod tests {
                 caret_row: None,
                 shortcuts: ShortcutMap::default(),
                 state: AdvancedEditorState::default(),
+                now: Instant::now(),
                 layout,
                 bounds: Rectangle {
                     x: 10.0,
@@ -1001,10 +1004,16 @@ mod tests {
         }
 
         fn dispatch(&mut self, event: Event, cursor: mouse::Cursor) -> Vec<EditorAction> {
+            // Simulated input timing must not depend on font loading or runner load.
+            self.now = match &event {
+                Event::Window(window::Event::RedrawRequested(now)) => *now,
+                _ => self.now + Duration::from_millis(16),
+            };
             let mut messages = Vec::new();
             let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
             handle_event(
                 InteractionContext {
+                    now: self.now,
                     buffer: &self.buffer,
                     viewport: &self.viewport,
                     decorations: &self.decorations,
@@ -1368,8 +1377,40 @@ mod tests {
                 EditorAction::SelectWordAt(EditorPosition::new(0, column))
             };
 
-            assert!(messages.contains(&expected));
+            assert!(
+                messages.contains(&expected),
+                "column {column}: {messages:?}"
+            );
             assert!(editor.state.drag_anchor.is_none());
+        }
+    }
+
+    #[test]
+    fn clicks_outside_the_double_click_interval_only_place_the_caret() {
+        for column in [0, 2] {
+            let mut editor = TestEditor::new("alpha beta\nnext");
+            let point = editor.text_point(0, column);
+            editor.press(mouse::Button::Left, point);
+            editor.dispatch(
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                mouse::Cursor::Available(point),
+            );
+            editor.now += Duration::from_millis(501);
+
+            let messages = editor.press(mouse::Button::Left, point);
+
+            assert!(messages.contains(&EditorAction::PlaceCaret(EditorPosition::new(0, column))));
+            assert!(
+                !messages.iter().any(|message| matches!(
+                    message,
+                    EditorAction::SelectRegion(_) | EditorAction::SelectWordAt(_)
+                )),
+                "column {column}: {messages:?}"
+            );
+            assert_eq!(
+                editor.state.drag_anchor,
+                Some(EditorPosition::new(0, column))
+            );
         }
     }
 

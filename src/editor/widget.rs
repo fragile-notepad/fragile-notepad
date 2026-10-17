@@ -484,6 +484,7 @@ where
         } else {
             handle_event(
                 InteractionContext {
+                    now: Instant::now(),
                     buffer: self.buffer,
                     viewport: self.viewport,
                     decorations: self.decorations,

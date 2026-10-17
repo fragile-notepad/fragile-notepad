@@ -122,7 +122,7 @@ fn encode(session: &Session) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{SessionDocument, TextEncoding};
+    use crate::core::{SessionDocument, SessionWindow, TextEncoding};
 
     fn remove_empty_test_directory(directory: PathBuf) {
         for attempt in 0..20 {
@@ -196,10 +196,52 @@ mod tests {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             for bytes in [
                 b"not json".as_slice(),
-                br#"{"version":2,"documents":[],"active_index":0}"#,
+                br#"{"version":3,"documents":[],"active_index":0}"#,
+                br#"{"version":2,"documents":[],"active_index":0,"windows":[{}]}"#,
             ] {
                 std::fs::write(&path, bytes).unwrap();
-                assert!(load_from(&path).await.is_err());
+                assert!(load_from(&path).await.is_err(), "{bytes:?}");
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            }
+        });
+        std::fs::remove_file(path).unwrap();
+        remove_empty_test_directory(directory);
+    }
+
+    #[test]
+    fn legacy_and_multiwindow_sessions_load_without_changing_file() {
+        let directory = test_dir("versions");
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("session.json");
+        let mut multiwindow = session("first window");
+        multiwindow.version = 2;
+        multiwindow
+            .documents
+            .extend(session("second window").documents);
+        multiwindow.windows = vec![
+            SessionWindow {
+                document_indices: vec![0],
+                ..Default::default()
+            },
+            SessionWindow {
+                document_indices: vec![1],
+                ..Default::default()
+            },
+        ];
+        multiwindow.focused_window = Some(1);
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            for expected in [
+                Session::default(),
+                session("legacy recovery"),
+                Session {
+                    version: 2,
+                    ..Default::default()
+                },
+                multiwindow,
+            ] {
+                let bytes = encode(&expected).unwrap();
+                std::fs::write(&path, &bytes).unwrap();
+                assert_eq!(load_from(&path).await.unwrap(), Some(expected));
                 assert_eq!(std::fs::read(&path).unwrap(), bytes);
             }
         });

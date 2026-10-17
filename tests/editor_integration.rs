@@ -534,6 +534,16 @@ fn background_outline_results_are_cached_and_stale_results_are_rejected() {
     let registry_hash = outline_registry_hash();
     let text = "fn first() {}\nfn second() {}\n";
 
+    // Finish the initial untitled document's parse to free the shared worker.
+    let initial = parse_outline_snapshot(OutlineParseRequest::new(
+        DocumentId::new(1),
+        Arc::new(String::new()),
+        "txt",
+        0,
+        registry_hash,
+    ));
+    let _ = app.update(Message::OutlineParseCompleted(initial));
+
     let _ = app.update(Message::FileOpened(Ok(opened_file("main.rs", text))));
 
     let stale = OutlineParseResult::new(

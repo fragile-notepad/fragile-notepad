@@ -2,7 +2,7 @@
 use std::time::{Duration, Instant};
 
 use fragile_notepad::core::{Document, DocumentId, FindState};
-use fragile_notepad::message::{AdvancedSearchTab, Message};
+use fragile_notepad::message::{AdvancedSearchTab, Message, SearchScope};
 use fragile_notepad::search_dialog::SearchDialogState;
 use fragile_notepad::ui::{advanced_search_panel, find_panel, motion};
 use iced::advanced::{
@@ -239,6 +239,13 @@ fn assert_renders(
     assert_eq!(pixels.len(), size.width as usize * size.height as usize * 4);
 }
 
+const SEARCH_SCOPES: [(&str, SearchScope); 4] = [
+    ("Current document", SearchScope::CurrentDocument),
+    ("Selected tabs", SearchScope::SelectedTabs),
+    ("This window", SearchScope::ThisWindow),
+    ("All windows", SearchScope::AllWindows),
+];
+
 #[test]
 fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
     let documents = [
@@ -251,7 +258,7 @@ fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
     ];
     let mut renderer = renderer();
     for (theme_name, theme) in [("dark", Theme::Dark), ("light", Theme::Light)] {
-        for (tab_name, tab, replace, open) in [
+        for (tab_name, tab, replace, open_tab) in [
             ("find", AdvancedSearchTab::Find, false, false),
             ("replace", AdvancedSearchTab::Replace, true, false),
             ("find-open", AdvancedSearchTab::FindInFiles, false, true),
@@ -262,184 +269,181 @@ fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
                 true,
             ),
         ] {
-            for display in [false, true] {
-                let mut dialog = SearchDialogState::new();
-                dialog.active_tab = tab;
-                dialog.query = "needle".into();
-                dialog.replacement = "thread".into();
-                dialog.include_pattern = "*.rs; *.txt".into();
-                dialog.result_options_visible = display;
-                dialog.refresh_from_documents(documents.iter().take(if open { 2 } else { 1 }));
-                dialog.selected_result = Some(0);
-                let size = Size::new(720.0, 560.0);
-                let viewport = Rectangle::with_size(size);
-                let mut element = advanced_search_panel::view(&dialog);
-                let (mut tree, node, controls) = settle(&mut element, &renderer, size);
-                assert_eq!(node.size(), size);
-                for (_, bounds) in &controls.inputs {
-                    visible(*bounds, viewport);
-                }
-                assert!(controls.input(advanced_search_panel::QUERY_INPUT_ID).width >= 180.0);
-                assert_eq!(
-                    controls.inputs.iter().any(|(id, _)| id.as_ref()
-                        == Some(&widget::Id::new(
-                            advanced_search_panel::REPLACEMENT_INPUT_ID
-                        ))),
-                    replace,
-                    "collapsed replacement must stay out of focus traversal"
-                );
-                assert_renders(
-                    &element,
-                    &tree,
-                    &node,
-                    &mut renderer,
-                    Size::new(720, 560),
-                    &theme,
-                );
-                if tab == AdvancedSearchTab::Find && !display {
-                    for status in ["No query", "Searching…"] {
-                        let mut status_dialog = SearchDialogState::new();
-                        status_dialog.status = status.into();
-                        if status == "Searching…" {
-                            status_dialog.query = "needle".into();
+            for (scope_name, scope) in SEARCH_SCOPES {
+                let open = scope != SearchScope::CurrentDocument;
+                for display in [false, true] {
+                    let mut dialog = SearchDialogState::new();
+                    dialog.active_tab = tab;
+                    dialog.scope = scope;
+                    dialog.query = "needle".into();
+                    dialog.replacement = "thread".into();
+                    dialog.include_pattern = "*.rs; *.txt".into();
+                    dialog.result_options_visible = display;
+                    dialog.refresh_from_documents(documents.iter().take(if open { 2 } else { 1 }));
+                    dialog.selected_result = Some(0);
+                    let size = Size::new(720.0, 560.0);
+                    let viewport = Rectangle::with_size(size);
+                    let mut element = advanced_search_panel::view(&dialog);
+                    let (mut tree, node, controls) = settle(&mut element, &renderer, size);
+                    assert_eq!(node.size(), size);
+                    for (_, bounds) in &controls.inputs {
+                        visible(*bounds, viewport);
+                    }
+                    assert!(controls.input(advanced_search_panel::QUERY_INPUT_ID).width >= 180.0);
+                    assert_eq!(
+                        controls.inputs.iter().any(|(id, _)| id.as_ref()
+                            == Some(&widget::Id::new(
+                                advanced_search_panel::REPLACEMENT_INPUT_ID
+                            ))),
+                        replace,
+                        "collapsed replacement must stay out of focus traversal"
+                    );
+                    assert_renders(
+                        &element,
+                        &tree,
+                        &node,
+                        &mut renderer,
+                        Size::new(720, 560),
+                        &theme,
+                    );
+                    if tab == AdvancedSearchTab::Find && !display {
+                        for status in ["No query", "Searching…"] {
+                            let mut status_dialog = SearchDialogState::new();
+                            status_dialog.status = status.into();
+                            if status == "Searching…" {
+                                status_dialog.query = "needle".into();
+                            }
+                            let mut status_view = advanced_search_panel::view(&status_dialog);
+                            let (status_tree, status_node, _) =
+                                settle(&mut status_view, &renderer, size);
+                            assert_renders(
+                                &status_view,
+                                &status_tree,
+                                &status_node,
+                                &mut renderer,
+                                Size::new(720, 560),
+                                &theme,
+                            );
                         }
-                        let mut status_view = advanced_search_panel::view(&status_dialog);
-                        let (status_tree, status_node, _) =
-                            settle(&mut status_view, &renderer, size);
-                        assert_renders(
-                            &status_view,
-                            &status_tree,
-                            &status_node,
-                            &mut renderer,
-                            Size::new(720, 560),
-                            &theme,
+                    }
+                    let labels = [
+                        "Aa", "ab", "Find all", "Count", "Display", "Close", "Replace",
+                    ];
+                    for label in labels {
+                        let messages = click(
+                            &mut element,
+                            &mut tree,
+                            &node,
+                            &renderer,
+                            viewport,
+                            controls.label(label),
+                        );
+                        assert!(
+                            matches!(messages.as_slice(), [message] if match (label, message) {
+                                ("Aa", Message::AdvancedSearchCaseSensitiveToggled(true)) => true,
+                                ("ab", Message::AdvancedSearchWholeWordToggled(true)) => true,
+                                ("Find all", Message::AdvancedFindAllOpenRun) => open,
+                                ("Find all", Message::AdvancedFindAllCurrentRun) => !open,
+                                ("Count", Message::AdvancedCountRun) => true,
+                                ("Display", Message::AdvancedResultOptionsToggled) => true,
+                                ("Close", Message::AdvancedSearchClosed) => true,
+                                ("Replace", Message::AdvancedSearchTabSelected(selected)) => *selected == if open_tab { AdvancedSearchTab::ReplaceInFiles } else { AdvancedSearchTab::Replace },
+                                _ => false,
+                            }),
+                            "{tab_name}/{scope_name}/{theme_name}/{label}: {messages:?}"
                         );
                     }
-                }
-                let labels = [
-                    "Aa", "ab", "Find all", "Count", "Display", "Close", "Replace",
-                ];
-                for label in labels {
+                    if replace {
+                        let messages = click(
+                            &mut element,
+                            &mut tree,
+                            &node,
+                            &renderer,
+                            viewport,
+                            controls.label("Replace all"),
+                        );
+                        assert!(
+                            matches!(messages.as_slice(), [Message::AdvancedReplaceAllOpenRun] if open)
+                                || matches!(messages.as_slice(), [Message::AdvancedReplaceAllCurrentRun] if !open)
+                        );
+                    }
+                    if display {
+                        assert!(matches!(
+                            click(
+                                &mut element,
+                                &mut tree,
+                                &node,
+                                &renderer,
+                                viewport,
+                                controls.label("Reset")
+                            )
+                            .as_slice(),
+                            [Message::AdvancedResultOptionsReset]
+                        ));
+                    }
+                    for (label, expected_scope) in SEARCH_SCOPES {
+                        let messages = click(
+                            &mut element,
+                            &mut tree,
+                            &node,
+                            &renderer,
+                            viewport,
+                            controls.label(label),
+                        );
+                        assert!(
+                            matches!(messages.as_slice(), [Message::AdvancedSearchScopeSelected(selected)] if *selected == expected_scope),
+                            "{tab_name}/{scope_name}/{theme_name}/{label}: {messages:?}"
+                        );
+                    }
+                    let first = &dialog.results[0];
+                    let start = first.selection.range().start;
+                    let location = format!("{}:{}", start.line + 1, start.column + 1);
                     let messages = click(
                         &mut element,
                         &mut tree,
                         &node,
                         &renderer,
                         viewport,
-                        controls.label(label),
+                        controls.label(&location),
                     );
                     assert!(
-                        matches!(messages.as_slice(), [message] if match (label, message) {
-                            ("Aa", Message::AdvancedSearchCaseSensitiveToggled(true)) => true,
-                            ("ab", Message::AdvancedSearchWholeWordToggled(true)) => true,
-                            ("Find all", Message::AdvancedFindAllOpenRun) => open,
-                            ("Find all", Message::AdvancedFindAllCurrentRun) => !open,
-                            ("Count", Message::AdvancedCountRun) => true,
-                            ("Display", Message::AdvancedResultOptionsToggled) => true,
-                            ("Close", Message::AdvancedSearchClosed) => true,
-                            ("Replace", Message::AdvancedSearchTabSelected(selected)) => *selected == if open { AdvancedSearchTab::ReplaceInFiles } else { AdvancedSearchTab::Replace },
-                            _ => false,
-                        }),
-                        "{tab_name}/{theme_name}/{label}: {messages:?}"
+                        matches!(messages.as_slice(), [Message::AdvancedSearchResultSelected(id, selection)] if *id == first.document_id && *selection == first.selection)
                     );
-                }
-                if replace {
-                    let messages = click(
-                        &mut element,
+                    assert!(
+                        matches!(type_into(&mut element, &mut tree, &node, &renderer, viewport, advanced_search_panel::QUERY_INPUT_ID).as_slice(), [Message::AdvancedSearchQueryChanged(query)] if query == "x")
+                    );
+                    if replace {
+                        assert!(
+                            matches!(type_into(&mut element, &mut tree, &node, &renderer, viewport, advanced_search_panel::REPLACEMENT_INPUT_ID).as_slice(), [Message::AdvancedSearchReplacementChanged(replacement)] if replacement == "x")
+                        );
+                    }
+                    element.as_widget_mut().operate(
                         &mut tree,
-                        &node,
+                        Layout::new(&node),
                         &renderer,
-                        viewport,
-                        controls.label("Replace all"),
+                        &mut operation::focusable::focus::<()>(
+                            advanced_search_panel::QUERY_INPUT_ID.into(),
+                        ),
                     );
-                    assert!(
-                        matches!(messages.as_slice(), [Message::AdvancedReplaceAllOpenRun] if open)
-                            || matches!(messages.as_slice(), [Message::AdvancedReplaceAllCurrentRun] if !open)
-                    );
-                }
-                if display {
-                    assert!(matches!(
-                        click(
-                            &mut element,
-                            &mut tree,
-                            &node,
-                            &renderer,
-                            viewport,
-                            controls.label("Reset")
-                        )
-                        .as_slice(),
-                        [Message::AdvancedResultOptionsReset]
-                    ));
-                }
-                let messages = click(
-                    &mut element,
-                    &mut tree,
-                    &node,
-                    &renderer,
-                    viewport,
-                    controls.label(if open {
-                        "Current document"
-                    } else {
-                        "Open documents"
-                    }),
-                );
-                let other_scope = match (replace, open) {
-                    (false, false) => AdvancedSearchTab::FindInFiles,
-                    (true, false) => AdvancedSearchTab::ReplaceInFiles,
-                    (false, true) => AdvancedSearchTab::Find,
-                    (true, true) => AdvancedSearchTab::Replace,
-                };
-                assert!(
-                    matches!(messages.as_slice(), [Message::AdvancedSearchTabSelected(tab)] if *tab == other_scope)
-                );
-                let first = &dialog.results[0];
-                let start = first.selection.range().start;
-                let location = format!("{}:{}", start.line + 1, start.column + 1);
-                let messages = click(
-                    &mut element,
-                    &mut tree,
-                    &node,
-                    &renderer,
-                    viewport,
-                    controls.label(&location),
-                );
-                assert!(
-                    matches!(messages.as_slice(), [Message::AdvancedSearchResultSelected(id, selection)] if *id == first.document_id && *selection == first.selection)
-                );
-                assert!(
-                    matches!(type_into(&mut element, &mut tree, &node, &renderer, viewport, advanced_search_panel::QUERY_INPUT_ID).as_slice(), [Message::AdvancedSearchQueryChanged(query)] if query == "x")
-                );
-                if replace {
-                    assert!(
-                        matches!(type_into(&mut element, &mut tree, &node, &renderer, viewport, advanced_search_panel::REPLACEMENT_INPUT_ID).as_slice(), [Message::AdvancedSearchReplacementChanged(replacement)] if replacement == "x")
-                    );
-                }
-                element.as_widget_mut().operate(
-                    &mut tree,
-                    Layout::new(&node),
-                    &renderer,
-                    &mut operation::focusable::focus::<()>(
-                        advanced_search_panel::QUERY_INPUT_ID.into(),
-                    ),
-                );
-                for modifiers in [
-                    keyboard::Modifiers::empty(),
-                    keyboard::Modifiers::SHIFT,
-                    keyboard::Modifiers::CTRL,
-                ] {
-                    assert!(
-                        send(
-                            &mut element,
-                            &mut tree,
-                            &node,
-                            &renderer,
-                            viewport,
-                            key(keyboard::key::Named::Enter, modifiers),
-                            mouse::Cursor::Unavailable
-                        )
-                        .is_empty(),
-                        "runtime search keys must not receive duplicate widget submissions"
-                    );
+                    for modifiers in [
+                        keyboard::Modifiers::empty(),
+                        keyboard::Modifiers::SHIFT,
+                        keyboard::Modifiers::CTRL,
+                    ] {
+                        assert!(
+                            send(
+                                &mut element,
+                                &mut tree,
+                                &node,
+                                &renderer,
+                                viewport,
+                                key(keyboard::key::Named::Enter, modifiers),
+                                mouse::Cursor::Unavailable
+                            )
+                            .is_empty(),
+                            "runtime search keys must not receive duplicate widget submissions"
+                        );
+                    }
                 }
             }
         }
@@ -454,15 +458,13 @@ fn count_summary_shows_exact_totals_and_returns_to_matching_lines() {
     ];
     let mut renderer = renderer();
     for theme in [Theme::Dark, Theme::Light] {
-        for open in [false, true] {
+        for (_, scope) in SEARCH_SCOPES {
+            let open = scope != SearchScope::CurrentDocument;
             for display in [false, true] {
                 for no_matches in [false, true] {
                     let mut dialog = SearchDialogState::new();
-                    dialog.active_tab = if open {
-                        AdvancedSearchTab::ReplaceInFiles
-                    } else {
-                        AdvancedSearchTab::Replace
-                    };
+                    dialog.active_tab = AdvancedSearchTab::Replace;
+                    dialog.scope = scope;
                     dialog.query = if no_matches { "absent" } else { "needle" }.into();
                     dialog.result_options_visible = display;
                     if !no_matches && !display {

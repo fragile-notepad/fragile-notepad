@@ -3,91 +3,62 @@
 # Fragile Notepad
 
 A desktop text editor for notes and source files. Written in Rust with
-[Iced](https://iced.rs), for Windows and Linux.
+[Iced](https://iced.rs), for Windows and Linux, with experimental macOS support.
 
 [Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
 &nbsp;·&nbsp; [Packaging](PACKAGING.md)
 
-> **Generative AI Notice:** Generative AI was used throughout the development of this project.
+> Generative AI was used throughout development.
 
-## Windows and tabs
+## Features
 
-Open another editor with **File → New Window** or **Ctrl+Shift+N**
-(**Cmd+Shift+N** on macOS). **Ctrl/Cmd+N** creates a tab in the current window.
-
-- Drag a tab along its strip to reorder it. Drag outside the strip to detach
-  it, then enter another window's tab strip to attach it there. Keep holding
-  the button to detach and attach again; release to finish or press **Escape**
-  to restore the original layout.
-- **Ctrl-click** (**Cmd-click** on macOS) toggles tabs in the selection;
-  **Shift-click** selects a range. Drag a selected tab to move the group.
-  Pinned tabs stay before ordinary tabs.
-- The **Window** menu also provides **Move Selected Tabs to New Window** and
-  **Move Selected Tabs to Window**. On Wayland compositors without the
-  toplevel drag extension, dragging supports transfer between existing windows;
-  use the menu command to create a separate window.
-
-Save and Close menus name their targets: selected tabs, this window, or all
-windows. Advanced Search has the same choices plus Current document, its
-default. Find Next and Previous search the current document.
-
-**Exit when the last editor window closes** is enabled by default in Settings.
-With session recovery enabled, Quit and closing the final window preserve open
-windows and unsaved text for the next launch. Closing another window asks about
-its unsaved tabs. Disable the setting to keep the application running after
-closing its final window; reopening the application creates a fresh editor.
+- Multiple windows with pinned, reorderable, and detachable tabs.
+- Multiple carets, rectangular selections, word wrap, and undo/redo.
+- Syntax highlighting, code folding, and function navigation.
+- Find and replace with regular expressions across tabs and windows.
+- Unicode, CJK text, legacy encodings, and configurable line endings.
+- Session recovery for unsaved text, customizable shortcuts, and themes.
 
 ## Build from source
 
 Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build tools;
-Linux packages are listed in [CI](.github/workflows/ci.yml). Patched dependencies are included.
+Linux packages are listed in [CI](.github/workflows/ci.yml). Use `python3` on Unix.
 
 ```sh
 git clone https://github.com/fragile-notepad/fragile-notepad.git
 cd fragile-notepad
-python -m pip install -r scripts/requirements-assets.txt
+python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
 ```
 
-Generate assets with `.\scripts\generate_icon_assets.ps1` on Windows or
-`bash scripts/generate_icon_assets.sh` on Unix, then:
+Generate assets for your platform:
+
+| Platform | Command |
+| --- | --- |
+| Windows (PowerShell) | `.\scripts\generate_icon_assets.ps1` |
+| Linux / macOS | `bash scripts/generate_icon_assets.sh` |
+
+Then launch the editor:
 
 ```sh
 cargo run --release --locked
 ```
 
-Rerun asset generation after SVG changes; outputs are ignored by Git.
-Cargo prepares CJK font profiles and may download fonts and Python dependencies.
-`FRAGILE_FONT_PYTHON` selects Python, `FRAGILE_FONT_CACHE` changes the cache
-(default `target/font-profiles`), and `FRAGILE_FONT_OFFLINE=1` requires cached inputs.
-
-Rendering starts in software and can switch to [Vulkan](SEAMLESS_HYBRID_RENDERING.md).
-Add `--no-default-features` to Cargo commands for software-only builds.
+The first build may download fonts. Regenerate assets after SVG changes.
+Add `--no-default-features` for software-only rendering; see
+[Vulkan setup](VULKAN_RENDERING.md#runtime-and-maintenance) for GPU requirements,
+including macOS runtime setup.
 
 ## Checks
 
-Run `.\scripts\ci.ps1` on Windows or `bash scripts/ci.sh` on Unix for asset generation,
-formatting, tests, and the software-only build check. See [Vulkan setup](VULKAN_RENDERING.md#runtime-and-maintenance)
-and [additional renderer checks](SEAMLESS_HYBRID_RENDERING.md#checks-and-tracing).
-Application ownership and routing are documented [beside the code](src/app/README.md).
+Run `.\scripts\ci.ps1` on Windows or `bash scripts/ci.sh` on Unix to generate assets,
+check formatting, run tests, and check the software-only build.
 
-## Previews
+## Documentation
 
-Run `cargo run --locked --example NAME`:
-
-| NAME | Output |
-| --- | --- |
-| `preview_dialogs` | `target/dialog-review/` |
-| `preview_branding` | `target/bunny-review/` |
-| `preview_cjk` | `target/cjk-*` |
-
-Dialog previews render all panels by default. Select a panel with
-`cargo run --locked --example preview_dialogs -- --panel settings`.
-Available panels are `settings`, `search`, `go-to-line`, `windows`, and `editor`;
-use `--help` for options.
-
-Branding and CJK previews accept `-- --vulkan`; CJK also accepts `-- --weights`
-or `-- --hangul-weights`. Debug builds expose **About → Debug → Window controls**;
-`FRAGILE_NOTEPAD_TITLE_BAR=macos|windows` selects a title-bar style.
+- [Packaging and macOS app bundles](PACKAGING.md)
+- [Optional file-manager integrations](components/README.md)
+- [Rendering design and diagnostics](SEAMLESS_HYBRID_RENDERING.md)
+- [Application architecture](src/app/README.md)
 
 ## License
 

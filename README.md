@@ -1,14 +1,28 @@
-<img src="assets/illustrations/bunny/app.svg" align="right" width="96" alt="Bunny holding a notebook">
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="assets/illustrations/readme/banner-compact.svg">
+    <img src="assets/illustrations/readme/banner.svg" width="100%" alt="Fragile Notepad — A little room for notes and code.">
+  </picture>
+</p>
 
-# Fragile Notepad
+<p align="center">
+  <a href="https://github.com/fragile-notepad/fragile-notepad/releases"><strong>Download</strong></a>
+  &nbsp; · &nbsp; <a href="#build-from-source">Build</a>
+  &nbsp; · &nbsp; <a href="#documentation">Documentation</a>
+</p>
 
-A desktop text editor for notes and source files. Written in Rust with
-[Iced](https://iced.rs), for Windows and Linux, with experimental macOS support.
+<p align="center">
+  A desktop text editor for notes and source files, built with Rust and <a href="https://iced.rs">Iced</a>.<br>
+  Windows · Linux · experimental macOS
+</p>
 
-[Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
-&nbsp;·&nbsp; [Packaging](PACKAGING.md)
+**Windows** · Dark appearance
 
-> Generative AI was used throughout development.
+![Fragile Notepad running on Windows with Rust code and multiple tabs.](assets/screenshots/windows.png)
+
+**macOS** · Light appearance
+
+![Fragile Notepad running on macOS with Rust code and native window controls.](assets/screenshots/macos.png)
 
 ## Features
 
@@ -20,6 +34,9 @@ A desktop text editor for notes and source files. Written in Rust with
 - Session recovery for unsaved text, customizable shortcuts, and themes.
 
 ## Build from source
+
+<details>
+<summary>Requirements and commands</summary>
 
 Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build tools;
 Linux packages are listed in [CI](.github/workflows/ci.yml). Use `python3` on Unix.
@@ -48,6 +65,8 @@ Add `--no-default-features` for software-only rendering; see
 [Vulkan setup](VULKAN_RENDERING.md#runtime-and-maintenance) for GPU requirements,
 including macOS runtime setup.
 
+</details>
+
 ## Checks
 
 Run `.\scripts\ci.ps1` on Windows or `bash scripts/ci.sh` on Unix to generate assets,
@@ -67,3 +86,5 @@ their upstream licenses. Original [colored icons](assets/icons/colored/LICENSE)
 and [illustrations](assets/illustrations/LICENSE), including rasters and reproductions,
 are **all rights reserved** and excluded from the code license.
 Other bundled icons retain their MIT licenses; see [artwork notices](assets/icons/NOTICE.txt).
+
+Generative AI was used throughout development.

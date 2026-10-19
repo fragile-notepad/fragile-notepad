@@ -21,8 +21,7 @@ jobs:
         os:
           - windows-latest
           - ubuntu-latest
-          # Temporarily disabled:
-          # - macos-latest
+          - macos-latest
 
     steps:
       - name: Checkout

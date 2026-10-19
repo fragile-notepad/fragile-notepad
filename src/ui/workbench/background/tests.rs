@@ -128,7 +128,7 @@ fn snapshot(
 #[test]
 fn software_fallback_matches_full_fills_at_fractional_joins() {
     let mut renderer = renderer();
-    assert_rendering_equivalence(&mut renderer);
+    assert_rendering_equivalence(&mut renderer, 0);
 }
 
 #[cfg(feature = "hybrid-rendering")]
@@ -141,12 +141,15 @@ fn gpu_covered_backgrounds_match_full_fills_at_fractional_joins() {
         eprintln!("skipping GPU rendering equivalence: no wgpu adapter available");
         return;
     };
-    assert_rendering_equivalence(&mut renderer);
+    // Fractional SDF coverage can round one RGB code apart when blended into
+    // the GPU's eight-bit UNORM target. Alpha and software output remain exact.
+    assert_rendering_equivalence(&mut renderer, 1);
 }
 
-fn assert_rendering_equivalence(renderer: &mut Renderer) {
+fn assert_rendering_equivalence(renderer: &mut Renderer, rgb_tolerance: u8) {
     let settings = EditorSettings::default();
     let document = Document::from_path(DocumentId::new(1), "joins.csv", "first,row\nsecond,row\n");
+    let mut max_observed_rgb_difference = 0;
     for (theme, theme_name) in [(Theme::Light, "light"), (Theme::Dark, "dark")] {
         for scale in [1.0, 1.25, 1.5, 2.0] {
             for has_document in [false, true] {
@@ -165,25 +168,53 @@ fn assert_rendering_equivalence(renderer: &mut Renderer) {
                             &theme,
                             scale,
                         );
-                        let mismatch = before
+                        assert_eq!(before.len(), after.len());
+                        let mut max_rgb_difference = 0;
+                        let mut mismatch = None;
+                        for (pixel, (before, after)) in before
                             .chunks_exact(4)
                             .zip(after.chunks_exact(4))
                             .enumerate()
-                            .find(|(_, (before, after))| before != after);
-                        if let Some((pixel, (before, after))) = mismatch {
+                        {
+                            let rgb_difference = before[..3]
+                                .iter()
+                                .zip(&after[..3])
+                                .map(|(before, after)| before.abs_diff(*after))
+                                .max()
+                                .unwrap_or(0);
+                            max_rgb_difference = max_rgb_difference.max(rgb_difference);
+                            if mismatch.is_none()
+                                && (rgb_difference > rgb_tolerance || before[3] != after[3])
+                            {
+                                mismatch = Some((pixel, before, after));
+                            }
+                        }
+                        let context = format!(
+                            "{theme_name}, scale={scale}, document={has_document}, \
+                             sidebar={sidebar_width}, fractional={fractional}"
+                        );
+                        if let Some((pixel, before, after)) = mismatch {
                             let width = (SIZE.width * scale) as usize;
                             panic!(
-                                "{theme_name}, scale={scale}, document={has_document}, \
-                                 sidebar={sidebar_width}, fractional={fractional}: \
-                                 pixel ({}, {}) differs: {before:?} != {after:?}",
+                                "{context}: pixel ({}, {}) differs: {before:?} != {after:?}; \
+                                 maximum RGB difference={max_rgb_difference}, \
+                                 allowed={rgb_tolerance}; alpha must match exactly",
                                 pixel % width,
                                 pixel / width,
                             );
                         }
-                        assert_eq!(before.len(), after.len());
+                        max_observed_rgb_difference =
+                            max_observed_rgb_difference.max(max_rgb_difference);
                     }
                 }
             }
         }
+    }
+    if max_observed_rgb_difference > 0 {
+        eprintln!(
+            "background equivalence across all themes, scales, and joins: \
+             maximum RGB difference={max_observed_rgb_difference}, \
+             allowed={rgb_tolerance}; alpha matches exactly"
+        );
     }
 }

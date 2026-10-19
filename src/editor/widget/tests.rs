@@ -728,12 +728,9 @@ fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
         folds.set_collapsed(FoldRange::new(0, 2), true);
         let fixture = FoldPointerFixture::new(source, folds);
         let position = EditorPosition::new(0, buffer.line(0).unwrap().len());
-        let size = Size::new(520, 180);
-        let bounds = Rectangle::with_size(Size::new(size.width as f32, size.height as f32));
         for zoom in [0.5, 1.0, 3.0] {
             let metrics = EditorMetrics::new(20.0 * zoom, 8.8 * zoom);
-            let layout =
-                EditorLayout::new(metrics, ScrollOffset::ZERO, bounds.width, bounds.height);
+            let layout = EditorLayout::new(metrics, ScrollOffset::ZERO, 520.0, 180.0);
             let plan = build_render_plan_for_selection_set_with_cache_and_caret_row(
                 &fixture.buffer,
                 &fixture.viewport,
@@ -761,6 +758,21 @@ fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
             let anchor = metrics.text_origin_x(&fixture.decorations)
                 + measured.width(0, prefix.len(), row.start_visual_column);
             let indicator = row.collapsed_indicator_bounds(metrics, anchor).unwrap();
+            let caret_x = indicator.x + indicator.width;
+            // Leave room for the complete placeholder and caret at every font
+            // advance and zoom; SF Mono exceeds the original 520px viewport.
+            let size = Size::new((caret_x + 32.0).ceil().max(520.0) as u32, 180);
+            let bounds = Rectangle::with_size(Size::new(size.width as f32, size.height as f32));
+            let layout = EditorLayout {
+                width: bounds.width,
+                ..layout
+            };
+            assert!(
+                bounds.contains(Point::new(indicator.x, indicator.y))
+                    && bounds.contains(Point::new(caret_x + 2.0, indicator.y + indicator.height)),
+                "Placeholder and caret must fit: zoom={zoom}, source={source:?}, \
+                 indicator={indicator:?}, viewport={bounds:?}"
+            );
             let mut draw = |caret_visible| {
                 renderer::Renderer::reset(&mut renderer, bounds);
                 draw_plan(
@@ -791,13 +803,19 @@ fn caret_after_a_collapsed_opener_renders_after_the_whole_placeholder() {
                 .filter(|(_, (before, after))| before != after)
                 .map(|(index, _)| index % size.width as usize)
                 .collect();
-            assert!(!changes.is_empty());
+            assert!(
+                !changes.is_empty(),
+                "Caret must render: zoom={zoom}, source={source:?}, \
+                 indicator={indicator:?}, viewport={bounds:?}, planned_caret={:?}",
+                plan.caret
+            );
             assert!(
                 changes.iter().all(|&x| {
                     x as f32 >= (indicator.x + indicator.width).floor()
                         && x as f32 <= (indicator.x + indicator.width).ceil() + 2.0
                 }),
-                "Caret must stay after the placeholder: zoom={zoom}, pixels={changes:?}"
+                "Caret must stay after the placeholder: zoom={zoom}, source={source:?}, \
+                 indicator={indicator:?}, viewport={bounds:?}, pixels={changes:?}"
             );
         }
     }

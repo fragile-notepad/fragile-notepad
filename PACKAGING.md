@@ -30,7 +30,10 @@ tar -C dist/package -czf dist/fragile-notepad-macos.tar.gz .
 ```
 
 Use a new package directory and distribute it whole: launcher, binary,
-Vulkan/MoltenVK libraries, ICD manifest, and licenses. This is a launcher package.
+Vulkan/MoltenVK libraries, ICD manifest, and licenses.
+Open `Fragile Notepad.app` or run the `fragile-notepad` launcher.
 
 The script collects runtime notices online and ad-hoc signs libraries;
 Developer ID signing and notarization are separate.
+
+Optional UI scaling: `FRAGILE_NOTEPAD_UI_SCALE=1.5` (default: `1.0`).

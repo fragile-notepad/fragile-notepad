@@ -53,7 +53,7 @@ pub(super) fn run(app: &mut App, message: Message) -> Task<Message> {
     if let Some(span) = span {
         span.end_with("");
     }
-    Task::batch([task, reactions])
+    Task::batch([task, reactions, app.finish_native_quit()])
 }
 
 /// Drain facts before running a reaction, then collect any mutations it produced.

@@ -79,6 +79,52 @@ pub fn initialize(app: &NSApplication) {
     app_menu.addItem(&quit_item);
     app_menu_item.setSubmenu(Some(&app_menu));
 
+    let edit_menu = NSMenu::new(mtm);
+    edit_menu.setTitle(ns_string!("Edit"));
+    edit_menu.setAutoenablesItems(true);
+
+    // Nil targets let native text fields (including file panels) handle these
+    // commands through the responder chain. Unsupported actions stay disabled
+    // so custom-rendered views can continue handling their own shortcuts.
+    edit_menu.addItem(&menu_item(
+        mtm,
+        ns_string!("Undo"),
+        Some(sel!(undo:)),
+        Some(KeyEquivalent { key: ns_string!("z"), masks: None }),
+    ));
+    edit_menu.addItem(&menu_item(
+        mtm,
+        ns_string!("Redo"),
+        Some(sel!(redo:)),
+        Some(KeyEquivalent {
+            key: ns_string!("z"),
+            masks: Some(NSEventModifierFlags::Command | NSEventModifierFlags::Shift),
+        }),
+    ));
+    edit_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    for (title, action, key) in [
+        (ns_string!("Cut"), sel!(cut:), ns_string!("x")),
+        (ns_string!("Copy"), sel!(copy:), ns_string!("c")),
+        (ns_string!("Paste"), sel!(paste:), ns_string!("v")),
+    ] {
+        edit_menu.addItem(&menu_item(
+            mtm,
+            title,
+            Some(action),
+            Some(KeyEquivalent { key, masks: None }),
+        ));
+    }
+    edit_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    edit_menu.addItem(&menu_item(
+        mtm,
+        ns_string!("Select All"),
+        Some(sel!(selectAll:)),
+        Some(KeyEquivalent { key: ns_string!("a"), masks: None }),
+    ));
+    let edit_menu_item = menu_item(mtm, ns_string!("Edit"), None, None);
+    edit_menu_item.setSubmenu(Some(&edit_menu));
+    menubar.addItem(&edit_menu_item);
+
     app.setServicesMenu(Some(&services_menu));
     app.setMainMenu(Some(&menubar));
 }

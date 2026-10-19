@@ -93,6 +93,7 @@ impl App {
                     self.files.pending_close_after_save = None;
                     self.clear_close();
                     self.files.pending_save_all.clear();
+                    self.files.close_goal = CloseGoal::KeepOpen;
                     return Task::none();
                 }
 
@@ -103,21 +104,22 @@ impl App {
             DirtyCloseDecision::Discard => {
                 let close_task = self.close_now(document_id);
 
-                if !self.files.pending_close_documents.is_empty() {
+                let task = if !self.files.pending_close_documents.is_empty() {
                     Task::batch([close_task, self.continue_close()])
                 } else if self.should_exit() {
                     self.files.close_goal = CloseGoal::KeepOpen;
                     Task::batch([close_task, self.exit_after_settings()])
                 } else {
                     Task::batch([close_task, self.finish_close_goal()])
-                }
+                };
+                Task::batch([task, self.focus_editor_after_close_prompt()])
             }
             DirtyCloseDecision::Cancel => {
                 self.files.pending_close_after_save = None;
                 self.clear_close();
                 self.files.pending_save_all.clear();
                 self.files.close_goal = CloseGoal::KeepOpen;
-                Task::none()
+                self.focus_editor_after_close_prompt()
             }
         }
     }
@@ -214,7 +216,7 @@ impl App {
         self.files.pending_close_documents.clear();
     }
 
-    pub(super) fn should_exit(&self) -> bool {
+    pub(in crate::app) fn should_exit(&self) -> bool {
         self.files.close_goal == CloseGoal::ExitApp
     }
 

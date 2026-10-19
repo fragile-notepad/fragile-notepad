@@ -583,7 +583,9 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                                 label,
                                 shortcut.as_ref().map(shortcut_label).unwrap_or_default(),
                             ),
-                            MenuNode::Disabled { label, shortcut } => (
+                            MenuNode::Disabled {
+                                label, shortcut, ..
+                            } => (
                                 label,
                                 shortcut.as_ref().map(shortcut_label).unwrap_or_default(),
                             ),

@@ -145,6 +145,10 @@ impl ActiveEventLoop {
         self.delegate.exiting()
     }
 
+    pub(crate) fn cancel_termination(&self) {
+        self.delegate.cancel_termination()
+    }
+
     pub(crate) fn owned_display_handle(&self) -> OwnedDisplayHandle {
         OwnedDisplayHandle
     }

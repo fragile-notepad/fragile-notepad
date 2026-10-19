@@ -79,6 +79,8 @@ mod documents;
 mod editor_actions;
 #[path = "app_tests/lifecycle.rs"]
 mod lifecycle;
+#[path = "app_tests/native_quit.rs"]
+mod native_quit;
 #[path = "app_tests/search.rs"]
 mod search;
 #[path = "app_tests/settings.rs"]
@@ -92,3 +94,6 @@ mod recovery;
 
 #[path = "app_tests/events.rs"]
 mod events;
+
+#[path = "app_tests/focus.rs"]
+mod focus;

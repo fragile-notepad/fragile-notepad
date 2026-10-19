@@ -5,6 +5,8 @@
 pub struct PlatformSpecific {
     /// Hides the window title.
     pub title_hidden: bool,
+    /// Hides the native titlebar buttons while retaining the native window frame.
+    pub titlebar_buttons_hidden: bool,
     /// Makes the titlebar transparent and allows the content to appear behind it.
     pub titlebar_transparent: bool,
     /// Makes the window content appear behind the titlebar.

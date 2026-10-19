@@ -45,6 +45,8 @@ pub enum PlatformSpecific {
 /// Describes an event specific to MacOS
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MacOS {
+    /// The user requested application termination through the native menu or Dock.
+    QuitRequested,
     /// The running application was reopened from the Dock.
     Reopened,
     /// Triggered when the app receives an URL from the system

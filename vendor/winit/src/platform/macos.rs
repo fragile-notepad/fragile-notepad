@@ -478,6 +478,10 @@ impl MonitorHandleExtMacOS for MonitorHandle {
 
 /// Additional methods on [`ActiveEventLoop`] that are specific to macOS.
 pub trait ActiveEventLoopExtMacOS {
+    /// Refuse a native termination request previously delivered as
+    /// [`crate::event::MacOS::QuitRequested`].
+    fn cancel_termination(&self);
+
     /// Hide the entire application. In most applications this is typically triggered with
     /// Command-H.
     fn hide_application(&self);
@@ -493,6 +497,10 @@ pub trait ActiveEventLoopExtMacOS {
 }
 
 impl ActiveEventLoopExtMacOS for ActiveEventLoop {
+    fn cancel_termination(&self) {
+        self.p.cancel_termination()
+    }
+
     fn hide_application(&self) {
         self.p.hide_application()
     }

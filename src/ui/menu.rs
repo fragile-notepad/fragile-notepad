@@ -36,6 +36,8 @@ pub enum MenuNode {
     Disabled {
         label: String,
         shortcut: Option<MenuShortcutHint>,
+        // Native responders may still handle a command disabled in the editor.
+        message: Option<Message>,
     },
     Submenu {
         id: String,
@@ -87,14 +89,10 @@ impl MenuNode {
         match self {
             Self::Item {
                 label, shortcut, ..
-            } => {
-                ROW_HORIZONTAL_PADDING
-                    + text_width(label, LABEL_TEXT_SIZE)
-                    + shortcut.as_ref().map_or(0.0, |shortcut| {
-                        LABEL_SHORTCUT_GAP + shortcut.intrinsic_width()
-                    })
             }
-            Self::Disabled { label, shortcut } => {
+            | Self::Disabled {
+                label, shortcut, ..
+            } => {
                 ROW_HORIZONTAL_PADDING
                     + text_width(label, LABEL_TEXT_SIZE)
                     + shortcut.as_ref().map_or(0.0, |shortcut| {
@@ -148,6 +146,7 @@ pub fn disabled(label: impl Into<String>) -> MenuNode {
     MenuNode::Disabled {
         label: label.into(),
         shortcut: None,
+        message: None,
     }
 }
 
@@ -627,7 +626,9 @@ fn menu_entry_view(
             segments: active_path_to(active_path, depth),
         }))
         .into(),
-        MenuNode::Disabled { label, shortcut } => mouse_area(
+        MenuNode::Disabled {
+            label, shortcut, ..
+        } => mouse_area(
             container(
                 row![
                     text(label).size(13),

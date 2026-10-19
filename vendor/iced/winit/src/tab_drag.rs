@@ -128,14 +128,14 @@ impl Tracker {
                 // essential: its open task may resolve after the user lets go.
                 self.poll(windows, events);
                 if let Some(session) = self.active.as_mut().filter(|session| session.id == id) {
-                    if let Some((_, window, _)) =
+                    if let Some((_, window, scale)) =
                         windows.iter().find(|(window, _, _)| *window == target)
                     {
                         if session.capability == Capability::Compositor {
                             let _ = winit::tab_drag::follow_surface(
                                 window,
                                 id.0,
-                                LogicalPosition::new(f64::from(offset.x), f64::from(offset.y)),
+                                native_offset(offset, f64::from(*scale) / window.scale_factor()),
                             );
                         }
                         if session.capability != Capability::SurfaceOnly {
@@ -150,13 +150,19 @@ impl Tracker {
                 let mut handoff_failed = false;
                 if let Some(session) = self.active.as_mut().filter(|session| session.id == id) {
                     if session.capability == Capability::Desktop && session.capture.0 != target {
-                        if let Some((_, raw, _)) = windows.iter().find(|(window, _, _)| *window == target) {
+                        if let Some((_, raw, _)) =
+                            windows.iter().find(|(window, _, _)| *window == target)
+                        {
                             // Transfer before the application hides the old
                             // followed window. No release/press is synthesized.
                             if winit::tab_drag::begin(raw) {
                                 session.capture = (target, raw.clone());
-                            } else { handoff_failed = true; }
-                        } else { handoff_failed = true; }
+                            } else {
+                                handoff_failed = true;
+                            }
+                        } else {
+                            handoff_failed = true;
+                        }
                     }
                     session.following = None;
                     session.last_motion = None;
@@ -306,7 +312,8 @@ impl Tracker {
             self.press_position = None;
         }
         if self.active.as_ref().is_some_and(|session| {
-            session.origin == id || session.capture.0 == id
+            session.origin == id
+                || session.capture.0 == id
                 || session
                     .following
                     .as_ref()
@@ -376,11 +383,13 @@ impl Tracker {
             emit(session.origin, motion.clone(), events);
             session.last_motion = Some(motion);
         }
-        if let Some((_, following, offset)) = &session.following {
+        if let Some((target, following, offset)) = &session.following
+            && let Some((_, _, scale)) = windows.iter().find(|(id, _, _)| id == target)
+        {
             winit::tab_drag::move_window(
                 following,
                 pointer.position,
-                LogicalPosition::new(f64::from(offset.x), f64::from(offset.y)),
+                native_offset(*offset, f64::from(*scale) / following.scale_factor()),
             );
         }
     }
@@ -423,6 +432,15 @@ impl Drop for Tracker {
     }
 }
 
+/// Convert application coordinates to the native logical coordinates expected
+/// by winit. The native drag backend applies display scaling independently.
+pub(crate) fn native_offset(offset: Vector, application_scale: f64) -> LogicalPosition<f64> {
+    LogicalPosition::new(
+        f64::from(offset.x) * application_scale,
+        f64::from(offset.y) * application_scale,
+    )
+}
+
 fn emit(window: Id, event: Event, events: &mut Vec<(Id, core::Event)>) {
     events.push((
         window,
@@ -451,6 +469,25 @@ fn pointer_terminal(pointer: winit::tab_drag::Pointer) -> Option<Terminal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detached_tab_grab_point_stays_under_pointer_with_display_and_ui_scaling() {
+        let pointer = PhysicalPosition::new(1500.0, 700.0);
+        let offset = Vector::new(180.0, 55.0);
+        for display_scale in [1.0, 1.5, 2.0] {
+            for application_scale in [0.75, 1.0, 1.5, 2.0, 3.0] {
+                let viewport_scale = display_scale * application_scale;
+                let native = native_offset(offset, viewport_scale / display_scale);
+                let physical = native.to_physical::<f64>(display_scale);
+                let origin = PhysicalPosition::new(pointer.x - physical.x, pointer.y - physical.y);
+                let grabbed = PhysicalPosition::new(
+                    origin.x + f64::from(offset.x) * viewport_scale,
+                    origin.y + f64::from(offset.y) * viewport_scale,
+                );
+                assert_eq!(grabbed, pointer);
+            }
+        }
+    }
 
     #[test]
     fn physical_release_commits_even_when_native_release_also_drops_capture() {

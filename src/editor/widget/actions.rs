@@ -10,32 +10,35 @@ pub fn key_action(
     text: Option<&str>,
     shortcuts: &ShortcutMap,
 ) -> Option<EditorAction> {
-    shortcuts
-        .resolve(key, modified_key, modifiers)
-        .and_then(shortcut_action)
-        .or_else(|| match modified_key.as_ref() {
-            keyboard::Key::Named(key::Named::Space) => text.map_or_else(
-                || Some(EditorAction::InsertText(" ".to_owned())),
-                text_action,
-            ),
-            keyboard::Key::Named(key::Named::Tab) if modifiers.shift() => {
-                Some(EditorAction::Unindent)
-            }
-            keyboard::Key::Named(key::Named::Tab) => Some(EditorAction::Indent),
-            keyboard::Key::Named(key::Named::Enter) => Some(EditorAction::InsertNewline),
-            keyboard::Key::Named(key::Named::Backspace) => Some(EditorAction::Backspace),
-            keyboard::Key::Named(key::Named::Delete) => Some(EditorAction::Delete),
-            keyboard::Key::Named(named) => {
-                let motion = caret_motion(named, modifiers)?;
+    if let Some(command) = shortcuts.resolve(key, modified_key, modifiers) {
+        // App shortcuts must propagate even when the platform supplies text.
+        return shortcut_action(command);
+    }
 
-                Some(if modifiers.shift() {
-                    EditorAction::Select(motion)
-                } else {
-                    EditorAction::MoveCaret(motion)
-                })
-            }
-            _ => text.and_then(text_action),
-        })
+    match modified_key.as_ref() {
+        keyboard::Key::Named(key::Named::Space) if modifiers.macos_command() => None,
+        keyboard::Key::Named(key::Named::Space) => text.map_or_else(
+            || Some(EditorAction::InsertText(" ".to_owned())),
+            text_action,
+        ),
+        keyboard::Key::Named(key::Named::Tab) if modifiers.shift() => Some(EditorAction::Unindent),
+        keyboard::Key::Named(key::Named::Tab) => Some(EditorAction::Indent),
+        keyboard::Key::Named(key::Named::Enter) => Some(EditorAction::InsertNewline),
+        keyboard::Key::Named(key::Named::Backspace) => Some(EditorAction::Backspace),
+        keyboard::Key::Named(key::Named::Delete) => Some(EditorAction::Delete),
+        keyboard::Key::Named(named) => {
+            let motion = caret_motion(named, modifiers)?;
+
+            Some(if modifiers.shift() {
+                EditorAction::Select(motion)
+            } else {
+                EditorAction::MoveCaret(motion)
+            })
+        }
+        _ => text
+            .filter(|_| !modifiers.macos_command())
+            .and_then(text_action),
+    }
 }
 
 fn text_action(text: &str) -> Option<EditorAction> {

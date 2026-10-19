@@ -6,6 +6,11 @@ if [[ "$(uname -s)" != Darwin || $# != 1 ]]; then
     exit 1
 fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+app_icon="$repo_root/target/app-icons/app.icns"
+if [[ ! -f "$app_icon" ]]; then
+    echo "Missing generated application icon: $app_icon" >&2
+    exit 1
+fi
 loader="$(brew --prefix vulkan-loader)"
 molten="$(brew --prefix molten-vk)"
 # Refuse an existing destination; never mix stale runtime libraries into a build.
@@ -73,3 +78,11 @@ done
         > licenses/vulkan-sha256.txt
 )
 "$package/fragile-notepad" --version
+
+# Keep the command-line layout and provide a Finder-launchable application with
+# the user-facing name and icon registered in its bundle metadata.
+app_bundle="$package/Fragile Notepad.app"
+python3 "$repo_root/scripts/create-macos-app.py" "$package" "$app_bundle" --icon "$app_icon"
+codesign --force --sign - --timestamp=none "$app_bundle/Contents/MacOS/Fragile Notepad"
+codesign --force --sign - --timestamp=none "$app_bundle"
+codesign --verify --strict "$app_bundle"

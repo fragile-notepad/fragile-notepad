@@ -53,6 +53,7 @@ pub use actions::key_action;
 #[cfg(test)]
 use cache::{RichParagraphCache, SyntaxSpanKey};
 use draw::{draw_plan, draw_vertical_scrollbar};
+pub(crate) use font::editor_character_width;
 pub use font::{
     EDITOR_FONT, EDITOR_FONT_ROUTE, EDITOR_TEXT_SHAPING, EditorFontRoute, EditorFontRun,
     editor_font_runs, editor_font_runs_from_cjk_runs, regional_cjk_font,

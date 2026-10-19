@@ -166,6 +166,18 @@ impl RunLoop {
     /// put the event at the very front of the queue, to be handled as soon as possible after
     /// handling whatever event it's currently handling.
     pub fn queue_closure(&self, closure: impl FnOnce() + 'static) {
+        // Blocking modals and live resize may have borrowed the event handler.
+        // Ordinary events must wait for the default mode to avoid re-entry.
+        self.queue_closure_in_mode(closure, unsafe { kCFRunLoopDefaultMode as CFTypeRef });
+    }
+
+    /// Queue native termination work in the modal loop AppKit uses while it
+    /// waits for `replyToApplicationShouldTerminate:`.
+    pub fn queue_closure_in_common_modes(&self, closure: impl FnOnce() + 'static) {
+        self.queue_closure_in_mode(closure, unsafe { kCFRunLoopCommonModes as CFTypeRef });
+    }
+
+    fn queue_closure_in_mode(&self, closure: impl FnOnce() + 'static, mode: CFTypeRef) {
         extern "C" {
             fn CFRunLoopPerformBlock(rl: CFRunLoopRef, mode: CFTypeRef, block: &Block<dyn Fn()>);
         }
@@ -179,23 +191,6 @@ impl RunLoop {
                 error!("tried to execute queued closure on main thread twice");
             }
         });
-
-        // There are a few common modes (`kCFRunLoopCommonModes`) defined by Cocoa:
-        // - `NSDefaultRunLoopMode`, alias of `kCFRunLoopDefaultMode`.
-        // - `NSEventTrackingRunLoopMode`, used when mouse-dragging and live-resizing a window.
-        // - `NSModalPanelRunLoopMode`, used when running a modal inside the Winit event loop.
-        // - `NSConnectionReplyMode`: TODO.
-        //
-        // We only want to run event handlers in the default mode, as we support running a blocking
-        // modal inside a Winit event handler (see [#1779]) which outrules the modal panel mode, and
-        // resizing such panel window enters the event tracking run loop mode, so we can't directly
-        // trigger events inside that mode either.
-        //
-        // Any events that are queued while running a modal or when live-resizing will instead wait,
-        // and be delivered to the application afterwards.
-        //
-        // [#1779]: https://github.com/rust-windowing/winit/issues/1779
-        let mode = unsafe { kCFRunLoopDefaultMode as CFTypeRef };
 
         // SAFETY: The runloop is valid, the mode is a `CFStringRef`, and the block is `'static`.
         unsafe { CFRunLoopPerformBlock(self.0, mode, &block) }

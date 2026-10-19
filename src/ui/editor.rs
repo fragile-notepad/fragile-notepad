@@ -9,14 +9,18 @@ use crate::message::Message;
 pub const EDITOR_ID: &str = "fragile-notepad-editor";
 const BASE_TEXT_SIZE: f32 = 16.0;
 
-pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element<'a, Message> {
-    let document_id = document.id;
-    let metrics = EditorMetrics {
-        line_height: BASE_TEXT_SIZE * settings.zoom * 1.25,
-        character_width: BASE_TEXT_SIZE * settings.zoom * 0.55,
+pub(crate) fn metrics(zoom: f32) -> EditorMetrics {
+    let size = BASE_TEXT_SIZE * zoom;
+    EditorMetrics {
+        line_height: size * 1.25,
+        character_width: crate::editor::widget::editor_character_width(size),
         ..EditorMetrics::default()
     }
-    .with_line_count(document.buffer.line_count());
+}
+
+pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element<'a, Message> {
+    let document_id = document.id;
+    let metrics = metrics(settings.zoom).with_line_count(document.buffer.line_count());
     let editor = AdvancedEditor::new(
         &document.buffer,
         &document.viewport,

@@ -583,7 +583,9 @@ pub mod font {
 pub mod event {
     //! Handle events of a user interface.
     pub use crate::core::event::{Event, Status};
-    pub use iced_futures::event::{listen, listen_raw, listen_reopen, listen_url, listen_with};
+    pub use iced_futures::event::{
+        listen, listen_quit, listen_raw, listen_reopen, listen_url, listen_with,
+    };
 }
 
 pub mod keyboard {
@@ -600,7 +602,7 @@ pub mod mouse {
 
 pub mod system {
     //! Retrieve system information.
-    pub use crate::runtime::system::{theme, theme_changes};
+    pub use crate::runtime::system::{cancel_quit, theme, theme_changes};
 
     #[cfg(feature = "sysinfo")]
     pub use crate::runtime::system::{Information, information};

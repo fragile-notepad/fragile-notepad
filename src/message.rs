@@ -34,6 +34,18 @@ pub enum Menu {
     Help,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+pub enum NativeEditCommand {
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    Delete,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuPath {
     pub depth: usize,
@@ -329,8 +341,11 @@ message_catalog! {
         Redo => Reject,
     }
     Application(ApplicationMessage) {
+        NativeQuitRequested => Resolve,
         None => Reject,
         ApplicationReopened => Reject,
+        #[cfg(target_os = "macos")]
+        NativeMenuEdit(arg0: NativeEditCommand) => Reject,
         TabStripGeometry(arg0: crate::ui::tabs::StripGeometry) => Reject,
         TabPressed(arg0: DocumentId, arg1: iced::Point, arg2: iced::keyboard::Modifiers) => Reject,
         TabPointerMoved(arg0: iced::Point) => Reject,

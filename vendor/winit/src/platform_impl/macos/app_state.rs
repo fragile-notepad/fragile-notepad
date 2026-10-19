@@ -7,7 +7,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{ClassType, DefinedClass, MainThreadOnly, Message, class, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSRunningApplication,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
+    NSApplicationTerminateReply, NSRunningApplication,
 };
 use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol};
 
@@ -36,6 +37,8 @@ pub(super) struct AppState {
     is_running: Cell<bool>,
     /// Whether the user has requested the event loop to exit.
     exit: Cell<bool>,
+    /// The reply AppKit is awaiting for a deferred native termination request.
+    termination: Cell<Termination>,
     control_flow: Cell<ControlFlow>,
     waker: RefCell<EventLoopWaker>,
     start_time: Cell<Option<Instant>>,
@@ -43,6 +46,13 @@ pub(super) struct AppState {
     pending_redraw: RefCell<Vec<WindowId>>,
     // NOTE: This is strongly referenced by our `NSWindowDelegate` and our `NSView` subclass, and
     // as such should be careful to not add fields that, in turn, strongly reference those.
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Termination {
+    Idle,
+    Pending,
+    Cancelled,
 }
 
 /// Apple constants
@@ -75,6 +85,37 @@ define_class!(
     unsafe impl NSObjectProtocol for ApplicationDelegate {}
 
     unsafe impl NSApplicationDelegate for ApplicationDelegate {
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
+            if !self.is_running()
+                || (!self.ivars().event_handler.ready() && !self.ivars().event_handler.in_use())
+            {
+                return NSApplicationTerminateReply::TerminateNow;
+            }
+
+            if self.ivars().termination.get() == Termination::Idle {
+                self.ivars().termination.set(Termination::Pending);
+                let this = self.retain();
+                // AppKit enters a modal run loop after TerminateLater. Deliver the
+                // request there, after this delegate callback has returned, so an
+                // immediate application reply cannot race the deferred response.
+                self.ivars().run_loop.queue_closure_in_common_modes(move || {
+                    if this.ivars().event_handler.ready() {
+                        this.handle_event(Event::PlatformSpecific(PlatformSpecific::MacOS(
+                            MacOS::QuitRequested,
+                        )));
+                    } else {
+                        // A native modal entered from an application callback can
+                        // still own the handler. Do not re-enter it or leave the
+                        // native termination loop waiting indefinitely.
+                        this.cancel_termination();
+                    }
+                });
+                self.ivars().run_loop.wakeup();
+            }
+            NSApplicationTerminateReply::TerminateLater
+        }
+
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _sender: &NSApplication, _has_visible_windows: bool) -> bool {
             self.handle_event(Event::PlatformSpecific(PlatformSpecific::MacOS(MacOS::Reopened)));
@@ -131,6 +172,7 @@ impl ApplicationDelegate {
             is_launched: Cell::new(false),
             is_running: Cell::new(false),
             exit: Cell::new(false),
+            termination: Cell::new(Termination::Idle),
             control_flow: Cell::new(ControlFlow::default()),
             waker: RefCell::new(EventLoopWaker::new()),
             start_time: Cell::new(None),
@@ -291,6 +333,13 @@ impl ApplicationDelegate {
         self.ivars().exit.get()
     }
 
+    pub fn cancel_termination(&self) {
+        if self.ivars().termination.get() != Termination::Idle {
+            self.ivars().termination.set(Termination::Cancelled);
+            self.ivars().run_loop.wakeup();
+        }
+    }
+
     pub fn set_control_flow(&self, value: ControlFlow) {
         self.ivars().control_flow.set(value)
     }
@@ -409,6 +458,13 @@ impl ApplicationDelegate {
             .upgrade()
             .expect("The panic info must exist here. This failure indicates a developer error.");
 
+        // A refusal must also break out of AppKit's deferred termination loop
+        // when a different native modal still has the Winit handler borrowed.
+        if !self.exiting() && self.ivars().termination.get() == Termination::Cancelled {
+            self.ivars().termination.set(Termination::Idle);
+            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(false);
+        }
+
         // Return when in event handler due to https://github.com/rust-windowing/winit/issues/1779
         // XXX: how does it make sense that `event_handler.ready()` can ever return `false` here if
         // we're about to return to the `CFRunLoop` to poll for new events?
@@ -430,6 +486,9 @@ impl ApplicationDelegate {
 
         if self.exiting() {
             let app = NSApplication::sharedApplication(mtm);
+            if self.ivars().termination.replace(Termination::Idle) != Termination::Idle {
+                app.replyToApplicationShouldTerminate(true);
+            }
             stop_app_immediately(&app);
             notify_windows_of_exit(&app);
         }

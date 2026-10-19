@@ -610,7 +610,7 @@ where
 
         // Stop pasting if input becomes disabled
         if self.on_input.is_none() {
-            state.is_pasting = None;
+            state.paste.cancel();
         }
     }
 
@@ -673,17 +673,17 @@ where
 
                 let click_position = cursor.position_over(layout.bounds());
 
-                state.is_focused = if click_position.is_some() {
+                if click_position.is_some() {
                     let now = Instant::now();
 
-                    Some(Focus {
+                    state.is_focused = Some(Focus {
                         updated_at: now,
                         now,
                         is_window_focused: true,
-                    })
+                    });
                 } else {
-                    None
-                };
+                    state.unfocus();
+                }
 
                 if let Some(cursor_position) = click_position {
                     let text_layout = layout.children().next().unwrap();
@@ -886,12 +886,20 @@ where
                                 return;
                             };
 
-                            let content = match &state.is_pasting {
-                                Some(Paste::Pasting(content)) => content,
-                                Some(Paste::Reading) => return,
-                                None => {
+                            // Reading the clipboard is asynchronous. This field
+                            // already owns Paste, including while that read is
+                            // pending; do not let the app paste into its editor.
+                            shell.capture_event();
+                            let content = match &mut state.paste {
+                                Paste::Pasting(content) => content,
+                                Paste::Reading { .. } => return,
+                                Paste::Cancelled { retry } => {
+                                    *retry = Some(true);
+                                    return;
+                                }
+                                Paste::Idle => {
                                     shell.read_clipboard(clipboard::Kind::Text);
-                                    state.is_pasting = Some(Paste::Reading);
+                                    state.paste = Paste::Reading { key_held: true };
                                     return;
                                 }
                             };
@@ -928,12 +936,14 @@ where
                         _ => {}
                     }
 
-                    if let Some(text) = text {
+                    if let Some(text) = text
+                        && !modifiers.macos_command()
+                    {
                         let Some(on_input) = &self.on_input else {
                             return;
                         };
 
-                        state.is_pasting = None;
+                        state.paste.cancel();
 
                         if let Some(c) = text.chars().next().filter(|c| !c.is_control()) {
                             let mut editor = Editor::new(&mut self.value, &mut state.cursor);
@@ -1119,9 +1129,8 @@ where
                             shell.capture_event();
                         }
                         keyboard::Key::Named(key::Named::Escape) => {
-                            state.is_focused = None;
+                            state.unfocus();
                             state.is_dragging = None;
-                            state.is_pasting = None;
 
                             state.keyboard_modifiers = keyboard::Modifiers::default();
 
@@ -1137,32 +1146,61 @@ where
                 if state.is_focused.is_some()
                     && let keyboard::Key::Character("v") = key.as_ref()
                 {
-                    state.is_pasting = None;
                     shell.capture_event();
                 }
 
-                state.is_pasting = None;
+                state.paste.release();
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 let state = state::<Renderer>(tree);
 
                 state.keyboard_modifiers = *modifiers;
             }
-            Event::Clipboard(clipboard::Event::Read(Ok(content))) => {
+            Event::Clipboard(clipboard::Event::Read(result)) => {
+                let state = state::<Renderer>(tree);
+
+                let key_held = match std::mem::take(&mut state.paste) {
+                    Paste::Reading { key_held } => key_held,
+                    Paste::Cancelled { retry } => {
+                        // A newer Paste must read again after the cancelled
+                        // response. Clipboard events do not carry request IDs.
+                        if let Some(key_held) = retry
+                            && self.on_input.is_some()
+                            && state.is_focused.is_some()
+                        {
+                            shell.read_clipboard(clipboard::Kind::Text);
+                            state.paste = Paste::Reading { key_held };
+                            shell.capture_event();
+                        }
+
+                        return;
+                    }
+                    other => {
+                        state.paste = other;
+                        return;
+                    }
+                };
+
+                // Clear the pending read even when focus or editability has
+                // changed, or the clipboard result contains no text.
+                shell.capture_event();
+
                 let Some(on_input) = &self.on_input else {
                     return;
                 };
-
-                let state = state::<Renderer>(tree);
 
                 let Some(focus) = &mut state.is_focused else {
                     return;
                 };
 
-                if let clipboard::Content::Text(text) = content.as_ref()
-                    && let Some(Paste::Reading) = state.is_pasting
+                if let Ok(content) = result
+                    && let clipboard::Content::Text(text) = content.as_ref()
                 {
-                    state.is_pasting = Some(Paste::Pasting(Value::new(text)));
+                    state.paste = if key_held {
+                        Paste::Pasting(Value::new(text))
+                    } else {
+                        Paste::Idle
+                    };
 
                     let mut editor = Editor::new(&mut self.value, &mut state.cursor);
                     editor.paste(Value::new(text));
@@ -1214,7 +1252,7 @@ where
                         editor.paste(Value::new(text));
 
                         focus.updated_at = Instant::now();
-                        state.is_pasting = None;
+                        state.paste.cancel();
 
                         let message = (on_input)(editor.contents());
                         shell.publish(message);
@@ -1226,6 +1264,8 @@ where
             },
             Event::Window(window::Event::Unfocused) => {
                 let state = state::<Renderer>(tree);
+
+                state.paste.cancel();
 
                 if let Some(focus) = &mut state.is_focused {
                     focus.is_window_focused = false;
@@ -1368,7 +1408,7 @@ pub struct State<P: text::Paragraph> {
     icon: paragraph::Plain<P>,
     is_focused: Option<Focus>,
     is_dragging: Option<Drag>,
-    is_pasting: Option<Paste>,
+    paste: Paste,
     preedit: Option<input_method::Preedit>,
     last_click: Option<mouse::Click>,
     cursor: Cursor,
@@ -1393,10 +1433,41 @@ enum Drag {
     SelectWords { anchor: usize },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 enum Paste {
-    Reading,
+    #[default]
+    Idle,
+    Reading {
+        key_held: bool,
+    },
+    Cancelled {
+        retry: Option<bool>,
+    },
     Pasting(Value),
+}
+
+impl Paste {
+    fn cancel(&mut self) {
+        *self = match self {
+            // Retain the outstanding read so a late response cannot complete
+            // a newer Paste after this field regains focus.
+            Self::Reading { .. } | Self::Cancelled { .. } => Self::Cancelled { retry: None },
+            _ => Self::Idle,
+        };
+    }
+
+    fn release(&mut self) {
+        // The response can arrive after key release. Complete that paste once,
+        // without caching its contents for repeat.
+        match self {
+            Self::Reading { key_held }
+            | Self::Cancelled {
+                retry: Some(key_held),
+            } => *key_held = false,
+            Self::Pasting(_) => *self = Self::Idle,
+            _ => {}
+        }
+    }
 }
 
 impl<P: text::Paragraph> State<P> {
@@ -1431,6 +1502,7 @@ impl<P: text::Paragraph> State<P> {
     /// Unfocuses the [`TextInput`].
     pub fn unfocus(&mut self) {
         self.is_focused = None;
+        self.paste.cancel();
     }
 
     /// Moves the [`Cursor`] of the [`TextInput`] to the front of the input text.

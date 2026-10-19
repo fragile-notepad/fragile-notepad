@@ -87,7 +87,6 @@ impl App {
             Task::batch([
                 open.map(Message::WindowOpened),
                 iced::system::theme().map(Message::SystemColorModeChanged),
-                iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
                 Task::perform(
                     crate::services::settings_store::load_settings(),
                     Message::SettingsLoaded,

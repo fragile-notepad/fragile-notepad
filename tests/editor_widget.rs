@@ -1658,6 +1658,145 @@ fn editor_widget_key_action_maps_undo_redo_select_all_and_text_inputs() {
 }
 
 #[test]
+fn editor_widget_key_action_routes_shortcuts_before_printable_text() {
+    let shortcuts = ShortcutMap::default();
+    // macOS key events can carry printable text alongside the Command modifier.
+    for (input, expected) in [
+        ("s", None),
+        ("n", None),
+        ("f", None),
+        ("g", None),
+        ("a", Some(EditorAction::SelectAll)),
+        ("v", Some(EditorAction::Paste)),
+        ("z", Some(EditorAction::Undo)),
+    ] {
+        let key = keyboard::Key::Character(input.into());
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::COMMAND,
+                Some(input),
+                &shortcuts,
+            ),
+            expected,
+            "shortcut with text payload {input:?}"
+        );
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::NONE,
+                Some(input),
+                &shortcuts,
+            ),
+            Some(EditorAction::InsertText(input.into())),
+            "ordinary text {input:?}"
+        );
+    }
+    for input in ["S", "N"] {
+        let key = keyboard::Key::Character(input.into());
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
+                Some(input),
+                &shortcuts,
+            ),
+            None,
+            "application shortcut with text payload {input:?}"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn editor_widget_routes_macos_close_shortcuts_before_printable_text() {
+    let shortcuts = ShortcutMap::default();
+    for (input, modifiers, command) in [
+        (
+            "w",
+            keyboard::Modifiers::COMMAND,
+            ShortcutCommand::CloseFile,
+        ),
+        (
+            "W",
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
+            ShortcutCommand::CloseWindow,
+        ),
+    ] {
+        let key = keyboard::Key::Character(input.into());
+        assert_eq!(shortcuts.resolve(&key, &key, modifiers), Some(command));
+        assert_eq!(
+            key_action(&key, &key, modifiers, Some(input), &shortcuts),
+            None,
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn editor_widget_ignores_unbound_command_text_without_changing_navigation() {
+    let mut shortcuts = ShortcutMap::default();
+    shortcuts.clear(ShortcutCommand::CloseFile);
+    for input in ["w", "k", "K"] {
+        let key = keyboard::Key::Character(input.into());
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::LOGO,
+                Some(input),
+                &shortcuts,
+            ),
+            None,
+        );
+    }
+    let space = keyboard::Key::Named(key::Named::Space);
+    assert_eq!(
+        key_action(
+            &space,
+            &space,
+            keyboard::Modifiers::LOGO,
+            Some(" "),
+            &shortcuts
+        ),
+        None,
+    );
+    let left = keyboard::Key::Named(key::Named::ArrowLeft);
+    assert_eq!(
+        key_action(&left, &left, keyboard::Modifiers::LOGO, None, &shortcuts,),
+        Some(EditorAction::MoveCaret(CaretMotion::WordLeft)),
+    );
+}
+
+#[test]
+fn editor_widget_keeps_option_and_altgr_printable_text() {
+    let shortcuts = ShortcutMap::default();
+    for (key, modified, modifiers, text) in [
+        ("o", "ø", keyboard::Modifiers::ALT, "ø"),
+        (
+            "q",
+            "@",
+            keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT,
+            "@",
+        ),
+    ] {
+        assert_eq!(
+            key_action(
+                &keyboard::Key::Character(key.into()),
+                &keyboard::Key::Character(modified.into()),
+                modifiers,
+                Some(text),
+                &shortcuts,
+            ),
+            Some(EditorAction::InsertText(text.into())),
+        );
+    }
+}
+
+#[test]
 fn editor_widget_key_action_preserves_windows_dead_key_text() {
     let shortcuts = ShortcutMap::default();
     // An incompatible key after a Windows dead key produces both characters in
@@ -1794,6 +1933,17 @@ fn shortcut_map_resolves_binding_after_first_key_misses() {
             keyboard::Modifiers::SHIFT | keyboard::Modifiers::ALT,
         ),
         Some(ShortcutCommand::SaveFile)
+    );
+    assert_eq!(
+        key_action(
+            &keyboard::Key::Character(")".into()),
+            &keyboard::Key::Character("0".into()),
+            keyboard::Modifiers::SHIFT | keyboard::Modifiers::ALT,
+            Some(")"),
+            &shortcuts,
+        ),
+        None,
+        "remapped application shortcut must propagate instead of inserting its text"
     );
 }
 

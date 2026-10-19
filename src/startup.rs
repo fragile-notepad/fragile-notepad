@@ -91,6 +91,16 @@ pub fn iced_settings() -> Settings {
     }
 }
 
+/// Additional interface scaling, useful on low-density or virtual displays.
+/// The window system's display scale is still applied independently.
+pub fn ui_scale_factor() -> f32 {
+    std::env::var("FRAGILE_NOTEPAD_UI_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| value.is_finite() && (0.75..=3.0).contains(value))
+        .unwrap_or(1.0)
+}
+
 pub fn startup_probe_enabled() -> bool {
     std::env::var_os(STARTUP_PROBE_ENV).is_some()
 }

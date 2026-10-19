@@ -4,6 +4,8 @@ use iced::keyboard::{self, key};
 pub enum ShortcutCommand {
     NewFile,
     NewWindow,
+    CloseFile,
+    CloseWindow,
     Quit,
     OpenFile,
     SaveFile,
@@ -45,9 +47,13 @@ pub enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; if cfg!(target_os = "macos") { 42 } else { 40 }] = [
         Self::NewFile,
         Self::NewWindow,
+        #[cfg(target_os = "macos")]
+        Self::CloseFile,
+        #[cfg(target_os = "macos")]
+        Self::CloseWindow,
         Self::Quit,
         Self::OpenFile,
         Self::SaveFile,
@@ -92,6 +98,8 @@ impl ShortcutCommand {
         match self {
             Self::NewFile => "new_file",
             Self::NewWindow => "new_window",
+            Self::CloseFile => "close_file",
+            Self::CloseWindow => "close_window",
             Self::Quit => "quit",
             Self::OpenFile => "open_file",
             Self::SaveFile => "save_file",
@@ -137,6 +145,8 @@ impl ShortcutCommand {
         match self {
             Self::NewFile => "New file",
             Self::NewWindow => "New window",
+            Self::CloseFile => "Close file",
+            Self::CloseWindow => "Close window",
             Self::Quit => "Quit",
             Self::OpenFile => "Open file",
             Self::SaveFile => "Save file",
@@ -182,6 +192,8 @@ impl ShortcutCommand {
         match self {
             Self::NewFile
             | Self::NewWindow
+            | Self::CloseFile
+            | Self::CloseWindow
             | Self::Quit
             | Self::OpenFile
             | Self::SaveFile
@@ -219,6 +231,11 @@ impl ShortcutCommand {
         match self {
             Self::NewFile => Some(KeyBinding::primary(ShortcutKey::character('n'))),
             Self::NewWindow => Some(KeyBinding::primary_shift(ShortcutKey::character('n'))),
+            Self::CloseFile => {
+                cfg!(target_os = "macos").then(|| KeyBinding::primary(ShortcutKey::character('w')))
+            }
+            Self::CloseWindow => cfg!(target_os = "macos")
+                .then(|| KeyBinding::primary_shift(ShortcutKey::character('w'))),
             Self::Quit => Some(KeyBinding::primary(ShortcutKey::character('q'))),
             Self::OpenFile => Some(KeyBinding::primary(ShortcutKey::character('o'))),
             Self::SaveFile => Some(KeyBinding::primary(ShortcutKey::character('s'))),
@@ -326,6 +343,26 @@ pub struct ShortcutMap {
 }
 
 impl ShortcutMap {
+    /// Restore explicit choices before applying defaults introduced by upgrades.
+    /// An explicit `None` keeps a shortcut unassigned; duplicate entries retain
+    /// the first persisted choice.
+    pub(super) fn from_persisted(
+        assignments: impl IntoIterator<Item = (ShortcutCommand, Option<KeyBinding>)>,
+    ) -> Self {
+        let assignments: Vec<_> = assignments.into_iter().collect();
+        let mut shortcuts = Self::with_defaults();
+        for entry in &mut shortcuts.entries {
+            if let Some((_, binding)) = assignments
+                .iter()
+                .find(|(command, _)| *command == entry.command)
+            {
+                entry.binding = *binding;
+            }
+        }
+        shortcuts.preserve_existing_bindings(&assignments);
+        shortcuts
+    }
+
     pub fn with_defaults() -> Self {
         Self {
             entries: ShortcutCommand::ALL
@@ -414,6 +451,34 @@ impl ShortcutMap {
 
     pub fn entries(&self) -> &[ShortcutEntry] {
         &self.entries
+    }
+
+    fn preserve_existing_bindings(
+        &mut self,
+        assignments: &[(ShortcutCommand, Option<KeyBinding>)],
+    ) {
+        // These defaults were added after settings with custom bindings had
+        // shipped. Their defaults must not take another command's binding.
+        for command in [
+            ShortcutCommand::NewWindow,
+            ShortcutCommand::Quit,
+            ShortcutCommand::CloseFile,
+            ShortcutCommand::CloseWindow,
+        ] {
+            if assignments.iter().any(|(assigned, _)| *assigned == command) {
+                continue;
+            }
+            if let Some(binding) = self.binding(command)
+                && self.entries.iter().any(|entry| {
+                    entry.command != command
+                        && entry
+                            .binding
+                            .is_some_and(|candidate| candidate.matches(binding))
+                })
+            {
+                self.clear(command);
+            }
+        }
     }
 
     fn entry_mut(&mut self, command: ShortcutCommand) -> Option<&mut ShortcutEntry> {

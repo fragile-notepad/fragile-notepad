@@ -2,9 +2,10 @@
 
 mod background;
 
-use iced::widget::{column, container, row, stack};
+use iced::widget::{Column, container, row, space, stack};
 use iced::{Element, Fill, Length};
 
+use crate::core::FindState;
 use crate::message::Message;
 
 use super::view_model::{ChromeAnimationInfo, WorkbenchView};
@@ -72,32 +73,23 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         editor::empty()
     };
 
-    let mut workbench = column![
-        raster_cache::cached(toolbar::menu_bar(active_menu), retain),
+    // from_vec preserves the Find slot at zero height. This lets its opening
+    // focus operation reach the input and keeps the editor's tree index stable.
+    let mut workbench = vec![
+        if cfg!(target_os = "macos") {
+            space::vertical().height(0.0).width(Fill).into()
+        } else {
+            raster_cache::cached(toolbar::menu_bar(active_menu), retain)
+        },
         raster_cache::cached(toolbar::tool_bar(active_document), retain),
         tabs::view_for_window(workspace, editor_window, dragged_tab, hovered_drop_tab),
+        find_panel_slot(
+            find,
+            is_find_visible,
+            is_inline_replace_visible,
+            chrome_animation,
+        ),
     ];
-
-    if chrome_animation.find_rendered_visible || is_find_visible {
-        let find_height = animated_find_height(chrome_animation);
-
-        workbench = workbench.push(
-            container(motion::fade(
-                find_panel::view(
-                    find,
-                    is_inline_replace_visible,
-                    chrome_animation.inline_replace_rendered_visible,
-                    chrome_animation.inline_replace_progress,
-                ),
-                chrome_animation.find_progress,
-                styles::utility_bar_background,
-                is_find_visible,
-            ))
-            .height(Length::Fixed(find_height))
-            .width(Fill)
-            .clip(true),
-        );
-    }
 
     let editor_surface = container(editor)
         .height(Fill)
@@ -140,20 +132,20 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         editor_surface.into()
     };
 
-    let shell = container(background::shell(workbench.push(main_area).push(
-        raster_cache::cached(
-            status_bar::view(active_document, settings, file_status),
-            retain,
-        ),
-    )))
-    .height(Fill)
-    .width(Fill)
-    .style(styles::app_shell);
+    workbench.push(main_area);
+    workbench.push(raster_cache::cached(
+        status_bar::view(active_document, settings, file_status),
+        retain,
+    ));
+    let shell = container(background::shell(Column::from_vec(workbench)))
+        .height(Fill)
+        .width(Fill)
+        .style(styles::app_shell);
     // A quiet shell needs one composite. When any child has a pending redraw
     // (caret, scrolling, or fade), draw it live and let the smaller caches help.
     let shell = raster_cache::cached_animated(shell, retain);
 
-    let with_menu: Element<'a, Message> = if active_menu.is_some() {
+    let with_menu: Element<'a, Message> = if !cfg!(target_os = "macos") && active_menu.is_some() {
         stack![
             shell,
             container(toolbar::menu_overlay(
@@ -205,6 +197,32 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     } else {
         with_window_list
     }
+}
+
+fn find_panel_slot(
+    find: &FindState,
+    visible: bool,
+    replace_visible: bool,
+    animation: ChromeAnimationInfo,
+) -> Element<'_, Message> {
+    if !visible && !animation.find_rendered_visible {
+        return space::vertical().height(0.0).width(Fill).into();
+    }
+    container(motion::fade(
+        find_panel::view(
+            find,
+            replace_visible,
+            animation.inline_replace_rendered_visible,
+            animation.inline_replace_progress,
+        ),
+        animation.find_progress,
+        styles::utility_bar_background,
+        visible,
+    ))
+    .height(Length::Fixed(animated_find_height(animation)))
+    .width(Fill)
+    .clip(true)
+    .into()
 }
 
 fn animated_find_height(animation: ChromeAnimationInfo) -> f32 {

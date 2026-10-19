@@ -24,7 +24,7 @@ const NEW_FILE_MARGIN: f32 = 4.0;
 const TAB_LABEL_MAX_CHARS: usize = 28;
 const TAB_LABEL_MIN_WIDTH: f32 = 62.0;
 const TAB_LABEL_MAX_WIDTH: f32 = 172.0;
-const TAB_LABEL_CHAR_WIDTH: f32 = 7.0;
+const TAB_LABEL_CHAR_WIDTH: f32 = if cfg!(target_os = "macos") { 8.0 } else { 7.0 };
 const TAB_TEXT_SIZE: u32 = 13;
 const TOOLTIP_TEXT_SIZE: u32 = 13;
 
@@ -169,6 +169,8 @@ fn tab(
                 .filter_method(image::FilterMethod::Linear),
             text(compact_title)
                 .size(TAB_TEXT_SIZE)
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::Middle)
                 .width(Length::Fixed(label_width)),
         ]
         .spacing(5)

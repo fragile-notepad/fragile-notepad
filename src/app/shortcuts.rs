@@ -2,6 +2,7 @@ use crate::message::FileMessage;
 use crate::message::GoToLineMessage;
 use crate::message::SearchMessage;
 use crate::message::SettingsMessage;
+use crate::message::WindowMessage;
 use iced::event::{Event, Status};
 use iced::{Task, keyboard, mouse, window};
 
@@ -150,6 +151,13 @@ impl App {
         }
 
         if let Some(command) = self.shortcut_for_key_event(&event) {
+            if matches!(
+                command,
+                ShortcutCommand::CloseFile | ShortcutCommand::CloseWindow
+            ) && self.editor_id(window_id).is_none()
+            {
+                return self.update_window(WindowMessage::WindowCloseRequested(window_id));
+            }
             return self.update_shortcut(command);
         }
 
@@ -180,6 +188,8 @@ impl App {
             ShortcutCommand::NewWindow => self.new_editor_window(),
             ShortcutCommand::Quit => self.exit_request(),
             ShortcutCommand::NewFile => self.update_file(FileMessage::NewFile),
+            ShortcutCommand::CloseFile => self.update_file(FileMessage::CloseFile),
+            ShortcutCommand::CloseWindow => self.update_window(WindowMessage::CloseWindow),
             ShortcutCommand::OpenFile => self.update_file(FileMessage::OpenFile),
             ShortcutCommand::SaveFile => self.update_file(FileMessage::SaveFile),
             ShortcutCommand::SaveFileAs => self.update_file(FileMessage::SaveFileAs),
@@ -361,6 +371,68 @@ mod tests {
             text: None,
             repeat: false,
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn close_shortcuts_close_the_originating_managed_window() {
+        use crate::app::App;
+        use crate::app::windowing::managed::{AdvancedSearchWindow, ManagedWindow, SettingsWindow};
+        use futures::StreamExt;
+        use iced::event::Status;
+
+        for preferences in [false, true] {
+            for close_window in [false, true] {
+                let (mut app, _) = App::new();
+                let document = app.workspace.active_document_id();
+                app.workspace.active_document_mut().unwrap().mark_dirty();
+                let native = window::Id::unique();
+                if preferences {
+                    app.settings_window = Some(SettingsWindow::new(native));
+                } else {
+                    app.advanced_search_window = Some(AdvancedSearchWindow::new(native));
+                    app.advanced_search_owner = Some(app.workspace.current_window_id());
+                }
+                let modifiers = keyboard::Modifiers::COMMAND
+                    | if close_window {
+                        keyboard::Modifiers::SHIFT
+                    } else {
+                        keyboard::Modifiers::empty()
+                    };
+                let mut key = search_key(keyboard::key::Named::Escape, modifiers);
+                if let Event::Keyboard(keyboard::Event::KeyPressed {
+                    key, modified_key, ..
+                }) = &mut key
+                {
+                    *key = keyboard::Key::Character("w".into());
+                    *modified_key = keyboard::Key::Character("w".into());
+                }
+
+                let task = app.update_runtime_event(key, Status::Ignored, native);
+
+                let actions = futures::executor::block_on(async {
+                    iced_runtime::task::into_stream(task)
+                        .unwrap()
+                        .collect::<Vec<_>>()
+                        .await
+                });
+                assert!(matches!(
+                    actions.as_slice(),
+                    [iced_runtime::Action::Window(iced_runtime::window::Action::Close(id))]
+                        if *id == native
+                ));
+                assert_eq!(app.workspace.active_document_id(), document);
+                assert!(app.close_prompt.document().is_none());
+                assert_eq!(app.editor_windows.len(), 1);
+                assert_eq!(
+                    app.settings_window
+                        .map(|window| window.id())
+                        .or_else(|| app.advanced_search_window.map(|window| window.id())),
+                    Some(native),
+                    "the native Closed event removes the managed window"
+                );
+            }
+        }
     }
 
     #[test]

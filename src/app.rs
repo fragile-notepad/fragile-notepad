@@ -29,8 +29,11 @@ mod editor;
 mod editor_ops;
 mod events;
 mod files;
+mod focus;
 mod go_to_line;
 mod lifecycle;
+#[cfg(target_os = "macos")]
+mod macos;
 mod menu;
 mod outline;
 mod presentation;
@@ -47,6 +50,12 @@ mod update;
 mod windowing;
 
 pub use subscriptions::register_single_instance;
+
+/// Apply the application identity before AppKit creates the menu bar.
+pub fn initialize_platform() {
+    #[cfg(target_os = "macos")]
+    macos::initialize_name();
+}
 
 #[derive(Debug)]
 pub struct App {
@@ -177,6 +186,8 @@ impl App {
             .filter(|id| self.editor_id(*id).is_none())
             .or(self.main_window_id);
         let task = update::run(self, message);
+        #[cfg(target_os = "macos")]
+        macos::sync(self);
         let task = if let Some(id) = native {
             task.scope_window(id)
                 .map(move |message| Message::ForWindow(id, Box::new(message)))

@@ -247,6 +247,15 @@ where
             );
         }
 
+        fn quit_requested(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.process_event(
+                event_loop,
+                Event::EventLoopAwakened(winit::event::Event::PlatformSpecific(
+                    winit::event::PlatformSpecific::MacOS(winit::event::MacOS::QuitRequested),
+                )),
+            );
+        }
+
         fn reopened(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
             self.process_event(
                 event_loop,
@@ -374,10 +383,7 @@ where
                                     let _ = winit::tab_drag::follow_surface(
                                         &window,
                                         session.0,
-                                        winit::dpi::LogicalPosition::new(
-                                            f64::from(offset.x),
-                                            f64::from(offset.y),
-                                        ),
+                                        tab_drag::native_offset(offset, f64::from(scale_factor)),
                                     );
                                 }
 
@@ -448,6 +454,13 @@ where
                                     event_loop.set_allows_automatic_window_tabbing(_enabled);
                                 }
                             }
+                            Control::CancelQuit => {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    use winit::platform::macos::ActiveEventLoopExtMacOS;
+                                    event_loop.cancel_termination();
+                                }
+                            }
                         },
                         _ => {
                             break;
@@ -513,6 +526,7 @@ enum Control {
         scale_factor: f32,
     },
     SetAutomaticWindowTabbing(bool),
+    CancelQuit,
 }
 
 struct PendingBackendHandoff<C: Compositor> {
@@ -958,6 +972,7 @@ async fn run_instance<P>(
     let mut events = Vec::new();
     let mut messages = Vec::new();
     let mut actions = 0;
+    let mut pending_quit_request = false;
 
     let mut ui_caches = FxHashMap::default();
     let mut user_interfaces = ManuallyDrop::new(FxHashMap::default());
@@ -1235,6 +1250,19 @@ async fn run_instance<P>(
                         } else {
                             let _ =
                                 control_sender.start_send(Control::ChangeFlow(ControlFlow::Wait));
+                        }
+                    }
+                    event::Event::PlatformSpecific(event::PlatformSpecific::MacOS(
+                        event::MacOS::QuitRequested,
+                    )) => {
+                        if is_daemon {
+                            // Apply queued input before the application snapshots its
+                            // state in response to the native quit request.
+                            pending_quit_request = true;
+                        } else {
+                            control_sender
+                                .start_send(Control::Exit)
+                                .expect("Send control action");
                         }
                     }
                     event::Event::PlatformSpecific(event::PlatformSpecific::MacOS(
@@ -1853,6 +1881,7 @@ async fn run_instance<P>(
                         if awaiting_first_present_backend_handoff.is_none()
                             && events.is_empty()
                             && messages.is_empty()
+                            && !pending_quit_request
                             && window_manager.is_idle()
                         {
                             continue;
@@ -1977,6 +2006,14 @@ async fn run_instance<P>(
                             for (_id, window) in window_manager.iter_mut() {
                                 window.raw.request_redraw();
                             }
+                        }
+
+                        if std::mem::take(&mut pending_quit_request) {
+                            runtime.broadcast(subscription::Event::PlatformSpecific(
+                                subscription::PlatformSpecific::MacOS(
+                                    subscription::MacOS::QuitRequested,
+                                ),
+                            ));
                         }
 
                         if let Some(redraw_at) = window_manager.redraw_at() {
@@ -3603,6 +3640,11 @@ fn run_action<'a, P, C>(
             }
         },
         Action::System(action) => match action {
+            system::Action::CancelQuit => {
+                control_sender
+                    .start_send(Control::CancelQuit)
+                    .expect("Send control action");
+            }
             system::Action::GetInformation(_channel) => {
                 #[cfg(feature = "sysinfo")]
                 {

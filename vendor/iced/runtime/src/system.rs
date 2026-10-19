@@ -15,6 +15,9 @@ pub enum Action {
 
     /// Notify to the runtime that the system theme has changed.
     NotifyTheme(theme::Mode),
+
+    /// Refuse a pending native application quit request.
+    CancelQuit,
 }
 
 /// Contains information about the system (e.g. system name, processor, memory, graphics adapter).
@@ -55,6 +58,12 @@ pub fn information() -> Task<Information> {
 /// Returns the current system theme.
 pub fn theme() -> Task<theme::Mode> {
     task::oneshot(|sender| crate::Action::System(Action::GetTheme(sender)))
+}
+
+/// Cancels a pending native quit request after the application decides to stay
+/// open. This has no effect when no request is pending or outside macOS.
+pub fn cancel_quit<T>() -> Task<T> {
+    task::effect(crate::Action::System(Action::CancelQuit))
 }
 
 /// Subscribes to system theme changes.

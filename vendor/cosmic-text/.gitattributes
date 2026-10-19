@@ -1,0 +1,2 @@
+# Preserve upstream text fixtures, including CRLF and intentional whitespace.
+sample/* -text -whitespace

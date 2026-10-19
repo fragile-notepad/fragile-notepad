@@ -18,6 +18,8 @@ impl App {
 
         Subscription::batch([
             single_instance_subscription(),
+            macos_menu_subscription(),
+            event::listen_quit().map(|()| Message::NativeQuitRequested),
             event::listen_reopen().map(|()| Message::ApplicationReopened),
             iced::system::theme_changes().map(Message::SystemColorModeChanged),
             event::listen_with(shortcuts::event_to_message),
@@ -39,6 +41,17 @@ impl App {
             window::tab_drag::events().map(Message::TabDragEvent),
             chrome_animation,
         ])
+    }
+}
+
+fn macos_menu_subscription() -> Subscription<Message> {
+    #[cfg(target_os = "macos")]
+    {
+        super::macos::subscription()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Subscription::none()
     }
 }
 

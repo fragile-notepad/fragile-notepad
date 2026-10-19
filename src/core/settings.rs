@@ -507,45 +507,18 @@ impl EditorSettings {
         }
 
         if let Some(shortcuts) = child(root, "shortcuts") {
-            let mut shortcut_map = ShortcutMap::default();
-
-            for command in ShortcutCommand::ALL {
-                if let Some(node) = shortcuts
+            settings.shortcuts = ShortcutMap::from_persisted(
+                shortcuts
                     .children()
                     .filter(|node| node.has_tag_name("shortcut"))
-                    .find(|node| {
-                        node.attribute("command")
-                            .and_then(ShortcutCommand::from_key)
-                            == Some(command)
-                    })
-                {
-                    shortcut_map.set_unchecked(
-                        command,
-                        node.attribute("binding").and_then(KeyBinding::parse),
-                    );
-                }
-            }
-
-            // Defaults added after a settings file was written must not steal a
-            // binding that the user already assigned to another command.
-            for command in [ShortcutCommand::NewWindow, ShortcutCommand::Quit] {
-                let explicitly_assigned = shortcuts.children().any(|node| {
-                    node.has_tag_name("shortcut")
-                        && node.attribute("command") == Some(command.key())
-                });
-                if !explicitly_assigned
-                    && let Some(binding) = shortcut_map.binding(command)
-                    && shortcut_map.entries().iter().any(|entry| {
-                        entry.command != command
-                            && entry
-                                .binding
-                                .is_some_and(|candidate| candidate.matches(binding))
-                    })
-                {
-                    shortcut_map.clear(command);
-                }
-            }
-            settings.shortcuts = shortcut_map;
+                    .filter_map(|node| {
+                        Some((
+                            node.attribute("command")
+                                .and_then(ShortcutCommand::from_key)?,
+                            node.attribute("binding").and_then(KeyBinding::parse),
+                        ))
+                    }),
+            );
         }
 
         if let Some(open_history) = child(root, "open-history") {
@@ -851,6 +824,127 @@ mod multiwindow_settings_tests {
             assert_eq!(
                 reloaded.shortcuts.binding(ShortcutCommand::NewFile),
                 KeyBinding::parse(binding)
+            );
+        }
+    }
+
+    #[test]
+    fn default_close_shortcuts_are_exclusive_to_macos() {
+        for settings in [
+            EditorSettings::default(),
+            EditorSettings::from_xml_str("<fragile-notepad-settings />"),
+            EditorSettings::from_xml_str(
+                "<fragile-notepad-settings><shortcuts /></fragile-notepad-settings>",
+            ),
+        ] {
+            for (command, binding) in [
+                (ShortcutCommand::CloseFile, "primary+w"),
+                (ShortcutCommand::CloseWindow, "primary+shift+w"),
+            ] {
+                assert_eq!(
+                    settings.shortcuts.binding(command),
+                    cfg!(target_os = "macos").then(|| KeyBinding::parse(binding).unwrap()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_close_shortcuts_are_exclusive_to_macos() {
+        let settings = EditorSettings::from_xml_str(
+            r#"<fragile-notepad-settings><shortcuts>
+                <shortcut command="close_file" binding="primary+alt+w" />
+                <shortcut command="close_window" binding="primary+alt+shift+w" />
+            </shortcuts></fragile-notepad-settings>"#,
+        );
+        for (command, binding) in [
+            (ShortcutCommand::CloseFile, "primary+alt+w"),
+            (ShortcutCommand::CloseWindow, "primary+alt+shift+w"),
+        ] {
+            assert_eq!(
+                settings.shortcuts.binding(command),
+                cfg!(target_os = "macos").then(|| KeyBinding::parse(binding).unwrap())
+            );
+            assert_eq!(
+                ShortcutCommand::from_key(command.key()),
+                cfg!(target_os = "macos").then_some(command),
+            );
+            assert_eq!(
+                settings.to_xml_string().contains(command.key()),
+                cfg!(target_os = "macos"),
+            );
+        }
+        assert_eq!(
+            EditorSettings::from_xml_str(&settings.to_xml_string()).shortcuts,
+            settings.shortcuts,
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn macos_close_shortcuts_cannot_be_assigned_on_other_platforms() {
+        for command in [ShortcutCommand::CloseFile, ShortcutCommand::CloseWindow] {
+            let mut shortcuts = ShortcutMap::default();
+            let binding = KeyBinding::parse("primary+alt+w").unwrap();
+            shortcuts.set_binding(command, binding).unwrap();
+            assert_eq!(shortcuts.binding(command), None);
+            shortcuts.set_unchecked(command, Some(binding));
+            assert_eq!(shortcuts.command_for_binding(binding), None);
+            assert!(
+                shortcuts
+                    .entries()
+                    .iter()
+                    .all(|entry| entry.command != command)
+            );
+        }
+    }
+
+    #[test]
+    fn new_close_shortcuts_preserve_custom_w_bindings_and_round_trip() {
+        for (close_file_binding, close_window_binding) in [
+            ("primary+w", "primary+shift+w"),
+            if cfg!(target_os = "macos") {
+                ("logo+w", "logo+shift+w")
+            } else {
+                ("ctrl+w", "ctrl+shift+w")
+            },
+        ] {
+            let settings = EditorSettings::from_xml_str(&format!(
+                r#"<fragile-notepad-settings><shortcuts>
+                    <shortcut command="open_file" binding="{close_file_binding}" />
+                    <shortcut command="save_file" binding="{close_window_binding}" />
+                </shortcuts></fragile-notepad-settings>"#,
+            ));
+            let key = iced::keyboard::Key::Character("w".into());
+            for (command, binding, modifiers) in [
+                (
+                    ShortcutCommand::OpenFile,
+                    close_file_binding,
+                    iced::keyboard::Modifiers::COMMAND,
+                ),
+                (
+                    ShortcutCommand::SaveFile,
+                    close_window_binding,
+                    iced::keyboard::Modifiers::COMMAND | iced::keyboard::Modifiers::SHIFT,
+                ),
+            ] {
+                assert_eq!(
+                    settings.shortcuts.binding(command),
+                    KeyBinding::parse(binding)
+                );
+                assert_eq!(
+                    settings.shortcuts.resolve(&key, &key, modifiers),
+                    Some(command),
+                );
+            }
+            assert_eq!(settings.shortcuts.binding(ShortcutCommand::CloseFile), None);
+            assert_eq!(
+                settings.shortcuts.binding(ShortcutCommand::CloseWindow),
+                None
+            );
+            assert_eq!(
+                EditorSettings::from_xml_str(&settings.to_xml_string()).shortcuts,
+                settings.shortcuts,
             );
         }
     }

@@ -82,13 +82,18 @@ pub fn document_status_label<'a>(document: &Document, file_status: Option<&'a st
 }
 
 fn segment<'a>(label: impl Into<String>, width: f32) -> Element<'a, Message> {
-    container(text(label.into()).size(STATUS_TEXT_SIZE))
-        .padding([3, 6])
-        .height(22)
-        .width(Length::Fixed(width))
-        .center_y(22)
-        .style(styles::status_segment)
-        .into()
+    container(
+        text(label.into())
+            .size(STATUS_TEXT_SIZE)
+            .wrapping(text::Wrapping::None)
+            .ellipsis(text::Ellipsis::End),
+    )
+    .padding([3, 6])
+    .height(22)
+    .width(Length::Fixed(width))
+    .center_y(22)
+    .style(styles::status_segment)
+    .into()
 }
 
 #[derive(Debug)]
@@ -134,10 +139,15 @@ impl StatusSegment {
 fn status_bar_for_width<'a>(data: &StatusBarData, available_width: f32) -> Element<'a, Message> {
     let visible = visible_status_segments(available_width);
     let mut row = row![
-        container(text(data.path_or_title.clone()).size(STATUS_TEXT_SIZE))
-            .padding([3, 2])
-            .width(Fill)
-            .style(styles::status_path)
+        container(
+            text(data.path_or_title.clone())
+                .size(STATUS_TEXT_SIZE)
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::Middle),
+        )
+        .padding([3, 2])
+        .width(Fill)
+        .style(styles::status_path)
     ]
     .spacing(STATUS_SEGMENT_SPACING)
     .padding([2, 6])

@@ -197,7 +197,11 @@ impl App {
                 let auto_save = self.auto_save_before_switch(None);
                 self.workspace.create_untitled();
 
-                Task::batch([cancel, auto_save])
+                Task::batch([
+                    cancel,
+                    auto_save,
+                    iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+                ])
             }
             FileMessage::OpenFile => {
                 self.menu.close();

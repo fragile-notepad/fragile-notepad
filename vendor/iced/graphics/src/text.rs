@@ -3,6 +3,9 @@ pub mod cache;
 pub mod editor;
 pub mod paragraph;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 pub use cache::Cache;
 pub use editor::Editor;
 pub use paragraph::Paragraph;
@@ -435,12 +438,7 @@ pub fn font_system() -> &'static RwLock<FontSystem> {
         raw.db_mut().set_sans_serif_family("Fira Sans");
 
         #[cfg(target_os = "macos")]
-        {
-            #[cfg(not(feature = "fira-sans"))]
-            raw.db_mut().set_sans_serif_family(".SF NS");
-            raw.db_mut().set_serif_family("Times New Roman");
-            raw.db_mut().set_monospace_family("Menlo");
-        }
+        macos::configure(&mut raw);
 
         #[cfg(target_os = "windows")]
         {
@@ -593,9 +591,13 @@ pub fn align(
 
 /// Returns the attributes of the given [`Font`].
 pub fn to_attributes(font: Font) -> cosmic_text::Attrs<'static> {
+    let weight = to_weight(font.weight);
+    #[cfg(target_os = "macos")]
+    let weight = macos::ui_weight(font.family, weight);
+
     cosmic_text::Attrs::new()
         .family(to_family(font.family))
-        .weight(to_weight(font.weight))
+        .weight(weight)
         .stretch(to_stretch(font.stretch))
         .style(to_style(font.style))
 }
@@ -661,7 +663,9 @@ fn to_align(alignment: Alignment) -> Option<cosmic_text::Align> {
 pub fn to_shaping(shaping: Shaping, text: &str) -> cosmic_text::Shaping {
     match shaping {
         Shaping::Auto => {
-            if text.is_ascii() {
+            // San Francisco's proportional and variable faces need shaping
+            // for kerning and weight-correct advances, including ASCII UI.
+            if text.is_ascii() && !cfg!(target_os = "macos") {
                 cosmic_text::Shaping::Basic
             } else {
                 cosmic_text::Shaping::Advanced

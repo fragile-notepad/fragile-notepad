@@ -24,9 +24,12 @@ impl App {
 
     fn dispatch_application(&mut self, message: ApplicationMessage) -> Task<Message> {
         match message {
+            ApplicationMessage::NativeQuitRequested => self.native_quit_requested(),
             ApplicationMessage::ApplicationReopened => {
                 self.show_main_window(crate::ipc::ActivationRequest::default())
             }
+            #[cfg(target_os = "macos")]
+            ApplicationMessage::NativeMenuEdit(command) => super::macos::edit(command),
             ApplicationMessage::ForWindow(id, message) => {
                 self.update(Message::ForWindow(id, message))
             }

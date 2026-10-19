@@ -254,8 +254,13 @@ impl App {
         let snapshot = match document.bytes_for_save() {
             Ok(snapshot) => snapshot,
             Err(error) => {
+                let was_closing = self.files.pending_close_after_save == Some(document_id);
                 self.save_failed(document_id, FileError::Encoding(error));
-                return Task::none();
+                return if was_closing {
+                    self.focus_editor_after_close_prompt()
+                } else {
+                    Task::none()
+                };
             }
         };
 
@@ -350,6 +355,7 @@ impl App {
 
                 if !self.files.pending_close_documents.is_empty() {
                     tasks.push(self.continue_close());
+                    tasks.push(self.focus_editor_after_close_prompt());
                     return Task::batch(tasks);
                 }
 
@@ -363,6 +369,7 @@ impl App {
                 self.clear_close();
                 self.files.close_goal = CloseGoal::KeepOpen;
             }
+            tasks.push(self.focus_editor_after_close_prompt());
         }
 
         tasks.push(self.continue_auto_save());

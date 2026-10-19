@@ -1,7 +1,26 @@
 use super::test_support::*;
+use futures::{FutureExt, StreamExt};
 use iced::backend;
 use iced::event::{Event, Status};
 use iced::mouse;
+
+fn assert_cancel_restores_focus_without_exit(task: iced::Task<Message>, native: iced::window::Id) {
+    let mut actions =
+        iced_runtime::task::into_stream(task).expect("cancellation restores editor focus");
+    let mut restored_focus = false;
+    // Widget operations wait for the runtime to apply them before their task
+    // stream completes. Inspect emitted actions without waiting for that reply.
+    while let Some(Some(action)) = actions.next().now_or_never() {
+        match action {
+            iced_runtime::Action::WindowWidget(window, _) => {
+                assert_eq!(window, native);
+                restored_focus = true;
+            }
+            other => panic!("cancellation must only restore this window's focus, got {other:?}"),
+        }
+    }
+    assert!(restored_focus, "focus restoration must reach the runtime");
+}
 
 #[test]
 fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() {
@@ -604,7 +623,8 @@ fn cancel_exit_keeps_app_open() {
         DirtyCloseDecision::Cancel,
     ));
 
-    assert_eq!(task.units(), 0);
+    assert_cancel_restores_focus_without_exit(task, main_window);
+    assert!(!app.lifecycle.is_exiting());
     assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
     assert!(app.workspace.document(document_id).is_some());
 }
@@ -637,7 +657,10 @@ fn save_cancel_keeps_app_open() {
         Err(crate::services::types::FileError::DialogClosed),
     ));
 
-    assert_eq!(task.units(), 0);
+    assert_cancel_restores_focus_without_exit(task, main_window);
+    assert!(!app.lifecycle.is_exiting());
+    assert!(app.files.pending_save().is_none());
+    assert_eq!(app.files.pending_close_after_save(), None);
     assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
     assert!(app.workspace.document(document_id).is_some());
 }

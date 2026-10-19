@@ -378,7 +378,7 @@ fn command_availability_and_custom_shortcut_survive_menu_construction() {
     let document = Document::untitled(DocumentId::new(102));
     let items = entries(&document, &settings);
     assert!(
-        matches!(&items[0], MenuNode::Disabled { label, shortcut: Some(_) } if label == "Undo")
+        matches!(&items[0], MenuNode::Disabled { label, shortcut: Some(_), message: Some(Message::Undo) } if label == "Undo")
     );
     assert!(matches!(&items[1], MenuNode::Disabled { label, .. } if label == "Redo"));
     assert!(items.iter().any(|entry| matches!(

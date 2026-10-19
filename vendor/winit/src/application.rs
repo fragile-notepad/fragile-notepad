@@ -223,6 +223,15 @@ pub trait ApplicationHandler<T: 'static = ()> {
         let _ = event_loop;
     }
 
+    /// Emitted when macOS requests application termination through its menu or Dock.
+    ///
+    /// The default implementation exits the event loop. An application may override
+    /// this to save its state first or cancel termination, then call
+    /// [`ActiveEventLoop::exit`] once it is ready to quit.
+    fn quit_requested(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.exit();
+    }
+
     /// Emitted when the running application is reopened from the macOS Dock.
     fn reopened(&mut self, event_loop: &ActiveEventLoop) {
         let _ = event_loop;
@@ -295,6 +304,11 @@ impl<A: ?Sized + ApplicationHandler<T>, T: 'static> ApplicationHandler<T> for &m
     }
 
     #[inline]
+    fn quit_requested(&mut self, event_loop: &ActiveEventLoop) {
+        (**self).quit_requested(event_loop);
+    }
+
+    #[inline]
     fn reopened(&mut self, event_loop: &ActiveEventLoop) {
         (**self).reopened(event_loop);
     }
@@ -359,6 +373,11 @@ impl<A: ?Sized + ApplicationHandler<T>, T: 'static> ApplicationHandler<T> for Bo
     #[inline]
     fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
         (**self).memory_warning(event_loop);
+    }
+
+    #[inline]
+    fn quit_requested(&mut self, event_loop: &ActiveEventLoop) {
+        (**self).quit_requested(event_loop);
     }
 
     #[inline]

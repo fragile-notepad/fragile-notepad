@@ -28,7 +28,41 @@ const MENU_ITEMS: &[(Menu, &str)] = &[
     (Menu::Help, "?"),
 ];
 
-#[derive(Debug, Clone, Default)]
+/// The native macOS menu uses the same commands and availability as the
+/// in-window menu on other platforms.
+#[cfg(target_os = "macos")]
+pub(crate) fn native_menu_trees(
+    state: WindowMenuState,
+    settings: &EditorSettings,
+    document: Option<&Document>,
+) -> Vec<(&'static str, MenuTree)> {
+    MENU_ITEMS
+        .iter()
+        .map(|(kind, label)| {
+            let mut tree = menu_tree(*kind, state.clone(), settings);
+            apply_editor_availability(&mut tree.entries, document);
+            (if *kind == Menu::Help { "Help" } else { *label }, tree)
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn native_menu_availability(document: Option<&Document>) -> Vec<bool> {
+    ShortcutCommand::ALL
+        .into_iter()
+        .map(Message::Shortcut)
+        .chain([
+            Message::Delete,
+            Message::Uppercase,
+            Message::Lowercase,
+            Message::TrimTrailingSpaces,
+            Message::JoinLines,
+        ])
+        .map(|message| editor_command_available(&message, document))
+        .collect()
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WindowMenuState {
     pub open_window_count: usize,
     pub editor_windows: Vec<(iced::window::Id, String)>,
@@ -290,7 +324,12 @@ fn window_menu_entries(state: WindowMenuState, settings: &EditorSettings) -> Vec
             ShortcutCommand::NewWindow,
             Message::NewWindow,
         ),
-        menu::item("Close Window", Message::CloseWindow),
+        menu_item(
+            settings,
+            "Close Window",
+            ShortcutCommand::CloseWindow,
+            Message::CloseWindow,
+        ),
         menu::separator(),
         menu::item(
             "Move Selected Tabs to New Window",
@@ -374,7 +413,12 @@ fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
         menu::separator(),
         menu::item("Reload from Disk", Message::ReloadFromDisk),
         menu::separator(),
-        menu::item("Close", Message::CloseFile),
+        menu_item(
+            settings,
+            "Close",
+            ShortcutCommand::CloseFile,
+            Message::CloseFile,
+        ),
         menu::submenu(
             "close-scoped",
             "Close Tabs",
@@ -498,6 +542,7 @@ pub(super) fn apply_editor_availability(entries: &mut [MenuNode], document: Opti
                 *entry = MenuNode::Disabled {
                     label: label.clone(),
                     shortcut: shortcut.clone(),
+                    message: Some(message.clone()),
                 };
             }
             MenuNode::Submenu { children, .. } => apply_editor_availability(children, document),

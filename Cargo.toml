@@ -32,6 +32,11 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSCell", "NSEvent", "NSGraphicsContext", "NSMenu", "NSMenuItem", "NSResponder", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString", "NSThread"] }
+
 [dev-dependencies]
 iced_runtime = { path = "vendor/iced/runtime" }
 tiny-skia = "0.11"
@@ -47,3 +52,6 @@ LegalCopyright = "Copyright (c) 2026, Fragile Notepad authors"
 lto = "thin"
 panic = "abort"
 strip = true
+
+[patch.crates-io]
+cosmic-text = { path = "vendor/cosmic-text" }

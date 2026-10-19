@@ -21,6 +21,17 @@ pub(crate) fn custom_chrome(mut settings: window::Settings) -> window::Settings 
     {
         settings.platform_specific.undecorated_shadow = true;
     }
+    #[cfg(target_os = "macos")]
+    {
+        // A borderless NSWindow has square corners. Retain AppKit's native
+        // frame and let our caption occupy its full content area, so macOS
+        // supplies corner clipping, shadows, resizing, and fullscreen behavior.
+        settings.decorations = true;
+        settings.platform_specific.title_hidden = true;
+        settings.platform_specific.titlebar_buttons_hidden = true;
+        settings.platform_specific.titlebar_transparent = true;
+        settings.platform_specific.fullsize_content_view = true;
+    }
     settings
 }
 

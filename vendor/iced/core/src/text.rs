@@ -147,9 +147,9 @@ impl From<Alignment> for alignment::Horizontal {
 pub enum Shaping {
     /// Auto-detect the best shaping strategy from the text.
     ///
-    /// This strategy will use [`Basic`](Self::Basic) shaping if the
-    /// text consists of only ASCII characters; otherwise, it will
-    /// use [`Advanced`](Self::Advanced) shaping.
+    /// This strategy uses [`Advanced`](Self::Advanced) shaping on macOS to
+    /// preserve native font spacing. On other platforms, it uses
+    /// [`Basic`](Self::Basic) shaping for ASCII and `Advanced` otherwise.
     ///
     /// This is the default, if neither the `basic-shaping` nor `advanced-shaping`
     /// features are enabled.

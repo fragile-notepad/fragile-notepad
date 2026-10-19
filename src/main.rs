@@ -52,6 +52,9 @@ fn main() -> iced::Result {
         ipc::Startup::Secondary => return Ok(()),
     }
 
+    app::initialize_platform();
+    let ui_scale = startup::ui_scale_factor();
+
     iced::daemon(
         move || App::new_with_options(options.clone()),
         App::update,
@@ -61,6 +64,7 @@ fn main() -> iced::Result {
     .subscription(App::subscription)
     .title(App::title)
     .theme(App::theme)
+    .scale_factor(move |_, _| ui_scale)
     .run()
 }
 

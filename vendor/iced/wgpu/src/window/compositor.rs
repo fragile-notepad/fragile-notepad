@@ -6,6 +6,7 @@ use crate::graphics::color;
 use crate::graphics::compositor;
 use crate::graphics::{self, Antialiasing, Shell, Viewport};
 use crate::{Engine, Renderer};
+use std::sync::{Arc, OnceLock};
 
 /// A window graphics backend for iced powered by `wgpu`.
 pub struct Compositor {
@@ -32,6 +33,9 @@ pub enum Error {
     /// No device request succeeded.
     #[error("no device request succeeded: {0:?}")]
     RequestDeviceFailed(Vec<(wgpu::Limits, wgpu::RequestDeviceError)>),
+    /// The device could not initialize the renderer resources.
+    #[error("renderer initialization failed: {0}")]
+    EngineInitializationFailed(String),
 }
 
 impl From<Error> for backend::Error {
@@ -204,14 +208,15 @@ impl Compositor {
 
             match result {
                 Ok((device, queue)) => {
-                    let engine = Engine::new(
+                    let engine = initialize_engine(
                         &adapter,
                         device,
                         queue,
                         format,
                         settings.antialiasing,
                         shell,
-                    );
+                    )
+                    .await?;
 
                     return Ok(Compositor {
                         instance,
@@ -230,6 +235,53 @@ impl Compositor {
 
         Err(Error::RequestDeviceFailed(errors))
     }
+}
+
+/// Build renderer resources and collect failures before the compositor is exposed.
+async fn initialize_engine(
+    adapter: &wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    format: wgpu::TextureFormat,
+    antialiasing: Option<Antialiasing>,
+    shell: Shell,
+) -> Result<Engine, Error> {
+    // A lost device can produce invalid resources without a scoped error,
+    // followed by cascading validation errors.
+    let device_lost = Arc::new(OnceLock::new());
+    device.set_device_lost_callback({
+        let device_lost = Arc::clone(&device_lost);
+        move |reason, message| {
+            if reason != wgpu::DeviceLostReason::Destroyed {
+                let message = format!("device lost ({reason:?}): {message}");
+                log::error!("{message}");
+                let _ = device_lost.set(message);
+            }
+        }
+    });
+
+    let (engine, initialization_errors) = {
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let engine = Engine::new(adapter, device, queue, format, antialiasing, shell);
+
+        // Pop every thread-local scope before yielding to the executor, which
+        // may resume on another thread.
+        (engine, [internal.pop(), memory.pop(), validation.pop()])
+    };
+    let initialization_errors = futures::future::join_all(initialization_errors).await;
+    if let Some(error) = device_lost.get().cloned().or_else(|| {
+        initialization_errors
+            .into_iter()
+            .flatten()
+            .next()
+            .map(|error| error.to_string())
+    }) {
+        return Err(Error::EngineInitializationFailed(error));
+    }
+
+    Ok(engine)
 }
 
 /// Creates a [`Compositor`] with the given [`Settings`] and window.

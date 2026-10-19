@@ -118,6 +118,8 @@ pub enum PlatformSpecific {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MacOS {
     ReceivedUrl(String),
+    /// The user requested application termination through the native menu or Dock.
+    QuitRequested,
     /// The user reopened the running application from the Dock.
     Reopened,
 }

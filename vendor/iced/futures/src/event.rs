@@ -91,6 +91,20 @@ pub fn listen_url() -> Subscription<String> {
     })
 }
 
+/// Notifies when macOS requests application termination through its menu or Dock.
+/// A daemon can save its state or ask for confirmation, then explicitly exit
+/// the runtime when it is ready to quit.
+pub fn listen_quit() -> Subscription<()> {
+    #[derive(Hash)]
+    struct ListenQuit;
+    subscription::filter_map(ListenQuit, |event| match event {
+        subscription::Event::PlatformSpecific(subscription::PlatformSpecific::MacOS(
+            subscription::MacOS::QuitRequested,
+        )) => Some(()),
+        _ => None,
+    })
+}
+
 /// Notifies when a running macOS application is reopened from its Dock icon.
 /// A daemon can use this to create a new editor after its last window closed.
 pub fn listen_reopen() -> Subscription<()> {
@@ -102,4 +116,29 @@ pub fn listen_reopen() -> Subscription<()> {
         )) => Some(()),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::{FutureExt, StreamExt, stream};
+
+    #[test]
+    fn quit_subscription_filters_other_events_and_keeps_repeated_requests() {
+        let input = [
+            subscription::MacOS::Reopened,
+            subscription::MacOS::QuitRequested,
+            subscription::MacOS::ReceivedUrl("fragile://example".into()),
+            subscription::MacOS::QuitRequested,
+        ]
+        .map(|event| {
+            subscription::Event::PlatformSpecific(subscription::PlatformSpecific::MacOS(event))
+        });
+        let recipe = subscription::into_recipes(listen_quit()).pop().unwrap();
+        let mut output = recipe.stream(crate::boxed_stream(stream::iter(input)));
+
+        assert_eq!(output.next().now_or_never(), Some(Some(())));
+        assert_eq!(output.next().now_or_never(), Some(Some(())));
+        assert_eq!(output.next().now_or_never(), Some(None));
+    }
 }

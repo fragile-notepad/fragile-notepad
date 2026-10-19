@@ -1,7 +1,7 @@
 use iced::Font;
 use iced::advanced::graphics::text::cosmic_text::fontdb;
 use iced::advanced::{graphics, text};
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 use iced::font;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -13,11 +13,17 @@ use crate::editor::fold_projection::ProjectionFragment;
 use crate::editor::render::{RowRenderPlan, clipped_projection_fragments};
 use crate::editor::viewport::ViewportModel;
 
+#[cfg(target_os = "macos")]
+mod macos;
 mod profile;
+
+#[cfg(target_os = "macos")]
+pub(crate) use macos::editor_character_width;
 
 use profile::{FontProfile, font_weight_is_available};
 
 pub const EDITOR_TEXT_SHAPING: text::Shaping = text::Shaping::Auto;
+const FALLBACK_CHARACTER_WIDTH_RATIO: f32 = 0.55;
 
 const REGIONAL_LANGUAGES: [CjkLanguage; 4] = [
     CjkLanguage::SimplifiedChinese,
@@ -53,7 +59,9 @@ pub const EDITOR_FONT_ROUTE: EditorFontRoute = EditorFontRoute {
 
 #[cfg(target_os = "macos")]
 pub const EDITOR_FONT_ROUTE: EditorFontRoute = EditorFontRoute {
-    primary: Font::new("Menlo"),
+    // The renderer resolves this to the installed SF Mono family, with Menlo
+    // retained for older macOS releases. Previews use the same monospace route.
+    primary: Font::MONOSPACE,
     cjk_fallback_families: &[
         "Hiragino Sans",
         "Apple SD Gothic Neo",
@@ -82,6 +90,11 @@ pub const EDITOR_FONT_ROUTE: EditorFontRoute = EditorFontRoute {
 };
 
 pub const EDITOR_FONT: Font = EDITOR_FONT_ROUTE.primary;
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn editor_character_width(size: f32) -> f32 {
+    size * FALLBACK_CHARACTER_WIDTH_RATIO
+}
 
 /// A contiguous byte range rendered with one installed font family and weight.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,10 +285,17 @@ fn regional_font_routes() -> Arc<RegionalFontRoutes> {
     // increments this version, so newly available regional families take
     // effect without a process restart.
     let db = font_system.raw().db();
-    let profiles =
+    // Cross builds may embed a complete Noto collection because the build host
+    // has no Apple fonts. On macOS it must remain a fallback for the installed
+    // PingFang, Hiragino, and Apple SD Gothic families.
+    let collection = if cfg!(target_os = "macos") {
+        None
+    } else {
         coherent_font_collection(|family, weight| font_weight_is_available(db, family, weight))
-            .map(|fonts| fonts.map(FontProfile::regular))
-            .unwrap_or_else(|| native_font_routes(db).map(|font| FontProfile::resolve(db, font)));
+    };
+    let profiles = collection
+        .map(|fonts| fonts.map(FontProfile::regular))
+        .unwrap_or_else(|| native_font_routes(db).map(|font| FontProfile::resolve(db, font)));
     let routes = Arc::new(RegionalFontRoutes { version, profiles });
     *cache.write().expect("Write regional font cache") = Some(Arc::clone(&routes));
 

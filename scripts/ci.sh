@@ -5,6 +5,7 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
 cargo fmt --package fragile-notepad --check
+python3 -m unittest discover -s scripts -p test_check_package.py
 python3 -m unittest discover -s scripts -p 'test_*font_profiles.py'
 case "$(uname -s)" in
     Darwin) font_target_os=macos ;;

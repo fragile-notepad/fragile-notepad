@@ -112,6 +112,7 @@ These variables support development and profiling.
 | `FRAGILE_PERF_TRACE` | Presence enables CSV tracing when the output file can be opened; use `1` by convention. |
 | `FRAGILE_PERF_TRACE_DIR` | Trace directory; defaults to `target/perf`. Use a fresh directory per capture. |
 | `FRAGILE_NOTEPAD_STARTUP_PROBE` | Presence enables startup timing output, bypasses session restoration, and uses a process-specific instance identity. |
+| `FRAGILE_NOTEPAD_EXIT_AFTER_FRAME` | With startup timing enabled, exit after the first screenshot completes. Used by the package test. |
 | `FRAGILE_NOTEPAD_TITLE_BAR` | Debug builds only: `windows` or `macos` selects the window control style. |
 
 See [Test and profile rendering](../development/rendering.md) for trace capture,

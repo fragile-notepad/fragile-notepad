@@ -17,6 +17,7 @@ function Invoke-CiCommand {
 }
 
 Invoke-CiCommand -Command @("cargo", "fmt", "--package", "fragile-notepad", "--check")
+Invoke-CiCommand -Command @("python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_package.py")
 Invoke-CiCommand -Command @("python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*font_profiles.py")
 Invoke-CiCommand -Command @("python", "scripts/prepare_font_profiles.py", "--out-dir", "target/font-profiles/prepared", "--target-os", "windows", "--cache-dir", "target/font-profiles")
 & .\scripts\generate_icon_assets.ps1

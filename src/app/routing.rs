@@ -53,7 +53,11 @@ impl App {
             ApplicationMessage::StartupReady => self.startup_ready(),
             ApplicationMessage::StartupFrameReady => {
                 crate::startup::report_first_frame_ready();
-                Task::none()
+                if crate::startup::exit_after_first_frame() {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
             }
             ApplicationMessage::SessionLoaded(result) => self.session_loaded(result),
             ApplicationMessage::SessionRecoveryLoaded(loaded) => {

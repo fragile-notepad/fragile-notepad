@@ -105,6 +105,11 @@ pub fn startup_probe_enabled() -> bool {
     std::env::var_os(STARTUP_PROBE_ENV).is_some()
 }
 
+/// Package validation exits only after the first screenshot has completed.
+pub fn exit_after_first_frame() -> bool {
+    startup_probe_enabled() && std::env::var_os("FRAGILE_NOTEPAD_EXIT_AFTER_FRAME").is_some()
+}
+
 pub fn mark_startup_started() {
     let _ = STARTED_AT.set(Instant::now());
 }

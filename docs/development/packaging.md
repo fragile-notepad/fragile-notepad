@@ -40,6 +40,18 @@ See [Vendored dependencies](../../vendor/README.md) for dependency provenance an
 The [nightly workflow](../../.github/workflows/nightly.yml) defines the release
 targets, archive names, and exact copy and archive commands.
 
+## Test an archive
+
+With Python 3.12 or later and a graphical desktop session, run:
+
+```sh
+python scripts/check_package.py dist/fragile-notepad-windows-x64.zip
+```
+
+Use the archive for your platform. The script extracts it into temporary storage,
+checks the CLI, and requires the editor to render a frame and exit within 60
+seconds. Linux CI uses `xvfb-run -a`; macOS tests both launchers.
+
 ## Create a macOS package
 
 The macOS packaging script creates a command-line launcher, a Finder application

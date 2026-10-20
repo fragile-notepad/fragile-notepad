@@ -7,6 +7,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "1"
+  RUST_TEST_THREADS: "1"
 
 permissions:
   contents: write
@@ -104,6 +106,9 @@ jobs:
       - name: Test font preparation
         run: python -m unittest discover -s scripts -p 'test_*font_profiles.py'
 
+      - name: Test package validation tooling
+        run: python -m unittest discover -s scripts -p test_check_package.py
+
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -197,18 +202,18 @@ jobs:
         shell: bash
         run: |
           source scripts/setup-macos-vulkan.sh
-          cargo test
-          cargo check --no-default-features
+          cargo test --locked
+          cargo check --locked --no-default-features
 
       - name: Test Linux build
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          WINIT_UNIX_BACKEND=x11 xvfb-run -a cargo test
-          cargo check --no-default-features
+          WINIT_UNIX_BACKEND=x11 xvfb-run -a cargo test --locked
+          cargo check --locked --no-default-features
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --locked -j 1
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
@@ -249,6 +254,21 @@ jobs:
           mkdir -p dist
           bash scripts/package-macos.sh dist/package
           tar -C dist/package -czf "dist/${{ matrix.archive }}" .
+
+      - name: Test Windows release archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python scripts/check_package.py dist/${{ matrix.archive }}
+
+      - name: Test Linux release archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: WINIT_UNIX_BACKEND=x11 xvfb-run -a python scripts/check_package.py dist/${{ matrix.archive }}
+
+      - name: Test macOS release archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: python scripts/check_package.py dist/${{ matrix.archive }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

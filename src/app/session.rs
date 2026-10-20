@@ -3,10 +3,11 @@ use crate::core::session::{Session, SessionDocument, SessionWindow};
 use crate::core::{Document, DocumentId, DocumentLoadState};
 use crate::editor::{EditorBuffer, EditorPosition, EditorSelection};
 use crate::message::Message;
+use crate::services::session_store::{CapturedDocument, SessionSnapshot};
 use crate::services::types::FileLoadRequest;
 use crate::startup::StartupOptions;
 use iced::Task;
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 #[derive(Debug)]
 pub(super) struct SessionState {
@@ -20,7 +21,7 @@ pub(super) struct SessionState {
     read_failed: bool,
     saved: Option<Session>,
     paths: Vec<PathBuf>,
-    pending: HashMap<DocumentId, SessionDocument>,
+    pending: HashMap<DocumentId, Arc<SessionDocument>>,
     folds: HashMap<DocumentId, Vec<(usize, usize)>>,
 }
 
@@ -48,7 +49,7 @@ impl SessionState {
             return;
         };
         Self::apply_save_metadata(document, &entry);
-        document.restore_syntax(entry.syntax_token, entry.syntax_automatic);
+        document.restore_syntax(entry.syntax_token.clone(), entry.syntax_automatic);
         document.set_main_selection(EditorSelection::new(
             EditorPosition::new(entry.anchor_line, entry.anchor_column),
             EditorPosition::new(entry.cursor_line, entry.cursor_column),
@@ -61,7 +62,7 @@ impl SessionState {
             entry.horizontal_offset,
             !entry.collapsed_folds.is_empty() && document.can_run_full_document_analysis(),
         );
-        self.folds.insert(id, entry.collapsed_folds);
+        self.folds.insert(id, entry.collapsed_folds.clone());
     }
 
     pub(super) fn is_enabled(&self) -> bool {
@@ -109,7 +110,7 @@ impl SessionState {
 
     #[cfg(test)]
     pub(super) fn defer_document(&mut self, id: DocumentId, entry: SessionDocument) {
-        self.pending.insert(id, entry);
+        self.pending.insert(id, Arc::new(entry));
     }
 
     pub fn new(options: StartupOptions) -> Self {
@@ -183,7 +184,7 @@ impl App {
                     document.is_pinned = entry.is_pinned;
                     document.is_dirty = entry.is_dirty;
                     self.workspace.push_document(document);
-                    self.session.pending.insert(id, entry);
+                    self.session.pending.insert(id, Arc::new(entry));
                     ids.push(id);
                 }
                 let mut restored_windows = Vec::new();
@@ -330,7 +331,12 @@ impl App {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn snapshot_session(&self) -> Session {
+        self.capture_session().materialize()
+    }
+
+    pub(super) fn capture_session(&self) -> SessionSnapshot {
         let mut session = Session::default();
         session.version = 2;
         let document_indices: HashMap<_, _> = self
@@ -384,7 +390,7 @@ impl App {
             .iter()
             .position(|d| d.id == self.workspace.active_document_id())
             .unwrap_or(0);
-        session.documents = self
+        let documents = self
             .workspace
             .documents()
             .iter()
@@ -393,52 +399,57 @@ impl App {
                     && (matches!(document.load_state, DocumentLoadState::Deferred { .. })
                         || !document.is_dirty)
                 {
-                    let mut entry = pending.clone();
-                    entry.is_pinned = document.is_pinned;
-                    return entry;
+                    return CapturedDocument::Deferred(pending.clone(), document.is_pinned);
                 }
                 let selection = document.main_selection();
-                SessionDocument {
-                    path: document.path.clone(),
-                    disk_revision: document.disk_revision,
-                    text: ((document.has_complete_text_index()
-                        || matches!(document.load_state, DocumentLoadState::Failed { .. }))
-                        && (document.path.is_none() || document.is_dirty))
-                        .then(|| document.text()),
-                    encoding: document.encoding,
-                    had_decoding_errors: document.had_decoding_errors(),
-                    line_ending: document
-                        .line_ending
-                        .map(|ending| ending.as_str().to_owned()),
-                    is_pinned: document.is_pinned,
-                    is_dirty: document.is_dirty,
-                    anchor_line: selection.anchor.line,
-                    anchor_column: selection.anchor.column,
-                    cursor_line: selection.cursor.line,
-                    cursor_column: selection.cursor.column,
-                    first_visible_row: document.scroll.first_visible_row,
-                    first_visible_position: document
-                        .session_top_position()
-                        .map(|position| (position.line, position.column)),
-                    horizontal_offset: document.scroll.horizontal_px,
-                    syntax_token: Some(document.syntax_token.clone()),
-                    syntax_automatic: Some(document.syntax_is_automatic()),
-                    collapsed_folds: self
-                        .session
-                        .folds
-                        .get(&document.id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            document
-                                .folds
-                                .collapsed_ranges()
-                                .map(|r| (r.start_line, r.end_line))
-                                .collect()
-                        }),
-                }
+                let recovery = ((document.has_complete_text_index()
+                    || matches!(document.load_state, DocumentLoadState::Failed { .. }))
+                    && (document.path.is_none() || document.is_dirty))
+                    .then(|| document.buffer.snapshot_rope());
+                CapturedDocument::Live(
+                    Box::new(SessionDocument {
+                        path: document.path.clone(),
+                        disk_revision: document.disk_revision,
+                        text: None,
+                        encoding: document.encoding,
+                        had_decoding_errors: document.had_decoding_errors(),
+                        line_ending: document
+                            .line_ending
+                            .map(|ending| ending.as_str().to_owned()),
+                        is_pinned: document.is_pinned,
+                        is_dirty: document.is_dirty,
+                        anchor_line: selection.anchor.line,
+                        anchor_column: selection.anchor.column,
+                        cursor_line: selection.cursor.line,
+                        cursor_column: selection.cursor.column,
+                        first_visible_row: document.scroll.first_visible_row,
+                        first_visible_position: document
+                            .session_top_position()
+                            .map(|position| (position.line, position.column)),
+                        horizontal_offset: document.scroll.horizontal_px,
+                        syntax_token: Some(document.syntax_token.clone()),
+                        syntax_automatic: Some(document.syntax_is_automatic()),
+                        collapsed_folds: self
+                            .session
+                            .folds
+                            .get(&document.id)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                document
+                                    .folds
+                                    .collapsed_ranges()
+                                    .map(|r| (r.start_line, r.end_line))
+                                    .collect()
+                            }),
+                    }),
+                    recovery,
+                )
             })
             .collect();
-        session
+        SessionSnapshot {
+            layout: session,
+            documents,
+        }
     }
 
     pub(super) fn request_session_save(&mut self) -> Task<Message> {
@@ -457,7 +468,7 @@ impl App {
         self.session.dirty = false;
         self.session.saving = true;
         Task::perform(
-            crate::services::session_store::save_session(self.snapshot_session()),
+            crate::services::session_store::save_session(self.capture_session()),
             Message::SessionPersisted,
         )
     }

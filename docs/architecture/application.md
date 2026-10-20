@@ -102,6 +102,10 @@ active tabs, placement, and the last active editor. Version 1 restores into one
 editor. During dragging, snapshots retain the original layout together with
 current recovery text.
 
+Recovery captures Rope snapshots and prepares text on a worker. One writer
+preserves snapshot order. See the [session file reference](../reference/runtime-options.md#settings-and-session-files)
+for storage layout and limits.
+
 Explicit close operations capture document IDs before prompts or saves. Later
 focus and selection changes cannot redirect the operation. The final-window
 exit setting defaults to enabled; disabling it permits a daemon with no editor

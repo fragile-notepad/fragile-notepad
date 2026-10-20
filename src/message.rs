@@ -358,6 +358,7 @@ message_catalog! {
         StartupReady => Defer,
         StartupFrameReady => Defer,
         SessionLoaded(arg0: Result<Option<crate::core::session::Session>, String>) => Defer,
+        SessionRecoveryLoaded(arg0: crate::services::session_store::LoadedSession) => Defer,
         SessionFlush => Defer,
         SessionPersisted(arg0: Result<(), String>) => Defer,
         ShutdownPersisted(arg0: Result<(), String>) => Resolve,

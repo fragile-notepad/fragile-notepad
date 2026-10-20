@@ -38,6 +38,14 @@ Change preferences through **Settings > Preferences...**. Settings use
 `settings.xml`; session recovery uses `session.json` in the same configuration
 directory.
 
+Recovery text is stored in `session.chunks/` in chunks of up to 8 MiB.
+The `session.json` manifest allows 16 MiB and 100,000 chunk references;
+legacy inline sessions allow 256 MiB. Restoration needs enough available RAM.
+If the latest snapshot is damaged, the editor tries `session.previous.json`
+and warns that recent edits may be missing. Damaged manifests are retained as
+`session.unreadable.json`. To clear recovery, close the editor and remove these
+three JSON files and `session.chunks/` together.
+
 | Platform | Configuration directory |
 | --- | --- |
 | Windows | `%APPDATA%\FragileNotepad\` |

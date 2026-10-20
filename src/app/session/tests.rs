@@ -14,6 +14,37 @@ fn ready(saved: Session) -> App {
 }
 
 #[test]
+fn previous_recovery_notice_is_visible_and_allows_new_snapshots() {
+    let (mut app, _) = App::new_with_options(StartupOptions::default());
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::SessionRecoveryLoaded(
+        crate::services::session_store::LoadedSession {
+            session: Some(Session {
+                documents: vec![SessionDocument {
+                    text: Some("previous recovery".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            warning: Some("Recovered previous snapshot; recent edits may be missing".into()),
+        },
+    ));
+    let _ = app.update(Message::StartupReady);
+    assert_eq!(
+        app.workspace.active_document().unwrap().text(),
+        "previous recovery"
+    );
+    assert!(
+        app.file_status
+            .as_deref()
+            .unwrap()
+            .contains("recent edits may be missing")
+    );
+    assert!(!app.session.read_failed());
+    assert!(app.capture_session().materialize().validate().is_ok());
+}
+
+#[test]
 fn decoding_errors_survive_dirty_recovery_and_block_overwrite() {
     let session = Session {
         documents: vec![SessionDocument {

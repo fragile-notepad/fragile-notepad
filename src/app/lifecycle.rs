@@ -118,7 +118,7 @@ impl App {
         self.lifecycle.begin_shutdown();
         let settings = (!self.settings_persistence.read_failed())
             .then(|| settings_store::save_settings(self.settings.clone()));
-        let session = crate::services::session_store::save_session(self.snapshot_session());
+        let session = crate::services::session_store::save_session(self.capture_session());
         let preserve_settings = self.settings_persistence.read_failed();
         Task::perform(
             async move {

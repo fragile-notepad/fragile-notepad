@@ -56,6 +56,13 @@ impl App {
                 Task::none()
             }
             ApplicationMessage::SessionLoaded(result) => self.session_loaded(result),
+            ApplicationMessage::SessionRecoveryLoaded(loaded) => {
+                let task = self.session_loaded(Ok(loaded.session));
+                if let Some(warning) = loaded.warning {
+                    self.file_status = Some(warning);
+                }
+                task
+            }
             ApplicationMessage::SessionFlush => self.flush_session(),
             ApplicationMessage::SessionPersisted(result) => self.session_persisted(result),
             ApplicationMessage::ShutdownPersisted(result) => self.shutdown_persisted(result),

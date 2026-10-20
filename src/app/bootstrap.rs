@@ -77,7 +77,10 @@ impl App {
         let session_task = if app.session.is_enabled() {
             Task::perform(
                 crate::services::session_store::load_session(),
-                Message::SessionLoaded,
+                |result| match result {
+                    Ok(loaded) => Message::SessionRecoveryLoaded(loaded),
+                    Err(error) => Message::SessionLoaded(Err(error)),
+                },
             )
         } else {
             Task::none()

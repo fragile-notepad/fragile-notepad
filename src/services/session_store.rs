@@ -1,27 +1,94 @@
-//! Ordered, atomic session recovery persistence.
+//! Ordered recovery manifests with bounded, content-addressed text chunks.
 
-use crate::core::Session;
+use crate::core::{Session, SessionDocument};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::AsyncReadExt;
 
-const MAX_SESSION_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_SESSION_BYTES: u64 = 256 * 1024 * 1024; // Legacy inline JSON only.
+const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+const CHUNK_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CHUNKS: usize = 100_000;
+
+pub(crate) enum CapturedDocument {
+    Deferred(Arc<SessionDocument>, bool),
+    Live(Box<SessionDocument>, Option<ropey::Rope>),
+}
+
+/// Text shares the editor's immutable Rope nodes until a worker materializes it.
+pub(crate) struct SessionSnapshot {
+    pub layout: Session,
+    pub documents: Vec<CapturedDocument>,
+}
+
+impl SessionSnapshot {
+    pub(crate) fn materialize(&self) -> Session {
+        let mut session = self.layout.clone();
+        session.documents = self
+            .documents
+            .iter()
+            .map(|document| match document {
+                CapturedDocument::Deferred(entry, pinned) => {
+                    let mut entry = (**entry).clone();
+                    entry.is_pinned = *pinned;
+                    entry
+                }
+                CapturedDocument::Live(entry, rope) => {
+                    let mut entry = (**entry).clone();
+                    entry.text = rope.as_ref().map(ToString::to_string);
+                    entry
+                }
+            })
+            .collect();
+        session
+    }
+}
+
+impl From<Session> for SessionSnapshot {
+    fn from(mut session: Session) -> Self {
+        let documents = std::mem::take(&mut session.documents)
+            .into_iter()
+            .map(|entry| {
+                let pinned = entry.is_pinned;
+                CapturedDocument::Deferred(Arc::new(entry), pinned)
+            })
+            .collect();
+        Self {
+            layout: session,
+            documents,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Manifest {
+    storage_version: u32,
+    session: Session,
+    recovery: Vec<Option<Vec<String>>>,
+}
+
+struct Prepared {
+    manifest: Manifest,
+    encoded: Vec<u8>,
+    texts: Vec<Option<String>>,
+}
 
 #[derive(Default)]
 struct SessionWriter {
-    pending: Mutex<(u64, Option<Arc<Session>>)>,
+    pending: Mutex<(u64, Option<Arc<SessionSnapshot>>)>,
     writing: tokio::sync::Mutex<()>,
 }
 
 impl SessionWriter {
-    fn enqueue(&self, session: Session) -> Result<(), String> {
-        session.validate()?;
+    fn enqueue(&self, session: impl Into<SessionSnapshot>) -> Result<(), String> {
         let mut pending = self
             .pending
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         pending.0 = pending.0.wrapping_add(1);
-        pending.1 = Some(Arc::new(session));
+        pending.1 = Some(Arc::new(session.into()));
         Ok(())
     }
 
@@ -33,13 +100,14 @@ impl SessionWriter {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
-            let (generation, Some(session)) = snapshot else {
+            let (generation, Some(snapshot)) = snapshot else {
                 return Ok(());
             };
-            let bytes = encode(&session)?;
-            super::atomic_write::write_private(path, &bytes)
-                .await
-                .map_err(|error| error.to_string())?;
+            let prepared =
+                tokio::task::spawn_blocking(move || prepare(snapshot.materialize(), CHUNK_BYTES))
+                    .await
+                    .map_err(|error| error.to_string())??;
+            publish(path, &prepared, CHUNK_BYTES).await?;
             let mut pending = self
                 .pending
                 .lock()
@@ -62,11 +130,43 @@ fn session_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Session storage is unavailable".into())
 }
 
-pub async fn load_session() -> Result<Option<Session>, String> {
-    load_from(&session_path()?).await
+#[derive(Debug, Clone)]
+pub struct LoadedSession {
+    pub session: Option<Session>,
+    pub warning: Option<String>,
 }
 
-pub fn save_session(session: Session) -> impl Future<Output = Result<(), String>> {
+pub async fn load_session() -> Result<LoadedSession, String> {
+    load_with_fallback(&session_path()?).await
+}
+
+async fn load_with_fallback(path: &Path) -> Result<LoadedSession, String> {
+    match load_from(path).await {
+        Ok(Some(session)) => Ok(LoadedSession {
+            session: Some(session),
+            warning: None,
+        }),
+        current => match load_from(&previous_path(path)).await {
+            Ok(Some(session)) => Ok(LoadedSession {
+                session: Some(session),
+                warning: Some(format!(
+                    "Recovered the previous session snapshot; latest recovery is unavailable ({}). Recent edits may be missing. Original recovery files were preserved.",
+                    current
+                        .err()
+                        .unwrap_or_else(|| "latest snapshot missing".into())
+                )),
+            }),
+            _ => current.map(|session| LoadedSession {
+                session,
+                warning: None,
+            }),
+        },
+    }
+}
+
+pub(crate) fn save_session(
+    session: impl Into<SessionSnapshot>,
+) -> impl Future<Output = Result<(), String>> {
     let queued = writer().enqueue(session);
     async move {
         queued?;
@@ -78,257 +178,321 @@ pub async fn flush_session() -> Result<(), String> {
     writer().flush(&session_path()?).await
 }
 
-async fn load_from(path: &Path) -> Result<Option<Session>, String> {
+fn previous_path(path: &Path) -> PathBuf {
+    path.with_extension("previous.json")
+}
+fn chunks_path(path: &Path) -> PathBuf {
+    path.with_extension("chunks")
+}
+
+async fn read_limited(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
     let file = match tokio::fs::File::open(path).await {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
     let mut bytes = Vec::new();
-    file.take(MAX_SESSION_BYTES + 1)
+    file.take(limit + 1)
         .read_to_end(&mut bytes)
         .await
         .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_SESSION_BYTES {
-        return Err("Session exceeds the 256 MiB recovery limit".into());
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "Recovery file exceeds its {} MiB limit; previous recovery is preserved. Save large documents explicitly.",
+            limit / (1024 * 1024)
+        ));
     }
-    let session: Session =
-        serde_json::from_slice(&bytes).map_err(|error| format!("Invalid session: {error}"))?;
-    session.validate()?;
-    Ok(Some(session))
+    Ok(Some(bytes))
 }
 
-fn encode(session: &Session) -> Result<Vec<u8>, String> {
-    struct LimitedOutput(Vec<u8>);
+async fn load_from(path: &Path) -> Result<Option<Session>, String> {
+    let Some(bytes) = read_limited(path, MAX_SESSION_BYTES).await? else {
+        return Ok(None);
+    };
+    let root = chunks_path(&if path.extension().is_some_and(|ext| ext == "json")
+        && path
+            .file_stem()
+            .is_some_and(|stem| stem.to_string_lossy().ends_with(".previous"))
+    {
+        path.with_extension("").with_extension("json")
+    } else {
+        path.to_owned()
+    });
+    tokio::task::spawn_blocking(move || decode(&bytes, &root, CHUNK_BYTES))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
+}
+
+fn decode(bytes: &[u8], root: &Path, chunk_bytes: usize) -> Result<Session, String> {
+    decode_snapshot(bytes, root, chunk_bytes, true)
+}
+
+/// Verification keeps only one bounded chunk and a UTF-8 boundary tail in RAM.
+fn decode_snapshot(
+    bytes: &[u8],
+    root: &Path,
+    chunk_bytes: usize,
+    restore_text: bool,
+) -> Result<Session, String> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|error| format!("Invalid session: {error}"))?;
+    if value.get("storage_version").is_none() {
+        let session: Session = serde_json::from_value(value).map_err(|error| error.to_string())?;
+        session.validate()?;
+        return Ok(session);
+    }
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err("Recovery manifest exceeds the 16 MiB limit".into());
+    }
+    let manifest: Manifest = serde_json::from_value(value).map_err(|error| error.to_string())?;
+    if manifest.storage_version != 1
+        || manifest.recovery.len() != manifest.session.documents.len()
+        || manifest
+            .recovery
+            .iter()
+            .flatten()
+            .map(Vec::len)
+            .sum::<usize>()
+            > MAX_CHUNKS
+    {
+        return Err("Invalid recovery manifest version or document/chunk count".into());
+    }
+    let mut session = manifest.session;
+    // Validate layout/counts before touching text. An empty placeholder records
+    // the existence of recovery data without allocating the document contents.
+    for (entry, recovery) in session.documents.iter_mut().zip(&manifest.recovery) {
+        if entry.text.is_some() {
+            return Err("Recovery manifest contains inline text".into());
+        }
+        entry.text = recovery.as_ref().map(|_| String::new());
+    }
+    session.validate()?;
+    for (entry, recovery) in session.documents.iter_mut().zip(manifest.recovery) {
+        if let Some(hashes) = recovery {
+            let mut text = Vec::new();
+            let mut utf8_tail = Vec::new();
+            for hash in hashes {
+                if !valid_hash(&hash) {
+                    return Err("Invalid recovery chunk name".into());
+                }
+                use std::io::Read;
+                let file = std::fs::File::open(root.join(&hash))
+                    .map_err(|error| format!("Recovery chunk {hash}: {error}"))?;
+                let mut bytes = Vec::new();
+                file.take(chunk_bytes as u64 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                if bytes.len() > chunk_bytes || blake3::hash(&bytes).to_hex().as_str() != hash {
+                    return Err(format!("Recovery chunk {hash} failed integrity validation"));
+                }
+                if restore_text {
+                    text.len()
+                        .checked_add(bytes.len())
+                        .ok_or_else(|| "Recovery text size overflow".to_string())?;
+                    text.try_reserve(bytes.len()).map_err(|error| format!("Not enough memory to restore recovery text: {error}. Recovery files were preserved."))?;
+                    text.extend_from_slice(&bytes);
+                } else {
+                    utf8_tail.extend_from_slice(&bytes);
+                    match std::str::from_utf8(&utf8_tail) {
+                        Ok(_) => utf8_tail.clear(),
+                        Err(error) if error.error_len().is_none() => {
+                            utf8_tail = utf8_tail[error.valid_up_to()..].to_vec();
+                        }
+                        Err(error) => return Err(format!("Invalid recovery text: {error}")),
+                    }
+                }
+            }
+            if !utf8_tail.is_empty() {
+                return Err("Incomplete UTF-8 recovery text".into());
+            }
+            entry.text = Some(String::from_utf8(text).map_err(|error| error.to_string())?);
+        }
+    }
+    session.validate()?;
+    Ok(session)
+}
+
+fn valid_hash(hash: &str) -> bool {
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn prepare(mut session: Session, chunk_bytes: usize) -> Result<Prepared, String> {
+    session.validate()?;
+    let texts: Vec<_> = session
+        .documents
+        .iter_mut()
+        .map(|entry| entry.text.take())
+        .collect();
+    let recovery: Vec<_> = texts
+        .iter()
+        .map(|text| {
+            text.as_ref().map(|text| {
+                text.as_bytes()
+                    .chunks(chunk_bytes)
+                    .map(|bytes| blake3::hash(bytes).to_hex().to_string())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    if recovery.iter().flatten().map(Vec::len).sum::<usize>() > MAX_CHUNKS {
+        return Err("Session exceeds the 100,000 recovery chunk limit; previous recovery is preserved. Save large documents explicitly.".into());
+    }
+    let manifest = Manifest {
+        storage_version: 1,
+        session,
+        recovery,
+    };
+    let encoded = encode_limited(&manifest, MAX_MANIFEST_BYTES)?;
+    Ok(Prepared {
+        manifest,
+        encoded,
+        texts,
+    })
+}
+
+async fn publish(path: &Path, prepared: &Prepared, chunk_bytes: usize) -> Result<(), String> {
+    let root = chunks_path(path);
+    let mut directory = tokio::fs::DirBuilder::new();
+    directory.recursive(true);
+    #[cfg(unix)]
+    directory.mode(0o700);
+    directory
+        .create(&root)
+        .await
+        .map_err(|error| error.to_string())?;
+    let check_root = root.clone();
+    let hashes: HashSet<_> = prepared
+        .manifest
+        .recovery
+        .iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect();
+    let mut written = tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        hashes
+            .into_iter()
+            .filter(|hash| {
+                let Ok(file) = std::fs::File::open(check_root.join(hash)) else {
+                    return false;
+                };
+                let mut bytes = Vec::new();
+                file.take(chunk_bytes as u64 + 1)
+                    .read_to_end(&mut bytes)
+                    .is_ok()
+                    && bytes.len() <= chunk_bytes
+                    && blake3::hash(&bytes).to_hex().as_str() == hash
+            })
+            .collect::<HashSet<_>>()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    for (text, hashes) in prepared.texts.iter().zip(&prepared.manifest.recovery) {
+        if let (Some(text), Some(hashes)) = (text, hashes) {
+            for (bytes, hash) in text.as_bytes().chunks(chunk_bytes).zip(hashes) {
+                if written.contains(hash) {
+                    continue;
+                }
+                super::atomic_write::write_private(&root.join(hash), bytes)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                written.insert(hash.clone());
+            }
+        }
+    }
+    let previous = previous_path(path);
+    // Only rotate a fully validated snapshot. A corrupt current manifest is
+    // retained separately as evidence instead of overwriting good recovery.
+    if let Some(bytes) = read_limited(path, MAX_SESSION_BYTES).await? {
+        let original = bytes.clone();
+        let check_root = root.clone();
+        let valid = tokio::task::spawn_blocking(move || {
+            decode_snapshot(&bytes, &check_root, CHUNK_BYTES, false)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .is_ok();
+        let destination = if valid {
+            previous.clone()
+        } else {
+            path.with_extension("unreadable.json")
+        };
+        super::atomic_write::write_private(&destination, &original)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    super::atomic_write::write_private(path, &prepared.encoded)
+        .await
+        .map_err(|error| error.to_string())?;
+    // Cleanup is best effort after commit. Keep chunks from the last valid
+    // manifest and any damaged evidence until the user removes that evidence.
+    let evidence = path.with_extension("unreadable.json");
+    if !tokio::fs::try_exists(evidence).await.unwrap_or(true) {
+        let mut keep: HashSet<String> = prepared
+            .manifest
+            .recovery
+            .iter()
+            .flatten()
+            .flatten()
+            .cloned()
+            .collect();
+        if let Ok(Some(bytes)) = read_limited(&previous, MAX_SESSION_BYTES).await
+            && let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes)
+        {
+            keep.extend(manifest.recovery.into_iter().flatten().flatten());
+        }
+        if let Ok(mut entries) = tokio::fs::read_dir(&root).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let name = entry.file_name();
+                if let Some(name) = name.to_str()
+                    && valid_hash(name)
+                    && !keep.contains(name)
+                {
+                    let _ = tokio::fs::remove_file(entry.path()).await;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn encode_limited(value: &impl Serialize, limit: u64) -> Result<Vec<u8>, String> {
+    struct LimitedOutput {
+        bytes: Vec<u8>,
+        limit: u64,
+    }
     impl std::io::Write for LimitedOutput {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if self.0.len().saturating_add(bytes.len()) as u64 > MAX_SESSION_BYTES {
+            if self.bytes.len().saturating_add(bytes.len()) as u64 > self.limit {
                 return Err(std::io::Error::other(
-                    "Session exceeds the 256 MiB recovery limit",
+                    "Recovery metadata exceeds its capacity; previous recovery is preserved. Save documents explicitly.",
                 ));
             }
-            self.0.extend_from_slice(bytes);
+            self.bytes.extend_from_slice(bytes);
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    let mut output = LimitedOutput(Vec::new());
-    serde_json::to_writer(&mut output, session).map_err(|error| error.to_string())?;
-    Ok(output.0)
+    let mut output = LimitedOutput {
+        bytes: Vec::new(),
+        limit,
+    };
+    serde_json::to_writer(&mut output, value).map_err(|error| error.to_string())?;
+    Ok(output.bytes)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::{SessionDocument, SessionWindow, TextEncoding};
-
-    fn remove_empty_test_directory(directory: PathBuf) {
-        for attempt in 0..20 {
-            match std::fs::remove_dir(&directory) {
-                Ok(()) => return,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::DirectoryNotEmpty && attempt < 19 =>
-                {
-                    // Windows may keep a recently removed file delete-pending.
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(error) => panic!("remove empty test directory: {error}"),
-            }
-        }
-    }
-
-    fn test_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "fragile-session-{name}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-    }
-    fn session(text: &str) -> Session {
-        Session {
-            documents: vec![SessionDocument {
-                path: Some(PathBuf::from("\u{6587}\u{4ef6}.txt")),
-                text: Some(text.into()),
-                is_dirty: true,
-                is_pinned: true,
-                encoding: TextEncoding::Utf16LeBom,
-                line_ending: Some("\r\n".into()),
-                cursor_column: 2,
-                horizontal_offset: 3.5,
-                syntax_token: Some("rs".into()),
-                collapsed_folds: vec![(1, 3)],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn roundtrip_and_reverse_polling_keep_latest_session() {
-        let directory = test_dir("ordered");
-        let path = directory.join("session.json");
-        let writer = SessionWriter::default();
-        writer.enqueue(session("old")).unwrap();
-        let old = writer.flush(&path);
-        let latest = session("hello \u{4e16}\u{754c}\r\n");
-        writer.enqueue(latest.clone()).unwrap();
-        let new = writer.flush(&path);
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let (a, b) = futures::join!(new, old);
-            a.unwrap();
-            b.unwrap();
-            assert_eq!(load_from(&path).await.unwrap(), Some(latest));
-        });
-        std::fs::remove_file(path).unwrap();
-        remove_empty_test_directory(directory);
-    }
-
-    #[test]
-    fn malformed_and_unknown_versions_are_rejected_without_changing_file() {
-        let directory = test_dir("invalid");
-        std::fs::create_dir(&directory).unwrap();
-        let path = directory.join("session.json");
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            for bytes in [
-                b"not json".as_slice(),
-                br#"{"version":3,"documents":[],"active_index":0}"#,
-                br#"{"version":2,"documents":[],"active_index":0,"windows":[{}]}"#,
-            ] {
-                std::fs::write(&path, bytes).unwrap();
-                assert!(load_from(&path).await.is_err(), "{bytes:?}");
-                assert_eq!(std::fs::read(&path).unwrap(), bytes);
-            }
-        });
-        std::fs::remove_file(path).unwrap();
-        remove_empty_test_directory(directory);
-    }
-
-    #[test]
-    fn legacy_and_multiwindow_sessions_load_without_changing_file() {
-        let directory = test_dir("versions");
-        std::fs::create_dir(&directory).unwrap();
-        let path = directory.join("session.json");
-        let mut multiwindow = session("first window");
-        multiwindow.version = 2;
-        multiwindow
-            .documents
-            .extend(session("second window").documents);
-        multiwindow.windows = vec![
-            SessionWindow {
-                document_indices: vec![0],
-                ..Default::default()
-            },
-            SessionWindow {
-                document_indices: vec![1],
-                ..Default::default()
-            },
-        ];
-        multiwindow.focused_window = Some(1);
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            for expected in [
-                Session::default(),
-                session("legacy recovery"),
-                Session {
-                    version: 2,
-                    ..Default::default()
-                },
-                multiwindow,
-            ] {
-                let bytes = encode(&expected).unwrap();
-                std::fs::write(&path, &bytes).unwrap();
-                assert_eq!(load_from(&path).await.unwrap(), Some(expected));
-                assert_eq!(std::fs::read(&path).unwrap(), bytes);
-            }
-        });
-        std::fs::remove_file(path).unwrap();
-        remove_empty_test_directory(directory);
-    }
-
-    #[test]
-    fn native_paths_and_invalid_metadata() {
-        let mut value = session("recovery");
-        #[cfg(windows)]
-        {
-            use std::os::windows::ffi::OsStringExt;
-            value.documents[0].path = Some(PathBuf::from(std::ffi::OsString::from_wide(&[
-                0x61, 0xd800, 0x62,
-            ])));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStringExt;
-            value.documents[0].path = Some(PathBuf::from(std::ffi::OsString::from_vec(vec![
-                b'a', 0xff, b'b',
-            ])));
-        }
-        assert_eq!(
-            serde_json::from_slice::<Session>(&encode(&value).unwrap()).unwrap(),
-            value
-        );
-        value.documents[0].text = None;
-        assert!(value.validate().is_err());
-        value.documents[0].text = Some(String::new());
-        value.documents[0].horizontal_offset = f32::NAN;
-        assert!(value.validate().is_err());
-    }
-
-    #[test]
-    fn failed_write_retains_snapshot_for_retry() {
-        let directory = test_dir("retry");
-        std::fs::write(&directory, b"block directory creation").unwrap();
-        let path = directory.join("session.json");
-        let writer = SessionWriter::default();
-        let expected = session("unsaved text");
-        writer.enqueue(expected.clone()).unwrap();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            assert!(writer.flush(&path).await.is_err());
-            std::fs::remove_file(&directory).unwrap();
-            writer.flush(&path).await.unwrap();
-            assert_eq!(load_from(&path).await.unwrap(), Some(expected));
-        });
-        std::fs::remove_file(path).unwrap();
-        remove_empty_test_directory(directory);
-    }
-
-    #[test]
-    fn language_provenance_roundtrips_and_legacy_sessions_remain_readable() {
-        for automatic in [None, Some(true), Some(false)] {
-            let mut saved = session("fn main() {}");
-            saved.documents[0].syntax_automatic = automatic;
-            let bytes = encode(&saved).unwrap();
-            let restored: Session = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(restored, saved);
-        }
-        let mut legacy = serde_json::to_value(session("fn main() {}")).unwrap();
-        legacy["documents"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("syntax_automatic");
-        let restored: Session = serde_json::from_value(legacy).unwrap();
-        assert_eq!(restored.documents[0].syntax_automatic, None);
-    }
-
-    #[test]
-    fn a_new_snapshot_during_a_write_is_flushed_before_completion() {
-        let directory = test_dir("inflight");
-        let path = directory.join("session.json");
-        let writer = SessionWriter::default();
-        writer.enqueue(session("old")).unwrap();
-        let expected = session("new");
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let mut in_flight = Box::pin(writer.flush(&path));
-            assert!(futures::poll!(&mut in_flight).is_pending());
-            assert!(writer.writing.try_lock().is_err());
-            writer.enqueue(expected.clone()).unwrap();
-            in_flight.await.unwrap();
-            assert_eq!(load_from(&path).await.unwrap(), Some(expected));
-        });
-        std::fs::remove_file(path).unwrap();
-        remove_empty_test_directory(directory);
-    }
+fn encode(session: &Session) -> Result<Vec<u8>, String> {
+    encode_limited(session, MAX_SESSION_BYTES)
 }
+
+#[cfg(test)]
+#[path = "session_store_tests.rs"]
+mod tests;

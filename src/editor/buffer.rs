@@ -43,6 +43,11 @@ impl EditorBuffer {
         self.rope.to_string()
     }
 
+    /// Cheap immutable text snapshot for background persistence.
+    pub(crate) fn snapshot_rope(&self) -> Rope {
+        self.rope.clone()
+    }
+
     pub fn chunks(&self) -> impl Iterator<Item = &str> {
         self.rope.chunks()
     }

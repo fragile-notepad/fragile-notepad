@@ -1,15 +1,26 @@
-# Syntax configuration
+[Documentation](../../docs/README.md)
 
-[`outline-parsers.xml`](outline-parsers.xml) configures the function list and
-navigation; [`folding-hints.xml`](folding-hints.xml) configures folding. Changes
-require rebuilding. These rules recognize structure rather than full grammars;
-source ranges use UTF-8 byte offsets with exclusive ends.
+# Syntax configuration reference
+
+The application embeds these XML files at compile time. Rebuild after changing
+them. The rules recognize language structure for navigation and folding; source
+ranges use UTF-8 byte offsets with exclusive ends.
+
+| File | Purpose |
+| --- | --- |
+| [outline-parsers.xml](outline-parsers.xml) | Function list and declaration navigation |
+| [folding-hints.xml](folding-hints.xml) | Code folding |
+
+Use the bundled language rules as examples. The
+[outline schema](../../src/editor/outline/schema.rs),
+[compiler](../../src/editor/outline/compiler.rs), and
+[registry](../../src/editor/outline/registry.rs) implement the configuration.
 
 ## Families and bodies
 
-A language selects `use-family`; adapter names are validated metadata.
-`delimiter` pairs match outside comments/literals; brace bodies add their pair.
-`syntax-token` elements specify a `role` and one-character `value`:
+A language selects its family with `use-family`. Adapter names are validated
+metadata. `delimiter` pairs match outside comments and literals; brace bodies add
+their pair. A `syntax-token` element specifies a `role` and one-character `value`.
 
 | Roles | Purpose |
 | --- | --- |
@@ -45,7 +56,7 @@ member names. List attributes are comma-separated.
 | `line-skip-pattern` | `value` regex consumes directive lines at their first significant position, including continuations |
 | `opaque-block` | `prefix-pattern`, balanced `open`/`close`; shields bodies after comment/string masking |
 
-Unterminated literals stay shielded through EOF. Regex context represents closed
+Unterminated literals stay shielded through the end of the file. Regex context represents closed
 control conditions as keyword + `()`, completed blocks as owner + `{}`, and
 members with their prefix. Use the bundled language rules as examples.
 
@@ -68,7 +79,7 @@ and callable filters. Language `signature-modifiers` includes preceding modifier
 | `nextline-body` | Permit bodies after newline terminators |
 | `expression-body` | Marker for a body ending on the declaration line |
 
-## Member lists and cache
+## Member lists
 
 `members kind="enum-member" within="enum"` lists variants/constants. `separator`
 splits top-level entries; `terminator` stops before methods. Nested arguments stay
@@ -81,7 +92,17 @@ Pair `generic-open-pattern` (prefix through opener) with `generic-suffix-pattern
 distinguish generics from comparisons/shifts. Unrecognized members recover at the
 next separator.
 
-Empty delimiters, invalid/empty-matching patterns, missing name captures, and
-incomplete generic configurations produce diagnostics; invalid lexical rules
-exclude the language. `outline-registry.xml` caches plans and rebuilds when
-source hashes or structure fail validation.
+## Validation and cache
+
+Empty delimiters, invalid or empty-matching patterns, missing name captures, and
+incomplete generic configurations produce diagnostics. Invalid lexical rules
+exclude the language.
+
+`outline-registry.xml` caches compiled plans. The registry rebuilds the cache
+when source hashes or its structure fail validation.
+
+## Related documentation
+
+- [Application architecture](../../docs/architecture/application.md)
+- [Build the application](../../docs/development/building.md)
+- [Testing](../../docs/development/testing.md)

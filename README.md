@@ -7,14 +7,24 @@
 
 <p align="center">
   <a href="https://github.com/fragile-notepad/fragile-notepad/releases"><strong>Download</strong></a>
-  &nbsp; · &nbsp; <a href="#build-from-source">Build</a>
-  &nbsp; · &nbsp; <a href="#documentation">Documentation</a>
+  &nbsp; · &nbsp; <a href="docs/getting-started.md">Get started</a>
+  &nbsp; · &nbsp; <a href="docs/README.md">Documentation</a>
+  &nbsp; · &nbsp; <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center">
-  A desktop text editor for notes and source files, built with Rust and <a href="https://iced.rs">Iced</a>.<br>
-  Windows · Linux · experimental macOS
-</p>
+# Fragile Notepad
+
+Fragile Notepad is a desktop text editor for notes and source files, built with
+Rust and [Iced](https://iced.rs). It supports Windows and Linux, with experimental
+macOS support.
+
+## Get started
+
+Download an archive from [Releases](https://github.com/fragile-notepad/fragile-notepad/releases),
+extract it, and follow the [getting started guide](docs/getting-started.md).
+To build the editor, see [Build from source](docs/development/building.md).
+
+## Screenshots
 
 **Windows** · Dark appearance
 
@@ -35,49 +45,23 @@
 
 ## Build from source
 
-<details>
-<summary>Requirements and commands</summary>
-
-Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build tools;
-Linux packages are listed in [CI](.github/workflows/ci.yml). Use `python3` on Unix.
-
-```sh
-git clone https://github.com/fragile-notepad/fragile-notepad.git
-cd fragile-notepad
-python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
-```
-
-Generate assets for your platform:
-
-| Platform | Command |
-| --- | --- |
-| Windows (PowerShell) | `.\scripts\generate_icon_assets.ps1` |
-| Linux / macOS | `bash scripts/generate_icon_assets.sh` |
-
-Then launch the editor:
-
-```sh
-cargo run --release --locked
-```
-
-The first build may download fonts. Regenerate assets after SVG changes.
-Add `--no-default-features` for software-only rendering; see
-[Vulkan setup](VULKAN_RENDERING.md#runtime-and-maintenance) for GPU requirements,
-including macOS runtime setup.
-
-</details>
+The [build guide](docs/development/building.md) covers prerequisites, generated
+assets, platform dependencies, and software-only builds.
 
 ## Checks
 
-Run `.\scripts\ci.ps1` on Windows or `bash scripts/ci.sh` on Unix to generate assets,
-check formatting, run tests, and check the software-only build.
+Use the [testing guide](docs/development/testing.md) to select focused checks or
+run the full validation scripts.
 
 ## Documentation
 
-- [Packaging and macOS app bundles](PACKAGING.md)
-- [Optional file-manager integrations](components/README.md)
-- [Rendering design and diagnostics](SEAMLESS_HYBRID_RENDERING.md)
-- [Application architecture](src/app/README.md)
+| Goal | Guide |
+| --- | --- |
+| Install and open files | [Get started](docs/getting-started.md) |
+| Find a guide or reference | [Documentation index](docs/README.md) |
+| Change the editor | [Contributing](CONTRIBUTING.md) |
+| Create a release archive | [Packaging](docs/development/packaging.md) |
+| Understand the implementation | [Application architecture](docs/architecture/application.md) |
 
 ## License
 
@@ -86,5 +70,7 @@ their upstream licenses. Original [colored icons](assets/icons/colored/LICENSE)
 and [illustrations](assets/illustrations/LICENSE), including rasters and reproductions,
 are **all rights reserved** and excluded from the code license.
 Other bundled icons retain their MIT licenses; see [artwork notices](assets/icons/NOTICE.txt).
+The [file-type icon collection](assets/icons/file-types/LICENSE) has separate
+artwork and third-party terms.
 
 Generative AI was used throughout development.

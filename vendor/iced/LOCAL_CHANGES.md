@@ -1,7 +1,10 @@
 # Local Iced changes
 
-Base: `ddd7c42a9ba625b219e5e8062ff9be83eea467c5`.
-Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
+These patches adapt Iced to Fragile Notepad's rendering and window workflows.
+
+- Base revision: `ddd7c42a9ba625b219e5e8062ff9be83eea467c5`
+- Upstream: https://github.com/iced-rs/iced
+- License: [MIT](LICENSE)
 
 ## Backports
 
@@ -45,7 +48,7 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 
 - Join adjacent compatible quad runs and text groups after layer merging,
   preserving transformation, clip, and cached-text ordering boundaries.
-- Explicit cached-layer tokens and paint keys, with a 32 MiB per-window GPU
+- Provide explicit cached-layer tokens and paint keys, with a 32 MiB per-window GPU
   surface budget and ordinary clipped drawing on software. Cached surfaces
   share the window's image atlas and the engine's pipelines; nested caches,
   unsupported targets, and oversized allocations draw live.
@@ -67,6 +70,11 @@ Upstream: https://github.com/iced-rs/iced. License: [MIT](LICENSE).
 - Software rounded quads honor pixel-grid snapping after scaling and translation,
   keeping fold placeholder backgrounds inside their painted bounds.
 
-Details: [hybrid rendering](../../SEAMLESS_HYBRID_RENDERING.md),
-[Vulkan resources](../../VULKAN_RENDERING.md),
-[update process](../README.md#updates).
+## Related documentation
+
+- [Documentation index](../../docs/README.md)
+- [Rendering architecture](../../docs/architecture/rendering.md)
+- [Vulkan renderer](../../docs/architecture/vulkan.md)
+- [Rendering development](../../docs/development/rendering.md)
+- [Testing](../../docs/development/testing.md)
+- [Dependency update process](../README.md#updates)

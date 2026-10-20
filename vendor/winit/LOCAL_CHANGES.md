@@ -1,7 +1,12 @@
 # Local winit changes
 
-Base: `48116469f15d3bc52b5e56bb516694be8882870d`.
-Upstream: https://github.com/iced-rs/winit. License: [Apache-2.0](LICENSE).
+These patches support continuous tab gestures and native window lifecycle events.
+
+- Base revision: `48116469f15d3bc52b5e56bb516694be8882870d`
+- Upstream: https://github.com/iced-rs/winit
+- License: [Apache-2.0](LICENSE)
+
+## Tab gestures
 
 - Add a cancellable tab-gesture pointer API. Windows retains native pointer
   capture and samples the physical button without a blocking move loop or
@@ -17,13 +22,23 @@ Upstream: https://github.com/iced-rs/winit. License: [Apache-2.0](LICENSE).
 - Toplevel attachment can be requested before first presentation. Compositors
   without the extension retain data-device transfer between existing windows;
   the application offers an explicit Move to New Window fallback.
-
-No upstream source or license files were omitted; `.git` metadata is excluded.
-
 - Delay the compositor data-device request until the existing press moves ten
   logical pixels. A tiny shared-memory tab preview remains visible on fallback
   compositors. Native source terminal events govern release and cancellation.
 - Implement Wayland hide/unmap and configure-gated show/remap, suppressing hidden
   redraws so docking releases the protocol attachment before another tear-off.
+
+## Window lifecycle
+
 - Forward macOS Dock reopening through the application handler and Iced event
   subscription, allowing an editor daemon to reopen after the last window closes.
+
+## Source preservation
+
+No upstream source or license files were omitted; `.git` metadata is excluded.
+
+## Related documentation
+
+- [Documentation index](../../docs/README.md)
+- [Local Iced changes](../iced/LOCAL_CHANGES.md)
+- [Dependency update process](../README.md#updates)

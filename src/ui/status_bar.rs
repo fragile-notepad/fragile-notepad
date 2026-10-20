@@ -1,4 +1,4 @@
-use iced::widget::{container, responsive, row, space, text};
+use iced::widget::{container, responsive, row, space, text, tooltip};
 use iced::{Center, Element, Fill, Length};
 
 use crate::core::{Document, EditorSettings};
@@ -74,6 +74,8 @@ pub fn document_status_label<'a>(document: &Document, file_status: Option<&'a st
         "indexing"
     } else if let Some(file_status) = file_status {
         file_status
+    } else if document.had_decoding_errors() {
+        "Decoding errors"
     } else if document.is_dirty {
         "Modified"
     } else {
@@ -155,9 +157,16 @@ fn status_bar_for_width<'a>(data: &StatusBarData, available_width: f32) -> Eleme
 
     for segment_kind in visible {
         row = row.push(match segment_kind {
-            StatusSegment::DocumentStatus => {
-                segment(data.document_status.clone(), segment_kind.width())
-            }
+            StatusSegment::DocumentStatus => tooltip(
+                segment(data.document_status.clone(), segment_kind.width()),
+                container(text(data.document_status.clone()).size(STATUS_TEXT_SIZE))
+                    .padding([8, 10])
+                    .max_width(480)
+                    .style(styles::utility_card),
+                tooltip::Position::Top,
+            )
+            .delay(std::time::Duration::from_millis(450))
+            .into(),
             StatusSegment::Cursor => segment(data.cursor.clone(), segment_kind.width()),
             StatusSegment::Selection => segment(data.selection.clone(), segment_kind.width()),
             StatusSegment::LineCount => segment(data.line_count.clone(), segment_kind.width()),
@@ -216,6 +225,19 @@ mod tests {
     use super::{StatusSegment, cursor_display_column, visible_status_segments};
     use crate::core::{Document, DocumentId};
     use crate::editor::{EditorPosition, EditorSelection};
+
+    #[test]
+    fn decoding_warning_remains_after_transient_file_status_clears() {
+        let document = Document::from_decoded(
+            DocumentId::new(1),
+            "malformed.txt",
+            crate::core::decode_bytes(b"\xef\xbb\xbfhello\xff"),
+        );
+        assert_eq!(
+            super::document_status_label(&document, None),
+            "Decoding errors"
+        );
+    }
 
     #[test]
     fn cursor_display_column_uses_unicode_and_configured_tab_stops() {

@@ -76,7 +76,13 @@ fn save_file_with_dialog(
     async move {
         let picked_file = dialog.save_file().await.ok_or(FileError::DialogClosed)?;
         let path = picked_file.path().to_owned();
-        save_picked_file(path, contents, options.original_file).await
+        save_picked_file(
+            path,
+            contents,
+            options.original_file,
+            options.protect_original,
+        )
+        .await
     }
 }
 
@@ -84,6 +90,7 @@ pub(super) async fn save_picked_file(
     path: PathBuf,
     contents: Vec<u8>,
     original: Option<(PathBuf, Option<crate::core::FileRevision>)>,
+    protect_original: bool,
 ) -> FileSaveResult {
     if let Some((original_path, revision)) = original {
         let same_path = std::path::absolute(&original_path)? == std::path::absolute(&path)?;
@@ -95,6 +102,9 @@ pub(super) async fn save_picked_file(
             _ => false,
         };
         if same_path || same_target {
+            if protect_original {
+                return Err(FileError::DecodingErrors);
+            }
             return save_file_if_unchanged(path, contents, revision).await;
         }
     }

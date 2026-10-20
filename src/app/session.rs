@@ -27,6 +27,7 @@ pub(super) struct SessionState {
 impl SessionState {
     fn apply_save_metadata(document: &mut Document, entry: &SessionDocument) {
         if entry.text.is_some() {
+            document.set_had_decoding_errors(entry.had_decoding_errors);
             document.disk_revision = entry.disk_revision;
             document.encoding = entry.encoding;
             document.line_ending = entry
@@ -405,6 +406,7 @@ impl App {
                         && (document.path.is_none() || document.is_dirty))
                         .then(|| document.text()),
                     encoding: document.encoding,
+                    had_decoding_errors: document.had_decoding_errors(),
                     line_ending: document
                         .line_ending
                         .map(|ending| ending.as_str().to_owned()),

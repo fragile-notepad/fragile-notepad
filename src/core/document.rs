@@ -118,6 +118,9 @@ pub struct Document {
     cjk_context: RefCell<CjkContextCache>,
     pub line_ending: Option<LineEnding>,
     pub encoding: TextEncoding,
+    /// Decoding replaced source bytes. Protect the source until a lossless reload
+    /// or a successful Save As to a different file.
+    had_decoding_errors: bool,
     pub load_state: DocumentLoadState,
     pub index_state: DocumentIndexState,
     pub defer_analysis: bool,
@@ -167,6 +170,7 @@ impl Document {
             SyntaxTokenSource::Auto,
         );
         document.encoding = decoded.encoding;
+        document.had_decoding_errors = decoded.had_errors;
         document
     }
 
@@ -256,6 +260,7 @@ impl Document {
             cjk_context: RefCell::new(CjkContextCache::default()),
             line_ending,
             encoding: TextEncoding::Utf8,
+            had_decoding_errors: false,
             load_state: DocumentLoadState::Complete,
             index_state: DocumentIndexState::Complete,
             defer_analysis: false,
@@ -447,6 +452,7 @@ impl Document {
         self.is_dirty = false;
         self.line_ending = detect_line_ending(text);
         self.encoding = decoded.encoding;
+        self.set_had_decoding_errors(decoded.had_errors);
         self.load_state = DocumentLoadState::Complete;
         self.index_state = DocumentIndexState::Complete;
         self.refresh_after_text_change();
@@ -547,6 +553,17 @@ impl Document {
         if self.encoding != encoding {
             self.encoding = encoding;
             self.mark_dirty();
+        }
+    }
+
+    pub fn had_decoding_errors(&self) -> bool {
+        self.had_decoding_errors
+    }
+
+    pub fn set_had_decoding_errors(&mut self, had_errors: bool) {
+        if self.had_decoding_errors != had_errors {
+            self.had_decoding_errors = had_errors;
+            self.metadata_revision = self.metadata_revision.wrapping_add(1);
         }
     }
 

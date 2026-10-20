@@ -31,6 +31,11 @@ To compile the editor instead, follow [Build from source](development/building.m
    **File > New**, enter text, and save it to a path.
 3. Use **File > Save As...** to save under another name.
 
+**Decoding errors** means some bytes could not be read using the selected encoding.
+Saving to the original file and autosave are blocked. Reopen with the correct
+encoding from the **Encoding** menu, or use **File > Save As...** to save the
+displayed text to a different file.
+
 You can also pass file paths on the command line. These examples run from the
 extracted archive directory.
 

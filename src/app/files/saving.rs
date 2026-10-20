@@ -16,6 +16,7 @@ fn save_dialog_options(document: &Document) -> SaveFileDialogOptions {
             .path
             .clone()
             .map(|path| (path, document.disk_revision)),
+        protect_original: document.had_decoding_errors(),
         ..Default::default()
     };
     if !document.uses_syntax_highlighting() {
@@ -73,7 +74,10 @@ impl App {
             .workspace
             .document(document_id)
             .is_some_and(|document| {
-                document.is_dirty && document.path.is_some() && document.has_complete_text_index()
+                document.is_dirty
+                    && document.path.is_some()
+                    && document.has_complete_text_index()
+                    && !document.had_decoding_errors()
             });
         if !eligible {
             return Task::none();
@@ -100,6 +104,7 @@ impl App {
                     document.is_dirty
                         && document.path.is_some()
                         && document.has_complete_text_index()
+                        && !document.had_decoding_errors()
                 });
             if !eligible {
                 continue;
@@ -251,6 +256,15 @@ impl App {
             self.file_status = Some(String::from("Reload the file successfully before saving."));
             return Task::none();
         }
+        if !force_save_as && document.had_decoding_errors() {
+            let was_closing = self.files.pending_close_after_save == Some(document_id);
+            self.save_failed(document_id, FileError::DecodingErrors);
+            return if was_closing {
+                self.focus_editor_after_close_prompt()
+            } else {
+                Task::none()
+            };
+        }
         let snapshot = match document.bytes_for_save() {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -313,6 +327,7 @@ impl App {
                 let saved_path = path.clone();
                 if let Some(document) = self.workspace.document_mut(request.document_id) {
                     document.set_path(path);
+                    document.set_had_decoding_errors(false);
                     document.disk_revision =
                         Some(crate::core::FileRevision::from_bytes(&request.snapshot));
                     let saved_snapshot_is_current = document
@@ -426,6 +441,86 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decoding_error_app() -> (App, crate::app::tests::test_support::TestFile) {
+        let original = b"\xef\xbb\xbfhello\xff";
+        let file = crate::app::tests::test_support::TestFile::new(original);
+        let mut app = App::new().0;
+        app.workspace
+            .insert_decoded_file(file.0.clone(), crate::core::decode_bytes(original));
+        app.workspace.active_document_mut().unwrap().disk_revision =
+            Some(crate::core::FileRevision::from_bytes(original));
+        (app, file)
+    }
+
+    #[test]
+    fn decoding_errors_block_save_auto_save_and_save_all() {
+        let (mut app, file) = decoding_error_app();
+        let id = app.workspace.active_document_id();
+        app.settings.auto_save = true;
+        app.workspace.active_document_mut().unwrap().mark_dirty();
+        let _ = app.queue_auto_save(id);
+        assert!(app.files.pending_auto_saves.is_empty());
+        assert!(app.files.pending_save.is_none());
+
+        // Recheck queued work too: a load may have finished after queueing.
+        app.files.pending_auto_saves.push_back(id);
+        let _ = app.continue_auto_save();
+        assert!(app.files.pending_save.is_none());
+        let _ = app.save_active(false);
+        assert!(app.files.pending_save.is_none());
+        assert!(
+            app.file_status
+                .as_deref()
+                .unwrap()
+                .contains("decoding errors")
+        );
+        let _ = app.save_all_documents();
+        assert!(app.files.pending_save_all.is_empty());
+        assert!(app.files.pending_save.is_none());
+        assert!(app.workspace.active_document().unwrap().is_dirty);
+        assert_eq!(
+            std::fs::read(file.0.clone()).unwrap(),
+            b"\xef\xbb\xbfhello\xff"
+        );
+    }
+
+    #[test]
+    fn decoding_save_as_protection_clears_only_after_successful_save() {
+        let (mut app, _file) = decoding_error_app();
+        let id = app.workspace.active_document_id();
+        assert!(save_dialog_options(app.workspace.active_document().unwrap()).protect_original);
+        let _ = app.save_active(true);
+        let request = app.files.pending_save.clone().unwrap();
+        let _ = app.save_done(request, Err(FileError::DialogClosed));
+        assert!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .had_decoding_errors()
+        );
+
+        let _ = app.save_copy_active();
+        let request = app.files.pending_save.clone().unwrap();
+        let _ = app.save_copy_done(request, Ok("copy.txt".into()));
+        assert!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .had_decoding_errors()
+        );
+
+        let _ = app.save_active(true);
+        let request = app.files.pending_save.clone().unwrap();
+        let _ = app.save_done(request, Ok("other.txt".into()));
+        let document = app.workspace.document(id).unwrap();
+        assert!(!document.had_decoding_errors());
+        assert!(!document.is_dirty);
+        assert_eq!(
+            document.path.as_deref(),
+            Some(std::path::Path::new("other.txt"))
+        );
+    }
 
     #[test]
     fn language_save_dialog_suggests_extension_and_filter() {

@@ -384,6 +384,33 @@ fn loaded_utf8_bom_document_strips_marker_from_editor_text_and_saves_it_back() {
 }
 
 #[test]
+fn decoding_protection_survives_cleaning_and_conversion_until_lossless_reload() {
+    let mut document = Document::from_decoded(
+        DocumentId::new(8),
+        fixture_path("malformed.txt"),
+        decode_bytes(b"\xef\xbb\xbfhello\xff"),
+    );
+    assert!(document.had_decoding_errors());
+    document.mark_clean();
+    document.set_encoding(TextEncoding::Utf16LeBom);
+    assert!(document.had_decoding_errors());
+
+    let generation = fragile_notepad::core::DocumentLoadGeneration::next();
+    document.load_state = fragile_notepad::core::DocumentLoadState::Loading {
+        generation,
+        bytes_read: 0,
+        total_bytes: None,
+    };
+    assert!(!document.complete_loading(
+        fragile_notepad::core::DocumentLoadGeneration::next(),
+        decode_bytes(b"clean")
+    ));
+    assert!(document.had_decoding_errors());
+    assert!(document.complete_loading(generation, decode_bytes(b"clean")));
+    assert!(!document.had_decoding_errors());
+}
+
+#[test]
 fn changing_encoding_to_utf8_bom_marks_document_dirty_and_adds_marker_on_save() {
     let mut document = Document::from_path(DocumentId::new(9), fixture_path("note.txt"), "hello");
 

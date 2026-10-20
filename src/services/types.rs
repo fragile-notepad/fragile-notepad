@@ -18,6 +18,8 @@ pub struct SaveFileDialogOptions {
     pub file_name: Option<String>,
     pub filter: Option<SaveFileDialogFilter>,
     pub original_file: Option<(PathBuf, Option<FileRevision>)>,
+    /// Lossy decoding must never overwrite the original through Save As/copy.
+    pub protect_original: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +98,7 @@ pub enum FileError {
     Encoding(EncodingError),
     FileChanged,
     UnknownFileRevision,
+    DecodingErrors,
 }
 
 impl FileError {
@@ -109,6 +112,9 @@ impl FileError {
             }
             Self::UnknownFileRevision => {
                 "cannot verify the file on disk; use Save As to save to a different file"
+            }
+            Self::DecodingErrors => {
+                "decoding errors; use Save As to save to a different file, or reopen with the correct encoding"
             }
         }
     }

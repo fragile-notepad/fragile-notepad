@@ -191,7 +191,8 @@ mod tests {
                 super::super::file_dialogs::save_picked_file(
                     alias,
                     b"editor contents".to_vec(),
-                    source.clone()
+                    source.clone(),
+                    false,
                 )
                 .await,
                 Err(FileError::FileChanged)
@@ -201,11 +202,57 @@ mod tests {
                 copy.clone(),
                 b"editor contents".to_vec(),
                 source,
+                false,
             )
             .await
             .unwrap();
             assert_eq!(fs::read(&file.0).unwrap(), b"external");
             assert_eq!(fs::read(copy).unwrap(), b"editor contents");
+        });
+    }
+
+    #[test]
+    fn decoding_errors_protect_original_in_save_as_and_copy() {
+        let file = TestFile::new();
+        let malformed = b"\xef\xbb\xbfhello\xff";
+        fs::write(&file.0, malformed).unwrap();
+        run(async {
+            let opened = load_file(file.0.clone()).await.unwrap();
+            assert!(opened.contents.had_errors);
+            let document = crate::core::Document::from_decoded(
+                crate::core::DocumentId::new(1),
+                file.0.clone(),
+                opened.contents.as_ref().clone(),
+            );
+            let contents = document.bytes_for_save().unwrap();
+            let source = Some((file.0.clone(), Some(opened.disk_revision)));
+            for target in [
+                file.0.clone(),
+                file.0.parent().unwrap().join(".").join("document.txt"),
+            ] {
+                assert_eq!(
+                    super::super::file_dialogs::save_picked_file(
+                        target,
+                        contents.clone(),
+                        source.clone(),
+                        true,
+                    )
+                    .await,
+                    Err(FileError::DecodingErrors)
+                );
+                assert_eq!(fs::read(&file.0).unwrap(), malformed);
+            }
+            let copy = file.0.with_file_name("copy.txt");
+            super::super::file_dialogs::save_picked_file(
+                copy.clone(),
+                contents.clone(),
+                source,
+                true,
+            )
+            .await
+            .unwrap();
+            assert_eq!(fs::read(copy).unwrap(), contents);
+            assert_eq!(fs::read(&file.0).unwrap(), malformed);
         });
     }
 }

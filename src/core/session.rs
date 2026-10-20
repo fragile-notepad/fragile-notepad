@@ -51,6 +51,7 @@ pub struct SessionDocument {
     pub text: Option<String>,
     #[serde(with = "encoding")]
     pub encoding: TextEncoding,
+    pub had_decoding_errors: bool,
     pub line_ending: Option<String>,
     pub is_pinned: bool,
     pub is_dirty: bool,
@@ -77,6 +78,7 @@ impl Default for SessionDocument {
             disk_revision: None,
             text: None,
             encoding: TextEncoding::Utf8,
+            had_decoding_errors: false,
             line_ending: None,
             is_pinned: false,
             is_dirty: false,
@@ -268,6 +270,7 @@ mod tests {
         assert_eq!(document.first_visible_row, 12);
         assert_eq!(document.first_visible_position, None);
         assert_eq!(document.horizontal_offset, 24.0);
+        assert!(!document.had_decoding_errors);
     }
 
     #[test]

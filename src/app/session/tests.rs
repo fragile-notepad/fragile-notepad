@@ -14,6 +14,78 @@ fn ready(saved: Session) -> App {
 }
 
 #[test]
+fn decoding_errors_survive_dirty_recovery_and_block_overwrite() {
+    let session = Session {
+        documents: vec![SessionDocument {
+            path: Some("malformed.txt".into()),
+            text: Some("replacement \u{fffd} and edits".into()),
+            is_dirty: true,
+            had_decoding_errors: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let serialized = serde_json::to_vec(&session).unwrap();
+    let mut app = ready(serde_json::from_slice(&serialized).unwrap());
+    assert!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .had_decoding_errors()
+    );
+    assert!(app.snapshot_session().documents[0].had_decoding_errors);
+    let _ = app.update(Message::SaveFile);
+    assert!(
+        app.file_status
+            .as_deref()
+            .is_some_and(|status| status.contains("Save As"))
+    );
+}
+
+#[test]
+fn decoding_errors_from_clean_disk_reload_override_legacy_recovery_metadata() {
+    use crate::app::tests::test_support::{TestFile, run_task};
+    let file = TestFile::new(b"\xef\xbb\xbfmalformed \xff");
+    let saved = Session {
+        documents: vec![SessionDocument {
+            path: Some(file.0.clone()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let (mut app, _) = App::new_with_options(StartupOptions::default());
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::SessionLoaded(Ok(Some(saved))));
+    let task = app.update(Message::StartupReady);
+    run_task(&mut app, task);
+    let document = app.workspace.active_document().unwrap();
+    assert!(!document.is_dirty);
+    assert!(document.had_decoding_errors());
+    let snapshot = app.snapshot_session();
+    assert!(snapshot.documents[0].had_decoding_errors);
+    assert!(snapshot.documents[0].text.is_none());
+
+    let encoded = serde_json::to_vec(&snapshot).unwrap();
+    let saved = serde_json::from_slice(&encoded).unwrap();
+    let (mut restored, _) = App::new_with_options(StartupOptions::default());
+    let _ = restored.update(Message::SettingsLoaded(Ok(None)));
+    let _ = restored.update(Message::SessionLoaded(Ok(Some(saved))));
+    let task = restored.update(Message::StartupReady);
+    run_task(&mut restored, task);
+    assert!(
+        restored
+            .workspace
+            .active_document()
+            .unwrap()
+            .had_decoding_errors()
+    );
+    assert_eq!(
+        std::fs::read(&file.0).unwrap(),
+        b"\xef\xbb\xbfmalformed \xff"
+    );
+}
+
+#[test]
 fn clean_legacy_session_documents_restore_using_the_saved_input_encoding() {
     use crate::app::tests::test_support::{TestFile, run_task};
     let original = crate::core::encode_text("あ", TextEncoding::ShiftJis).unwrap();

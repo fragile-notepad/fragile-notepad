@@ -292,9 +292,10 @@ impl App {
                     return Task::none();
                 }
                 document.disk_revision = Some(finished.disk_revision);
+                document.set_had_decoding_errors(finished.had_errors);
 
                 self.file_status = finished.had_errors.then(|| {
-                    String::from("Opened with decoding errors; check the text before saving.")
+                    String::from("Decoding errors; use Save As to save to a different file, or reopen with the correct encoding.")
                 });
                 self.record_open_history(opened_path)
             }
@@ -389,5 +390,49 @@ fn same_file_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     #[cfg(not(windows))]
     {
         a == b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::tests::test_support::{TestFile, run_task};
+
+    #[test]
+    fn decoding_protection_tracks_streamed_load_and_lossless_reload() {
+        let file = TestFile::new(b"\xef\xbb\xbfhello\xff");
+        let mut app = App::new().0;
+        let task = app.start_loading_file(file.0.clone());
+        run_task(&mut app, task);
+        assert!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .had_decoding_errors()
+        );
+
+        // A failed reload preserves the text and its safety state.
+        let _ = app.reload_active_from_disk();
+        let document = app.workspace.active_document().unwrap();
+        let failure = FileLoadFailure {
+            document_id: document.id,
+            generation: document.load_generation().unwrap(),
+            path: file.0.clone(),
+            error: crate::services::types::FileError::Io(std::io::ErrorKind::PermissionDenied),
+        };
+        let _ = app.load_failed(failure);
+        assert!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .had_decoding_errors()
+        );
+
+        std::fs::write(&file.0, b"\xef\xbb\xbfclean").unwrap();
+        let task = app.reload_active_from_disk();
+        run_task(&mut app, task);
+        let document = app.workspace.active_document().unwrap();
+        assert_eq!(document.text(), "clean");
+        assert!(!document.had_decoding_errors());
     }
 }

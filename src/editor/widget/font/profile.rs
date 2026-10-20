@@ -233,7 +233,7 @@ fn is_modern_hangul_cluster(grapheme: &str) -> bool {
         (Some(first), Some(second), None, None) => {
             (leading(first) && vowel(second))
                 || ((0xac00..=0xd7a3).contains(&(first as u32))
-                    && (first as u32 - 0xac00) % 28 == 0
+                    && (first as u32 - 0xac00).is_multiple_of(28)
                     && trailing(second))
         }
         (Some(first), Some(second), Some(third), None) => {

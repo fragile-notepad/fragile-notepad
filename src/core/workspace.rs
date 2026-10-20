@@ -125,10 +125,10 @@ impl Workspace {
         }
         self.windows.remove(&id);
         self.changes.push(WorkspaceEvent::WindowClosed(id));
-        if self.current_window == id {
-            if let Some(next) = self.windows.keys().next() {
-                self.current_window = *next;
-            }
+        if self.current_window == id
+            && let Some(next) = self.windows.keys().next()
+        {
+            self.current_window = *next;
         }
         true
     }
@@ -532,11 +532,11 @@ impl Workspace {
                 .get(id)
                 .map_or_else(EditorWindow::default, |state| (**state).clone());
             if *state != replacement {
-                if state.active_document_id != replacement.active_document_id {
-                    if let Some(active) = replacement.active_document_id {
-                        self.changes
-                            .push(WorkspaceEvent::ActiveDocumentChanged(active));
-                    }
+                if state.active_document_id != replacement.active_document_id
+                    && let Some(active) = replacement.active_document_id
+                {
+                    self.changes
+                        .push(WorkspaceEvent::ActiveDocumentChanged(active));
                 }
                 *state = replacement;
                 self.changes.push(WorkspaceEvent::WindowTabsChanged(*id));

@@ -124,6 +124,10 @@ macro_rules! message_catalog {
         }
         $(
             #[derive(Debug, Clone)]
+            #[allow(
+                clippy::enum_variant_names,
+                reason = "Feature messages keep the public catalog's variant names."
+            )]
             pub(crate) enum $domain {
                 $( $(#[$attr])* $variant $(($($ty),*))?, )*
             }

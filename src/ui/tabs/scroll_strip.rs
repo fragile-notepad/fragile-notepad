@@ -263,6 +263,10 @@ impl Operation for TabGeometryOperation {
 }
 
 impl ScrollStrip<'_> {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Tab tracking forwards the Iced widget update context with the current animation time."
+    )]
     fn update_tabs(
         &mut self,
         tree: &mut Tree,
@@ -277,10 +281,7 @@ impl ScrollStrip<'_> {
         if !self.track_tabs {
             return;
         }
-        let bounds = layout
-            .bounds()
-            .intersection(viewport)
-            .unwrap_or(Rectangle::default());
+        let bounds = layout.bounds().intersection(viewport).unwrap_or_default();
         let mut operation = TabGeometryOperation::default();
         self.content.as_widget_mut().operate(
             &mut tree.children[0],
@@ -318,15 +319,15 @@ impl ScrollStrip<'_> {
                     shell.capture_event();
                 }
             }
-            Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                if state.pressed_tab.is_some() || self.dragging_tabs {
-                    shell.publish(Message::TabPointerMoved(*position));
-                }
+            Event::Mouse(mouse::Event::CursorMoved { position })
+                if state.pressed_tab.is_some() || self.dragging_tabs =>
+            {
+                shell.publish(Message::TabPointerMoved(*position));
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.pressed_tab.take().is_some() || self.dragging_tabs {
-                    shell.publish(Message::TabPointerReleased);
-                }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.pressed_tab.take().is_some() || self.dragging_tabs =>
+            {
+                shell.publish(Message::TabPointerReleased);
             }
             _ => {}
         }

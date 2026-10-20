@@ -741,6 +741,10 @@ fn draw_fold_control<Renderer>(
     );
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Drawing helpers pass renderer, geometry, content, and style separately to match the widget draw path."
+)]
 fn draw_collapsed_fold_indicator<Renderer>(
     renderer: &mut Renderer,
     bounds: Rectangle,
@@ -865,6 +869,10 @@ fn draw_hidden_line_hint<Renderer>(
     );
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "This adapter keeps Iced text content, placement, style, and clipping inputs explicit."
+)]
 fn draw_text<Renderer>(
     renderer: &mut Renderer,
     content: impl Into<String>,

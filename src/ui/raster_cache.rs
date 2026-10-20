@@ -61,12 +61,14 @@ fn editor_paint_state<Renderer: iced::advanced::text::Renderer>(tree: &Tree) -> 
         .unwrap_or((0, true))
 }
 
+type PaintStateCallback = fn(&Tree) -> (u64, bool);
+
 struct RasterCache<'a, Message, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     enabled: bool,
     settle_before_capture: bool,
     animated: bool,
-    paint_state: Option<fn(&Tree) -> (u64, bool)>,
+    paint_state: Option<PaintStateCallback>,
 }
 
 impl<'a, Message, Renderer> RasterCache<'a, Message, Renderer>

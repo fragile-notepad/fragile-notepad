@@ -1113,6 +1113,10 @@ fn caret_plan_from_projected(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Caret planning takes the same explicit document, viewport, and layout inputs as row planning."
+)]
 fn caret_plan_for_position(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,

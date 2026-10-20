@@ -386,8 +386,11 @@ fn chinese_particle_context(text: &str) -> bool {
     if han_count < 6 {
         return false;
     }
-    let mut before = 0;
-    for character in text.chars().filter(|&character| is_han(character)) {
+    for (before, character) in text
+        .chars()
+        .filter(|&character| is_han(character))
+        .enumerate()
+    {
         let after = han_count - before - 1;
         if before >= 2
             && after >= 2
@@ -398,7 +401,6 @@ fn chinese_particle_context(text: &str) -> bool {
         {
             return true;
         }
-        before += 1;
     }
     false
 }
@@ -410,12 +412,14 @@ fn chinese_adverb_context(text: &str) -> bool {
     if han_count < 3 {
         return false;
     }
-    let mut before = 0;
-    for character in text.chars().filter(|&character| is_han(character)) {
+    for (before, character) in text
+        .chars()
+        .filter(|&character| is_han(character))
+        .enumerate()
+    {
         if character == '很' && before > 0 && before + 1 < han_count {
             return true;
         }
-        before += 1;
     }
     false
 }

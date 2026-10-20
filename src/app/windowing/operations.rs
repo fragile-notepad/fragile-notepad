@@ -64,19 +64,17 @@ impl App {
                 let mut changed = false;
                 if let Some(editor) = self.editor_id(id)
                     && let Some(state) = self.editor_windows.get_mut(&editor)
+                    && !self.maximized_windows.get(&id).copied().unwrap_or(false)
+                    && !state.fullscreen
                 {
-                    if !self.maximized_windows.get(&id).copied().unwrap_or(false)
-                        && !state.fullscreen
-                    {
-                        let bounds = Some([
-                            point.map_or(0.0, |p| p.x),
-                            point.map_or(0.0, |p| p.y),
-                            size.width,
-                            size.height,
-                        ]);
-                        changed = state.bounds != bounds;
-                        state.bounds = bounds;
-                    }
+                    let bounds = Some([
+                        point.map_or(0.0, |p| p.x),
+                        point.map_or(0.0, |p| p.y),
+                        size.width,
+                        size.height,
+                    ]);
+                    changed = state.bounds != bounds;
+                    state.bounds = bounds;
                 }
                 if changed {
                     self.request_session_save()
@@ -86,12 +84,11 @@ impl App {
             }
             WindowMessage::WindowOpened(id) => self.window_opened(id),
             WindowMessage::WindowMaximized(id, maximized) => {
-                if self.owns_window(id) {
-                    if self.maximized_windows.insert(id, maximized) != Some(maximized)
-                        && self.editor_id(id).is_some()
-                    {
-                        return self.request_session_save();
-                    }
+                if self.owns_window(id)
+                    && self.maximized_windows.insert(id, maximized) != Some(maximized)
+                    && self.editor_id(id).is_some()
+                {
+                    return self.request_session_save();
                 }
                 Task::none()
             }

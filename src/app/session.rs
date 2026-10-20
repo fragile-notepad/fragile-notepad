@@ -337,8 +337,10 @@ impl App {
     }
 
     pub(super) fn capture_session(&self) -> SessionSnapshot {
-        let mut session = Session::default();
-        session.version = 2;
+        let mut session = Session {
+            version: 2,
+            ..Default::default()
+        };
         let document_indices: HashMap<_, _> = self
             .workspace
             .documents()

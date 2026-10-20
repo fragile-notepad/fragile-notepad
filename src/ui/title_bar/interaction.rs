@@ -129,7 +129,6 @@ impl Widget<Message, Theme, Renderer> for ChromeRegion<'_> {
                     y: top,
                     width: bounds.x + bounds.width - right,
                     height: bottom - top,
-                    ..bounds
                 },
                 Rectangle {
                     x: left,

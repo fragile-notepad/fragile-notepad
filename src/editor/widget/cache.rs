@@ -45,6 +45,10 @@ pub(super) struct SyntaxSpanKey {
 }
 
 impl<Paragraph> RichParagraphCache<Paragraph> {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Every shaping and viewport input is an independent cache invalidation key."
+    )]
     pub(super) fn get_or_insert_with(
         &mut self,
         line: usize,
@@ -73,6 +77,10 @@ impl<Paragraph> RichParagraphCache<Paragraph> {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Font runs extend the same explicit shaping and viewport cache key."
+    )]
     pub(super) fn get_or_insert_with_fonts(
         &mut self,
         line: usize,

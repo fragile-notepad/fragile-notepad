@@ -141,13 +141,12 @@ impl Session {
                 {
                     return Err("Invalid active window document".into());
                 }
-                if let Some([x, y, width, height]) = window.bounds {
-                    if ![x, y, width, height].iter().all(|value| value.is_finite())
+                if let Some([x, y, width, height]) = window.bounds
+                    && (![x, y, width, height].iter().all(|value| value.is_finite())
                         || width <= 0.0
-                        || height <= 0.0
-                    {
-                        return Err("Invalid session window placement".into());
-                    }
+                        || height <= 0.0)
+                {
+                    return Err("Invalid session window placement".into());
                 }
                 for &index in &window.document_indices {
                     let Some(seen) = assigned.get_mut(index) else {

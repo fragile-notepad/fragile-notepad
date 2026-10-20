@@ -160,7 +160,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         ]
         .into()
     } else {
-        shell.into()
+        shell
     };
 
     let with_dialogs = if let Some(document) = dirty_close_document {

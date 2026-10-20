@@ -279,15 +279,14 @@ impl App {
         if !self.workspace.window_tab_ids(id).is_empty() {
             return;
         }
-        if self.workspace.current_window_id() == id {
-            if let Some(other) = self
+        if self.workspace.current_window_id() == id
+            && let Some(other) = self
                 .workspace
                 .window_ids()
                 .into_iter()
                 .find(|other| *other != id && self.editor_windows.contains_key(other))
-            {
-                self.switch_editor(other);
-            }
+        {
+            self.switch_editor(other);
         }
         if let Some(window) = self.editor_windows.remove(&id) {
             self.maximized_windows.remove(&window.native);

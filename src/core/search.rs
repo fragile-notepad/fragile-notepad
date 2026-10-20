@@ -169,6 +169,10 @@ impl FindState {
             .and_then(|index| self.matches.get(index).copied())
     }
 
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Search navigation can wrap and has a matching previous operation; it is not an iterator."
+    )]
     pub fn next(&mut self) -> Option<TextMatch> {
         if self.matches.is_empty() {
             self.current_match = None;

@@ -95,6 +95,10 @@ impl<Paragraph> LineGeometryCache<Paragraph>
 where
     Paragraph: text::Paragraph<Font = Font>,
 {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Geometry cache keys must include each shaping, font, and viewport input."
+    )]
     fn ensure<Renderer>(
         &mut self,
         visible_row: usize,
@@ -261,6 +265,10 @@ where
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Caret measurement shares explicit document and layout inputs with hit testing, plus optional font context."
+)]
 pub(crate) fn measured_position_point_with_context<Renderer>(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
@@ -288,6 +296,10 @@ where
 }
 
 /// Retains caret shaping while recomputing its position in the current viewport.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The cached measurement adapter adds cache ownership to the existing caret geometry inputs."
+)]
 pub(super) fn measured_position_point_with_cache<Renderer>(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
@@ -315,6 +327,10 @@ where
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Cached and uncached caret measurements share this implementation and its explicit geometry inputs."
+)]
 fn measured_position_point_impl<Renderer>(
     buffer: &EditorBuffer,
     viewport: &ViewportModel,

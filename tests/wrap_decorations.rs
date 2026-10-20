@@ -16,12 +16,7 @@ fn software_renderer() -> Renderer {
 }
 
 fn metrics(document: &Document, settings: &EditorSettings) -> EditorMetrics {
-    EditorMetrics {
-        line_height: 20.0 * settings.zoom,
-        character_width: 8.8 * settings.zoom,
-        ..EditorMetrics::default()
-    }
-    .with_line_count(document.buffer.line_count())
+    editor::metrics(settings.zoom).with_line_count(document.buffer.line_count())
 }
 
 fn draw(

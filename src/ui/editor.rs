@@ -9,7 +9,8 @@ use crate::message::Message;
 pub const EDITOR_ID: &str = "fragile-notepad-editor";
 const BASE_TEXT_SIZE: f32 = 16.0;
 
-pub(crate) fn metrics(zoom: f32) -> EditorMetrics {
+/// Returns the editor's font metrics at the requested zoom.
+pub fn metrics(zoom: f32) -> EditorMetrics {
     let size = BASE_TEXT_SIZE * zoom;
     EditorMetrics {
         line_height: size * 1.25,

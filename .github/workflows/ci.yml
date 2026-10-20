@@ -15,6 +15,9 @@ jobs:
   validation:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Require a Vulkan adapter on Linux; other hosts may lack one.
+      FRAGILE_REQUIRE_GPU_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -95,9 +98,6 @@ jobs:
       - name: Validate
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          # Hosted Windows runners may have no usable wgpu adapter, even with SwiftShader.
-          FRAGILE_ALLOW_WGPU_PARITY_SKIP: "1"
         run: .\scripts\ci.ps1
 
       - name: Validate

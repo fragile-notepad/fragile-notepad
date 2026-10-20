@@ -64,6 +64,9 @@ jobs:
     needs: check-nightly
     if: ${{ needs.check-nightly.outputs.should_run == 'true' }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Require Linux's software Vulkan tests before publishing.
+      FRAGILE_REQUIRE_GPU_TESTS: ${{ matrix.name == 'linux-x64' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -179,12 +182,9 @@ jobs:
           python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared \
             --target-os "$font_target_os" --cache-dir target/font-profiles
 
-      - name: Test Windows release gates
+      - name: Test Windows build
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          # Keep parity checks when an adapter exists; permit headless Windows runners.
-          FRAGILE_ALLOW_WGPU_PARITY_SKIP: "1"
         run: cargo test --locked
 
       - name: Check Windows software-only build
@@ -192,7 +192,7 @@ jobs:
         shell: pwsh
         run: cargo check --locked --no-default-features
 
-      - name: Validate macOS release gates
+      - name: Test macOS build
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -200,7 +200,7 @@ jobs:
           cargo test
           cargo check --no-default-features
 
-      - name: Validate Linux release gates
+      - name: Test Linux build
         if: runner.os == 'Linux'
         shell: bash
         run: |

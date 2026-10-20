@@ -1,5 +1,8 @@
 #![cfg(feature = "hybrid-rendering")]
 
+#[path = "support/gpu_validation.rs"]
+mod gpu_validation;
+
 use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::renderer::{self, Renderer as _};
 use iced::{Color, Rectangle, Size, Transformation};
@@ -104,19 +107,29 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
         }))
         .ok()
     else {
-        eprintln!("Skipping Vulkan transform validation: no Vulkan adapter");
+        gpu_validation::unavailable("transform validation: no Vulkan adapter");
         return;
     };
-    if !adapter.features().contains(wgpu::Features::IMMEDIATES)
-        || adapter.limits().max_immediate_size < 80
-    {
-        eprintln!("Skipping Vulkan transform validation: immediate uniforms unavailable");
-        return;
+    let immediate_limit = if adapter.features().contains(wgpu::Features::IMMEDIATES) {
+        adapter.limits().max_immediate_size
+    } else {
+        0
+    };
+    // Uniform rendering is mandatory even when this driver lacks optional
+    // immediate uniforms. Test every supported limit rather than skipping all
+    // coverage when the largest optional limit is unavailable.
+    if immediate_limit < 80 {
+        eprintln!(
+            "Optional immediate-uniform cases above {immediate_limit} bytes are unavailable; testing supported limits and uniform rendering"
+        );
     }
     eprintln!("TRANSFORM_ADAPTER {:?}", adapter.get_info());
     let mut reference = None;
     let mut baseline_counts = None;
-    for limit in [0, 16, 64, 80] {
+    for limit in [0, 16, 64, 80]
+        .into_iter()
+        .filter(|&limit| limit <= immediate_limit)
+    {
         let (device, queue) =
             futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 required_features: if limit == 0 {

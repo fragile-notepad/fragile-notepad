@@ -1,3 +1,6 @@
+#[path = "support/gpu_validation.rs"]
+mod gpu_validation;
+
 use iced::advanced::image;
 use iced::advanced::renderer::{self, Headless};
 use iced::{Color, Rectangle, Size};
@@ -379,8 +382,33 @@ fn alpha_image(rows: &[&[u8]]) -> Vec<u8> {
         .collect()
 }
 
+#[cfg(feature = "hybrid-rendering")]
+fn vulkan_adapter_available() -> bool {
+    // Headless::new erases adapter and device errors into None. Establish
+    // adapter availability first so an initialization failure cannot be
+    // mistaken for an allowed adapter skip.
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        ..Default::default()
+    }))
+    .is_ok()
+}
+
+#[cfg(not(feature = "hybrid-rendering"))]
+fn vulkan_adapter_available() -> bool {
+    false
+}
+
 #[test]
 fn tiny_skia_and_wgpu_render_real_icon_consistently() {
+    if !vulkan_adapter_available() {
+        gpu_validation::unavailable("icon comparison: no Vulkan adapter");
+        return;
+    }
     for &(name, asset) in ICONS {
         let rgba = asset.rgba_bytes();
 
@@ -388,19 +416,8 @@ fn tiny_skia_and_wgpu_render_real_icon_consistently() {
             let Some(cpu) = render_icon("tiny-skia", scale_factor, rgba) else {
                 panic!("tiny-skia headless renderer should be available");
             };
-            let Some(gpu) = render_icon("wgpu", scale_factor, rgba) else {
-                if std::env::var_os("CI").is_some()
-                    && std::env::var_os("FRAGILE_ALLOW_WGPU_PARITY_SKIP").is_none()
-                {
-                    panic!(
-                        "wgpu headless renderer is unavailable in CI; set FRAGILE_ALLOW_WGPU_PARITY_SKIP=1 to opt out"
-                    );
-                }
-                eprintln!(
-                    "skipping icon render parity test: wgpu headless renderer is unavailable"
-                );
-                return;
-            };
+            let gpu = render_icon("wgpu", scale_factor, rgba)
+                .expect("create wgpu headless renderer with an available Vulkan adapter");
 
             assert_eq!(cpu.len(), gpu.len());
 

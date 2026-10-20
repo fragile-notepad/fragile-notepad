@@ -1,5 +1,8 @@
 #![cfg(feature = "hybrid-rendering")]
 
+#[path = "support/gpu_validation.rs"]
+mod gpu_validation;
+
 use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::renderer::{self, Renderer as _};
 use iced::{Background, Color, Rectangle, Size, Transformation, gradient};
@@ -38,10 +41,10 @@ fn vulkan_atlas_limits_spill_and_recover_without_losing_existing_images() {
     let Some(adapter) =
         futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
     else {
-        eprintln!("Skipping Vulkan atlas validation: no Vulkan adapter");
+        gpu_validation::unavailable("atlas validation: no Vulkan adapter");
         return;
     };
-    let Ok((device, queue)) =
+    let (device, queue) =
         futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits: wgpu::Limits {
                 max_texture_array_layers: 2,
@@ -50,10 +53,7 @@ fn vulkan_atlas_limits_spill_and_recover_without_losing_existing_images() {
             },
             ..Default::default()
         }))
-    else {
-        eprintln!("Skipping Vulkan atlas validation: device unavailable");
-        return;
-    };
+        .expect("create Vulkan atlas test device");
     let engine = iced_wgpu::Engine::new(
         &adapter,
         device.clone(),
@@ -241,15 +241,11 @@ fn vulkan_quad_buffers_grow_reuse_and_keep_windows_and_layers_independent() {
     let Some(adapter) =
         futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
     else {
-        eprintln!("Skipping Vulkan quad resource validation: no Vulkan adapter");
+        gpu_validation::unavailable("quad resource validation: no Vulkan adapter");
         return;
     };
-    let Ok((device, queue)) =
-        futures::executor::block_on(adapter.request_device(&Default::default()))
-    else {
-        eprintln!("Skipping Vulkan quad resource validation: device unavailable");
-        return;
-    };
+    let (device, queue) = futures::executor::block_on(adapter.request_device(&Default::default()))
+        .expect("create Vulkan quad resource test device");
     let engine = iced_wgpu::Engine::new(
         &adapter,
         device.clone(),
@@ -367,15 +363,12 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
         let Some(adapter) =
             futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
         else {
-            eprintln!("Skipping Vulkan mesh resource validation: no Vulkan adapter");
+            gpu_validation::unavailable("mesh resource validation: no Vulkan adapter");
             return;
         };
-        let Ok((device, queue)) =
+        let (device, queue) =
             futures::executor::block_on(adapter.request_device(&Default::default()))
-        else {
-            eprintln!("Skipping Vulkan mesh resource validation: device unavailable");
-            return;
-        };
+                .expect("create Vulkan mesh resource test device");
         let engine = iced_wgpu::Engine::new(
             &adapter,
             device.clone(),
@@ -539,15 +532,11 @@ fn vulkan_image_storage_is_lazy_and_preserves_async_allocations_and_atlas_growth
     let Some(adapter) =
         futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
     else {
-        eprintln!("Skipping Vulkan image validation: no Vulkan adapter");
+        gpu_validation::unavailable("image validation: no Vulkan adapter");
         return;
     };
-    let Ok((device, queue)) =
-        futures::executor::block_on(adapter.request_device(&Default::default()))
-    else {
-        eprintln!("Skipping Vulkan image validation: device unavailable");
-        return;
-    };
+    let (device, queue) = futures::executor::block_on(adapter.request_device(&Default::default()))
+        .expect("create Vulkan image test device");
     let engine = iced_wgpu::Engine::new(
         &adapter,
         device.clone(),

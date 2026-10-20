@@ -1,5 +1,8 @@
 #![cfg(feature = "hybrid-rendering")]
 
+#[path = "support/gpu_validation.rs"]
+mod gpu_validation;
+
 use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::renderer::{self, Renderer as _};
 use iced::advanced::text::{self, Renderer as _};
@@ -15,8 +18,8 @@ const FORMATS: [wgpu::TextureFormat; 2] = [
     wgpu::TextureFormat::Rgba8UnormSrgb,
 ];
 
-// The same small headless Vulkan setup as vulkan_raster_cache.rs. Only adapter
-// absence skips validation; device, rendering, and readback errors fail it.
+// Adapter absence follows the shared GPU policy; device, rendering, and readback
+// errors always fail validation.
 struct Gpu {
     engine: iced_wgpu::Engine,
     device: wgpu::Device,
@@ -33,7 +36,7 @@ impl Gpu {
         let Some(adapter) =
             futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
         else {
-            eprintln!("Skipping composition validation: no Vulkan adapter");
+            gpu_validation::unavailable("composition validation: no Vulkan adapter");
             return None;
         };
         let (device, queue) =

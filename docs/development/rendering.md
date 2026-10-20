@@ -63,8 +63,10 @@ For example, check retained window frames with:
 cargo test --locked -j 1 --test vulkan_composition -- --test-threads=1
 ```
 
-Several GPU tests report a skip when no Vulkan adapter is available. Inspect that
-output before treating a passing command as evidence that GPU paths were tested.
+Set `FRAGILE_REQUIRE_GPU_TESTS=1` to fail when no Vulkan adapter is available,
+or `0` to allow skips. When unset, adapters are required in CI and optional
+locally. Device creation and rendering failures always fail. Linux CI and
+nightly builds use `1`; other hosted platforms use `0`.
 
 ## Capture a trace
 

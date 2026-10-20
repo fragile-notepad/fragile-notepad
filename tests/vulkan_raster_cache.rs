@@ -1,5 +1,8 @@
 #![cfg(feature = "hybrid-rendering")]
 
+#[path = "support/gpu_validation.rs"]
+mod gpu_validation;
+
 use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::renderer::{self, Headless, Renderer as _};
 use iced::advanced::text::{self, Renderer as _};
@@ -102,10 +105,10 @@ impl Gpu {
         let Some(adapter) =
             futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
         else {
-            eprintln!("Skipping raster cache validation: no Vulkan adapter");
+            gpu_validation::unavailable("raster cache validation: no Vulkan adapter");
             return None;
         };
-        // An unavailable adapter may skip; device or rendering failures must fail.
+        // Device or rendering failures must fail even when adapter skips are allowed.
         let (device, queue) =
             futures::executor::block_on(adapter.request_device(&Default::default()))
                 .expect("create Vulkan raster cache test device");

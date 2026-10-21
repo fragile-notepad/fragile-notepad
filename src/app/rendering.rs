@@ -328,7 +328,8 @@ fn configure_hardware_backend(policy: RenderBackendPolicy) -> Task<Message> {
             RenderBackendPolicy::HardwareDiagnostic => backend::PowerPreference::HighPerformance,
             _ => backend::PowerPreference::LowPower,
         },
-        antialiasing: false,
+        // Smooth vector icon edges with the mesh pipeline's antialiasing.
+        antialiasing: true,
         vsync: true,
     })
     .map(Message::BackendBoostConfigured)

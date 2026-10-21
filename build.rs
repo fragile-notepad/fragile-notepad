@@ -1,4 +1,5 @@
 fn main() {
+    compile_vector_icons();
     prepare_font_profiles();
     println!("cargo:rerun-if-changed=target/app-icons/app.ico");
     #[cfg(windows)]
@@ -7,6 +8,43 @@ fn main() {
             .set_icon("target/app-icons/app.ico")
             .compile()
             .expect("compile Windows icon resource; run scripts/generate_icon_assets.ps1 first");
+    }
+}
+
+fn compile_vector_icons() {
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    for path in [
+        "scripts/compile_vector_icons.py",
+        "assets/icons/colored/svg",
+        "assets/icons/heroicons/svg",
+        "assets/icons/bootstrap/svg",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    println!("cargo:rerun-if-env-changed=FRAGILE_FONT_PYTHON");
+    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("package directory"));
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("build output directory"));
+    let python = std::env::var_os("FRAGILE_FONT_PYTHON")
+        .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into());
+    let output = Command::new(&python)
+        .arg(root.join("scripts/compile_vector_icons.py"))
+        .arg("--out-dir")
+        .arg(out)
+        .current_dir(root)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "compile vector icons with {python:?}: {error}; install Python 3 or set FRAGILE_FONT_PYTHON"
+            )
+        });
+    if !output.status.success() {
+        panic!(
+            "vector icon compilation failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 

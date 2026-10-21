@@ -161,12 +161,12 @@ jobs:
         shell: pwsh
         run: .\scripts\setup-ci-vulkan.ps1
 
-      - name: Generate embedded icon assets
+      - name: Generate illustrations and platform icons
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\generate_icon_assets.ps1
 
-      - name: Generate embedded icon assets
+      - name: Generate illustrations and platform icons
         if: runner.os != 'Windows'
         shell: bash
         run: bash scripts/generate_icon_assets.sh

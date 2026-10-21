@@ -149,6 +149,7 @@ pub fn attribute_count_of(meshes: &[Mesh]) -> AttributeCount {
 #[derive(Debug, Clone)]
 pub struct Cache {
     id: Id,
+    owner: Arc<()>,
     batch: Arc<[Mesh]>,
     version: usize,
 }
@@ -164,6 +165,7 @@ impl Cache {
 
         Self {
             id: Id(NEXT_ID.fetch_add(1, atomic::Ordering::Relaxed)),
+            owner: Arc::new(()),
             batch: meshes,
             version: 0,
         }
@@ -172,6 +174,14 @@ impl Cache {
     /// Returns the [`Id`] of the [`Cache`].
     pub fn id(&self) -> Id {
         self.id
+    }
+
+    /// Returns a weak lifetime token shared by all clones of this cache.
+    ///
+    /// Renderers can retain uploaded meshes without keeping their cache owner
+    /// alive, and release the uploads once this token has no strong owners.
+    pub fn weak_owner(&self) -> std::sync::Weak<()> {
+        Arc::downgrade(&self.owner)
     }
 
     /// Returns the current version of the [`Cache`].

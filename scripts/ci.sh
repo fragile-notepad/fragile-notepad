@@ -7,6 +7,7 @@ cd "$repo_root"
 cargo fmt --package fragile-notepad --check
 python3 -m unittest discover -s scripts -p test_check_package.py
 python3 -m unittest discover -s scripts -p 'test_*font_profiles.py'
+python3 -m unittest discover -s scripts -p test_compile_vector_icons.py
 case "$(uname -s)" in
     Darwin) font_target_os=macos ;;
     Linux) font_target_os=linux ;;
@@ -15,7 +16,7 @@ esac
 python3 scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared \
     --target-os "$font_target_os" --cache-dir target/font-profiles
 bash scripts/generate_icon_assets.sh
-python3 scripts/test_icon_assets.py
+python3 scripts/test_illustration_assets.py
 cargo clippy --locked --all-targets
 
 # cargo test also compiles the application and examples.

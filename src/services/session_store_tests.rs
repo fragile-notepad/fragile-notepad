@@ -31,7 +31,7 @@ fn partitioned_text_exceeds_metadata_budget_without_inline_json_expansion() {
 }
 
 #[test]
-fn corrupt_latest_chunk_restores_previous_and_preserves_evidence() {
+fn corrupt_session_falls_back_without_deleting_files() {
     let directory = test_dir("fallback");
     let path = directory.join("session.json");
     let first = session("first recoverable text");

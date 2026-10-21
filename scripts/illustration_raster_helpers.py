@@ -1,38 +1,17 @@
+"""Path parsing and Pillow drawing for the quill illustration renderer."""
+
 from __future__ import annotations
 
-import argparse
 import math
 import re
-from pathlib import Path
-from xml.etree import ElementTree
 
 from PIL import Image, ImageChops, ImageDraw
-
-ROOT = Path(__file__).resolve().parents[1]
-SVG_DIR = ROOT / "assets" / "icons" / "heroicons" / "svg"
-RGBA_DIR = ROOT / "assets" / "icons" / "heroicons" / "rgba"
-DEFAULT_SIZE = 22
-DEFAULT_SUPERSAMPLE = 8
-DEFAULT_COLOR = (100, 116, 139, 255)
 
 TOKEN_RE = re.compile(
     r"[AaCcHhLlMmQqSsVvZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?"
 )
 COMMAND_RE = re.compile(r"[A-Za-z]")
 SUPPORTED_COMMANDS = set("AaCcHhLlMmQqSsVvZz")
-
-
-def parse_color(value: str) -> tuple[int, int, int, int]:
-    value = value.strip().lstrip("#")
-    if len(value) != 6:
-        raise ValueError("Color must be a 6-digit hex value, e.g. #64748b")
-
-    return (
-        int(value[0:2], 16),
-        int(value[2:4], 16),
-        int(value[4:6], 16),
-        255,
-    )
 
 
 def is_command(token: str) -> bool:
@@ -283,14 +262,6 @@ def parse_path(d: str) -> list[list[tuple[float, float]]]:
     return subpaths
 
 
-def parse_view_box(svg: ElementTree.Element) -> tuple[float, float, float, float]:
-    view_box = svg.attrib.get("viewBox", "0 0 24 24")
-    values = [float(value) for value in view_box.split()]
-    if len(values) != 4:
-        raise ValueError(f"Invalid viewBox: {view_box}")
-    return values[0], values[1], values[2], values[3]
-
-
 def scale_point(
     point: tuple[float, float],
     view_box: tuple[float, float, float, float],
@@ -343,73 +314,3 @@ def draw_filled_path(
 
     fill = Image.new("RGBA", image.size, color)
     image.paste(fill, (0, 0), mask.convert("L"))
-
-
-def rasterize_svg(
-    svg_path: Path,
-    size: int,
-    supersample: int,
-    color: tuple[int, int, int, int] | None,
-) -> Image.Image:
-    tree = ElementTree.parse(svg_path)
-    svg = tree.getroot()
-    view_box = parse_view_box(svg)
-    _, _, view_width, view_height = view_box
-    canvas_size = size * supersample
-    scale = canvas_size / max(view_width, view_height)
-    image = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-
-    for element in svg.iter():
-        if not element.tag.endswith("path"):
-            continue
-
-        d = element.attrib.get("d")
-        if not d:
-            continue
-
-        stroke_width = float(
-            element.attrib.get("stroke-width", svg.attrib.get("stroke-width", "1.5"))
-        )
-        width = max(1, round(stroke_width * scale))
-
-        fill = element.attrib.get("fill", svg.attrib.get("fill", "none"))
-        stroke = element.attrib.get("stroke", svg.attrib.get("stroke", "none"))
-        subpaths = parse_path(d)
-
-        def paint(value: str) -> tuple[int, int, int, int]:
-            if color is not None:
-                return color
-            return DEFAULT_COLOR if value == "currentColor" else parse_color(value)
-
-        if fill != "none":
-            draw_filled_path(image, subpaths, view_box, scale, paint(fill))
-
-        if stroke != "none":
-            for subpath in subpaths:
-                scaled = [scale_point(point, view_box, scale) for point in subpath]
-                draw_round_line(draw, scaled, width, paint(stroke))
-
-    return image.resize((size, size), Image.Resampling.LANCZOS)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Rasterize SVG icons to raw RGBA assets."
-    )
-    parser.add_argument("--svg-dir", type=Path, default=SVG_DIR)
-    parser.add_argument("--out-dir", type=Path, default=RGBA_DIR)
-    parser.add_argument("--size", type=int, default=DEFAULT_SIZE)
-    parser.add_argument("--supersample", type=int, default=DEFAULT_SUPERSAMPLE)
-    parser.add_argument("--color", type=parse_color, default=DEFAULT_COLOR)
-    args = parser.parse_args()
-
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-
-    for svg_path in sorted(args.svg_dir.glob("*.svg")):
-        image = rasterize_svg(svg_path, args.size, args.supersample, args.color)
-        (args.out_dir / f"{svg_path.stem}.rgba").write_bytes(image.tobytes())
-
-
-if __name__ == "__main__":
-    main()

@@ -1,7 +1,6 @@
 use iced::highlighter;
 use iced::widget::{
-    button, column, container, image, mouse_area, opaque, row, scrollable, space, stack, text,
-    tooltip,
+    button, column, container, mouse_area, opaque, row, scrollable, space, stack, text, tooltip,
 };
 use iced::{Center, Element, Fill, Length};
 
@@ -1195,19 +1194,18 @@ fn toolbar_button<'a>(
     label: &'static str,
     message: Option<Message>,
 ) -> Element<'a, Message> {
+    let icon = if message.is_some() {
+        colored::icon(colored_icon(icon), 18)
+    } else {
+        colored::disabled_icon(colored_icon(icon), 18)
+    };
     tooltip(
-        button(centered_button_content(
-            image::Image::new(icon_handle(icon))
-                .width(18)
-                .height(18)
-                .opacity(if message.is_some() { 1.0 } else { 0.38 })
-                .filter_method(image::FilterMethod::Linear),
-        ))
-        .width(25)
-        .height(24)
-        .padding(3)
-        .style(styles::icon_button)
-        .on_press_maybe(message),
+        button(centered_button_content(icon))
+            .width(25)
+            .height(24)
+            .padding(3)
+            .style(styles::icon_button)
+            .on_press_maybe(message),
         container(text(label).size(12))
             .padding([4, 7])
             .style(styles::tooltip),
@@ -1226,8 +1224,8 @@ fn separator<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn icon_handle(icon: Icon) -> image::Handle {
-    colored::handle(match icon {
+fn colored_icon(icon: Icon) -> ColoredIcon {
+    match icon {
         Icon::New => ColoredIcon::New,
         Icon::Open => ColoredIcon::Open,
         Icon::Save => ColoredIcon::Save,
@@ -1248,5 +1246,5 @@ fn icon_handle(icon: Icon) -> image::Handle {
         Icon::AllCharacters => ColoredIcon::AllCharacters,
         Icon::IndentGuide => ColoredIcon::IndentGuide,
         Icon::FunctionList => ColoredIcon::FunctionList,
-    })
+    }
 }

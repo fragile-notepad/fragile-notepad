@@ -1,11 +1,7 @@
-use iced::advanced::widget::{Tree, Widget};
-use iced::advanced::{Layout, image, layout, mouse, renderer};
-use iced::{Color, Element, Length, Rectangle, Size, Theme};
+use iced::advanced::graphics::geometry;
+use iced::{Color, Element, Radians, Rectangle};
 
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
-
-use super::mask;
+use super::vector::{self, VectorIcon, compiled};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HeroIcon {
@@ -19,136 +15,46 @@ pub enum HeroIcon {
     XMark,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HeroIconAsset {
-    ArrowTurnDownLeft,
-    ArrowTurnDownRight,
-    ChevronDown,
-    ChevronRight,
-    Minus,
-    Plus,
-    QuestionMarkCircle,
-    XMark,
-}
-
-impl HeroIconAsset {
-    pub fn rgba_bytes(self) -> &'static [u8] {
-        match self {
-            HeroIconAsset::ArrowTurnDownLeft => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/arrow-turn-down-left.rgba")
-            }
-            HeroIconAsset::ArrowTurnDownRight => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/arrow-turn-down-right.rgba")
-            }
-            HeroIconAsset::ChevronDown => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/chevron-down.rgba")
-            }
-            HeroIconAsset::ChevronRight => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/chevron-right.rgba")
-            }
-            HeroIconAsset::Minus => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/minus.rgba")
-            }
-            HeroIconAsset::Plus => include_bytes!("../../../assets/icons/heroicons/rgba/plus.rgba"),
-            HeroIconAsset::QuestionMarkCircle => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/question-mark-circle.rgba")
-            }
-            HeroIconAsset::XMark => {
-                include_bytes!("../../../assets/icons/heroicons/rgba/x-mark.rgba")
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum IconTone {
     Text,
     Muted,
 }
 
-pub fn icon<Message>(icon: HeroIcon, size: u32, tone: IconTone) -> Element<'static, Message>
-where
-    Message: 'static,
-{
-    Element::new(ThemedHeroIcon { icon, size, tone })
-}
-
-pub fn handle_with_color(icon: HeroIcon, color: Color) -> image::Handle {
-    static CACHE: mask::IconCache<HeroIcon> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    mask::handle_with_color(icon, color, &CACHE, icon_bytes)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ThemedHeroIcon {
+pub fn icon<Message: 'static>(
     icon: HeroIcon,
     size: u32,
     tone: IconTone,
-}
-
-impl<Message, Renderer> Widget<Message, Theme, Renderer> for ThemedHeroIcon
-where
-    Renderer: image::Renderer<Handle = image::Handle>,
-{
-    fn size(&self) -> Size<Length> {
-        Size {
-            width: Length::Fixed(self.size as f32),
-            height: Length::Fixed(self.size as f32),
+) -> Element<'static, Message> {
+    let color = match tone {
+        IconTone::Text => crate::ui::styles::shortcut_text_color,
+        IconTone::Muted => {
+            |theme: &iced::Theme| crate::ui::styles::shortcut_text_color(theme).scale_alpha(0.72)
         }
-    }
-
-    fn layout(
-        &mut self,
-        _tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(Size::new(self.size as f32, self.size as f32))
-    }
-
-    fn draw(
-        &self,
-        _tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        _style: &renderer::Style,
-        layout: Layout<'_>,
-        _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-    ) {
-        let bounds = layout.bounds();
-
-        renderer.draw_image(
-            image::Image::new(handle_with_color(self.icon, icon_color(theme, self.tone)))
-                .filter_method(image::FilterMethod::Linear),
-            bounds,
-            bounds,
-        );
-    }
+    };
+    vector::icon(asset(icon), size, color, 1.0)
 }
 
-fn icon_color(theme: &Theme, tone: IconTone) -> Color {
-    let text = mask::theme_text_color(theme);
-
-    match tone {
-        IconTone::Text => text,
-        IconTone::Muted => text.scale_alpha(0.72),
-    }
+pub fn draw(
+    renderer: &mut impl geometry::Renderer,
+    icon: HeroIcon,
+    bounds: Rectangle,
+    clip: Rectangle,
+    color: Color,
+    rotation: Radians,
+) {
+    asset(icon).draw(renderer, bounds, clip, color, 1.0, rotation);
 }
 
-fn icon_bytes(icon: HeroIcon) -> &'static [u8] {
-    hero_asset(icon).rgba_bytes()
-}
-
-fn hero_asset(icon: HeroIcon) -> HeroIconAsset {
+fn asset(icon: HeroIcon) -> &'static VectorIcon {
     match icon {
-        HeroIcon::ArrowTurnDownLeft => HeroIconAsset::ArrowTurnDownLeft,
-        HeroIcon::ArrowTurnDownRight => HeroIconAsset::ArrowTurnDownRight,
-        HeroIcon::ChevronDown => HeroIconAsset::ChevronDown,
-        HeroIcon::ChevronRight => HeroIconAsset::ChevronRight,
-        HeroIcon::Minus => HeroIconAsset::Minus,
-        HeroIcon::Plus => HeroIconAsset::Plus,
-        HeroIcon::QuestionMarkCircle => HeroIconAsset::QuestionMarkCircle,
-        HeroIcon::XMark => HeroIconAsset::XMark,
+        HeroIcon::ArrowTurnDownLeft => &compiled::HEROICONS_ARROW_TURN_DOWN_LEFT,
+        HeroIcon::ArrowTurnDownRight => &compiled::HEROICONS_ARROW_TURN_DOWN_RIGHT,
+        HeroIcon::ChevronDown => &compiled::HEROICONS_CHEVRON_DOWN,
+        HeroIcon::ChevronRight => &compiled::HEROICONS_CHEVRON_RIGHT,
+        HeroIcon::Minus => &compiled::HEROICONS_MINUS,
+        HeroIcon::Plus => &compiled::HEROICONS_PLUS,
+        HeroIcon::QuestionMarkCircle => &compiled::HEROICONS_QUESTION_MARK_CIRCLE,
+        HeroIcon::XMark => &compiled::HEROICONS_X_MARK,
     }
 }

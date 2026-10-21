@@ -172,8 +172,9 @@ pub enum State<T> {
 
 /// A piece of data that can be cached.
 pub trait Cached: Sized {
-    /// The type of cache produced.
-    type Cache: Clone;
+    /// The type of cache produced. It owns its contents so callers can share
+    /// cached geometry between widget instances without borrowing a renderer.
+    type Cache: Clone + 'static;
 
     /// Loads the [`Cache`] into a proper instance.
     ///

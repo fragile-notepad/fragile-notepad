@@ -1,7 +1,7 @@
 use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget};
-use iced::advanced::{Layout, Shell, image as advanced_image, mouse, text};
+use iced::advanced::{Layout, Shell, graphics::geometry, mouse, text};
 use iced::time::Duration;
 use iced::time::Instant;
 use iced::{Background, Element, Event, Font, Length, Rectangle, Size, Theme, highlighter};
@@ -196,9 +196,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
 impl<Message, Renderer> Widget<Message, Theme, Renderer> for AdvancedEditor<'_, Message>
 where
     Message: Clone,
-    Renderer: iced::advanced::Renderer
-        + text::Renderer<Font = Font>
-        + advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font> + geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
         Size {
@@ -750,10 +748,7 @@ impl<'a, Message, Renderer> From<AdvancedEditor<'a, Message>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: Clone + 'a,
-    Renderer: iced::advanced::Renderer
-        + text::Renderer<Font = Font>
-        + advanced_image::Renderer<Handle = advanced_image::Handle>
-        + 'a,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font> + geometry::Renderer + 'a,
 {
     fn from(editor: AdvancedEditor<'a, Message>) -> Self {
         Element::new(editor)

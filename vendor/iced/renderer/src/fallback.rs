@@ -62,13 +62,12 @@ where
         delegate!(self, renderer, renderer.end_layer());
     }
 
-    fn start_cached_layer(
-        &mut self,
-        cache: &renderer::Cache,
-        key: u64,
-        bounds: Rectangle,
-    ) -> bool {
-        delegate!(self, renderer, renderer.start_cached_layer(cache, key, bounds))
+    fn start_cached_layer(&mut self, cache: &renderer::Cache, key: u64, bounds: Rectangle) -> bool {
+        delegate!(
+            self,
+            renderer,
+            renderer.start_cached_layer(cache, key, bounds)
+        )
     }
 
     fn end_cached_layer(&mut self) {
@@ -535,6 +534,13 @@ mod geometry {
             match self {
                 Self::Primary(renderer) => Frame::Primary(renderer.new_frame(bounds)),
                 Self::Secondary(renderer) => Frame::Secondary(renderer.new_frame(bounds)),
+            }
+        }
+
+        fn cache_backend(&self) -> usize {
+            match self {
+                Self::Primary(renderer) => renderer.cache_backend() * 2,
+                Self::Secondary(renderer) => renderer.cache_backend() * 2 + 1,
             }
         }
 

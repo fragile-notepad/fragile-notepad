@@ -1,7 +1,6 @@
-use iced::advanced::image;
+use iced::Element;
 
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use super::vector::{self, VectorIcon, compiled};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColoredIcon {
@@ -31,195 +30,50 @@ pub enum ColoredIcon {
     ZoomOut,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ColoredIconAsset {
-    AccessoriesCharacterMap,
-    DocumentClose,
-    DocumentCloseAll,
-    DocumentNew,
-    DocumentOpen,
-    DocumentPrint,
-    DocumentSave,
-    DocumentSaveAll,
-    DocumentSaveAs,
-    EditCopy,
-    EditCut,
-    EditDelete,
-    EditFind,
-    EditFindReplace,
-    EditPaste,
-    EditRedo,
-    EditUndo,
-    EmblemFavorite,
-    EmblemImportant,
-    FormatIndentMore,
-    FormatJustifyFill,
-    ProcessStop,
-    TabClose,
-    TabDocumentMonitoring,
-    TabDocumentReadOnly,
-    TabDocumentSaved,
-    TabDocumentSystemReadOnly,
-    TabDocumentUnsaved,
-    TextXGeneric,
-    TextXGenericTemplate,
-    TextXScript,
-    ZoomIn,
-    ZoomOut,
+pub fn icon<Message: 'static>(icon: ColoredIcon, size: u32) -> Element<'static, Message> {
+    vector::icon(
+        asset(icon),
+        size,
+        crate::ui::styles::shortcut_text_color,
+        1.0,
+    )
 }
 
-impl ColoredIconAsset {
-    pub fn rgba_bytes(self) -> &'static [u8] {
-        match self {
-            ColoredIconAsset::AccessoriesCharacterMap => {
-                include_bytes!("../../../assets/icons/colored/rgba/accessories-character-map.rgba")
-            }
-            ColoredIconAsset::DocumentClose => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-close.rgba")
-            }
-            ColoredIconAsset::DocumentCloseAll => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-close-all.rgba")
-            }
-            ColoredIconAsset::DocumentNew => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-new.rgba")
-            }
-            ColoredIconAsset::DocumentOpen => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-open.rgba")
-            }
-            ColoredIconAsset::DocumentPrint => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-print.rgba")
-            }
-            ColoredIconAsset::DocumentSave => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-save.rgba")
-            }
-            ColoredIconAsset::DocumentSaveAll => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-save-all.rgba")
-            }
-            ColoredIconAsset::DocumentSaveAs => {
-                include_bytes!("../../../assets/icons/colored/rgba/document-save-as.rgba")
-            }
-            ColoredIconAsset::EditCopy => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-copy.rgba")
-            }
-            ColoredIconAsset::EditCut => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-cut.rgba")
-            }
-            ColoredIconAsset::EditDelete => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-delete.rgba")
-            }
-            ColoredIconAsset::EditFind => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-find.rgba")
-            }
-            ColoredIconAsset::EditFindReplace => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-find-replace.rgba")
-            }
-            ColoredIconAsset::EditPaste => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-paste.rgba")
-            }
-            ColoredIconAsset::EditRedo => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-redo.rgba")
-            }
-            ColoredIconAsset::EditUndo => {
-                include_bytes!("../../../assets/icons/colored/rgba/edit-undo.rgba")
-            }
-            ColoredIconAsset::EmblemFavorite => {
-                include_bytes!("../../../assets/icons/colored/rgba/emblem-favorite.rgba")
-            }
-            ColoredIconAsset::EmblemImportant => {
-                include_bytes!("../../../assets/icons/colored/rgba/emblem-important.rgba")
-            }
-            ColoredIconAsset::FormatIndentMore => {
-                include_bytes!("../../../assets/icons/colored/rgba/format-indent-more.rgba")
-            }
-            ColoredIconAsset::FormatJustifyFill => {
-                include_bytes!("../../../assets/icons/colored/rgba/format-justify-fill.rgba")
-            }
-            ColoredIconAsset::ProcessStop => {
-                include_bytes!("../../../assets/icons/colored/rgba/process-stop.rgba")
-            }
-            ColoredIconAsset::TabClose => {
-                include_bytes!("../../../assets/icons/colored/rgba/tab-close.rgba")
-            }
-            ColoredIconAsset::TabDocumentMonitoring => {
-                include_bytes!("../../../assets/icons/colored/rgba/tab-document-monitoring.rgba")
-            }
-            ColoredIconAsset::TabDocumentReadOnly => {
-                include_bytes!("../../../assets/icons/colored/rgba/tab-document-read-only.rgba")
-            }
-            ColoredIconAsset::TabDocumentSaved => {
-                include_bytes!("../../../assets/icons/colored/rgba/tab-document-saved.rgba")
-            }
-            ColoredIconAsset::TabDocumentSystemReadOnly => {
-                include_bytes!(
-                    "../../../assets/icons/colored/rgba/tab-document-system-read-only.rgba"
-                )
-            }
-            ColoredIconAsset::TabDocumentUnsaved => {
-                include_bytes!("../../../assets/icons/colored/rgba/tab-document-unsaved.rgba")
-            }
-            ColoredIconAsset::TextXGeneric => {
-                include_bytes!("../../../assets/icons/colored/rgba/text-x-generic.rgba")
-            }
-            ColoredIconAsset::TextXGenericTemplate => {
-                include_bytes!("../../../assets/icons/colored/rgba/text-x-generic-template.rgba")
-            }
-            ColoredIconAsset::TextXScript => {
-                include_bytes!("../../../assets/icons/colored/rgba/text-x-script.rgba")
-            }
-            ColoredIconAsset::ZoomIn => {
-                include_bytes!("../../../assets/icons/colored/rgba/zoom-in.rgba")
-            }
-            ColoredIconAsset::ZoomOut => {
-                include_bytes!("../../../assets/icons/colored/rgba/zoom-out.rgba")
-            }
-        }
-    }
+pub fn disabled_icon<Message: 'static>(icon: ColoredIcon, size: u32) -> Element<'static, Message> {
+    vector::disabled_icon(
+        asset(icon),
+        size,
+        crate::ui::styles::shortcut_text_color,
+        crate::ui::styles::tool_bar_background,
+        0.38,
+    )
 }
 
-pub fn handle(icon: ColoredIcon) -> image::Handle {
-    let asset = asset(icon);
-
-    static CACHE: LazyLock<Mutex<HashMap<ColoredIconAsset, image::Handle>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    let mut cache = CACHE.lock().expect("colored icon cache");
-    cache
-        .entry(asset)
-        .or_insert_with(|| {
-            image::Handle::from_rgba(
-                super::ICON_SIZE,
-                super::ICON_SIZE,
-                asset.rgba_bytes().to_vec(),
-            )
-        })
-        .clone()
-}
-
-fn asset(icon: ColoredIcon) -> ColoredIconAsset {
+fn asset(icon: ColoredIcon) -> &'static VectorIcon {
     match icon {
-        ColoredIcon::AllCharacters => ColoredIconAsset::AccessoriesCharacterMap,
-        ColoredIcon::Close => ColoredIconAsset::DocumentClose,
-        ColoredIcon::CloseAll => ColoredIconAsset::DocumentCloseAll,
-        ColoredIcon::Delete => ColoredIconAsset::EditDelete,
-        ColoredIcon::Copy => ColoredIconAsset::EditCopy,
-        ColoredIcon::Cut => ColoredIconAsset::EditCut,
-        ColoredIcon::DocumentSaved => ColoredIconAsset::TabDocumentSaved,
-        ColoredIcon::DocumentUnsaved => ColoredIconAsset::TabDocumentUnsaved,
-        ColoredIcon::Find => ColoredIconAsset::EditFind,
-        ColoredIcon::FunctionList => ColoredIconAsset::TextXScript,
-        ColoredIcon::IndentGuide => ColoredIconAsset::FormatIndentMore,
-        ColoredIcon::New => ColoredIconAsset::DocumentNew,
-        ColoredIcon::Open => ColoredIconAsset::DocumentOpen,
-        ColoredIcon::Paste => ColoredIconAsset::EditPaste,
-        ColoredIcon::Print => ColoredIconAsset::DocumentPrint,
-        ColoredIcon::Redo => ColoredIconAsset::EditRedo,
-        ColoredIcon::Replace => ColoredIconAsset::EditFindReplace,
-        ColoredIcon::Save => ColoredIconAsset::DocumentSave,
-        ColoredIcon::SaveAll => ColoredIconAsset::DocumentSaveAll,
-        ColoredIcon::TabClose => ColoredIconAsset::TabClose,
-        ColoredIcon::Undo => ColoredIconAsset::EditUndo,
-        ColoredIcon::WordWrap => ColoredIconAsset::FormatJustifyFill,
-        ColoredIcon::ZoomIn => ColoredIconAsset::ZoomIn,
-        ColoredIcon::ZoomOut => ColoredIconAsset::ZoomOut,
+        ColoredIcon::AllCharacters => &compiled::COLORED_ACCESSORIES_CHARACTER_MAP,
+        ColoredIcon::Close => &compiled::COLORED_DOCUMENT_CLOSE,
+        ColoredIcon::CloseAll => &compiled::COLORED_DOCUMENT_CLOSE_ALL,
+        ColoredIcon::Delete => &compiled::COLORED_EDIT_DELETE,
+        ColoredIcon::Copy => &compiled::COLORED_EDIT_COPY,
+        ColoredIcon::Cut => &compiled::COLORED_EDIT_CUT,
+        ColoredIcon::DocumentSaved => &compiled::COLORED_TAB_DOCUMENT_SAVED,
+        ColoredIcon::DocumentUnsaved => &compiled::COLORED_TAB_DOCUMENT_UNSAVED,
+        ColoredIcon::Find => &compiled::COLORED_EDIT_FIND,
+        ColoredIcon::FunctionList => &compiled::COLORED_TEXT_X_SCRIPT,
+        ColoredIcon::IndentGuide => &compiled::COLORED_FORMAT_INDENT_MORE,
+        ColoredIcon::New => &compiled::COLORED_DOCUMENT_NEW,
+        ColoredIcon::Open => &compiled::COLORED_DOCUMENT_OPEN,
+        ColoredIcon::Paste => &compiled::COLORED_EDIT_PASTE,
+        ColoredIcon::Print => &compiled::COLORED_DOCUMENT_PRINT,
+        ColoredIcon::Redo => &compiled::COLORED_EDIT_REDO,
+        ColoredIcon::Replace => &compiled::COLORED_EDIT_FIND_REPLACE,
+        ColoredIcon::Save => &compiled::COLORED_DOCUMENT_SAVE,
+        ColoredIcon::SaveAll => &compiled::COLORED_DOCUMENT_SAVE_ALL,
+        ColoredIcon::TabClose => &compiled::COLORED_TAB_CLOSE,
+        ColoredIcon::Undo => &compiled::COLORED_EDIT_UNDO,
+        ColoredIcon::WordWrap => &compiled::COLORED_FORMAT_JUSTIFY_FILL,
+        ColoredIcon::ZoomIn => &compiled::COLORED_ZOOM_IN,
+        ColoredIcon::ZoomOut => &compiled::COLORED_ZOOM_OUT,
     }
 }

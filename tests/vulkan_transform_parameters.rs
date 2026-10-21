@@ -9,9 +9,9 @@ use iced::{Color, Rectangle, Size, Transformation};
 use iced_wgpu::graphics::{Shell, Viewport};
 
 fn poll_initialization(device: &wgpu::Device, limit: u32, stage: &str) {
-    let result = device.poll(wgpu::PollType::Poll);
-    eprintln!("TRANSFORM_INIT_POLL limit={limit} stage={stage} result={result:?}");
-    result.unwrap_or_else(|error| panic!("GPU initialization poll failed at {stage}: {error}"));
+    device.poll(wgpu::PollType::Poll).unwrap_or_else(|error| {
+        panic!("GPU initialization failed at {stage} with immediate limit {limit}: {error}")
+    });
 }
 
 fn record(renderer: &mut iced_wgpu::Renderer, image: &image::Handle, phase: u32) {
@@ -148,35 +148,6 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
             eprintln!("TRANSFORM_DEVICE_LOST limit={limit} reason={reason:?} message={message}");
         });
         poll_initialization(&device, limit, "device_requested");
-        for format in [
-            wgpu::TextureFormat::Rgba8Unorm,
-            wgpu::TextureFormat::R8Unorm,
-        ] {
-            eprintln!(
-                "TRANSFORM_INIT_TEXTURE limit={limit} format={format:?} stage=create_texture"
-            );
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("transform initialization texture probe"),
-                size: wgpu::Extent3d {
-                    width: 2,
-                    height: 2,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            eprintln!("TRANSFORM_INIT_TEXTURE limit={limit} format={format:?} stage=create_view");
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            eprintln!("TRANSFORM_INIT_TEXTURE limit={limit} format={format:?} stage=ready");
-            poll_initialization(&device, limit, "texture_probe_ready");
-            drop(view);
-            drop(texture);
-        }
-        eprintln!("TRANSFORM_INIT_STAGE limit={limit} stage=engine_begin");
         let engine = iced_wgpu::Engine::new(
             &adapter,
             device.clone(),
@@ -185,7 +156,6 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
             None,
             Shell::headless(),
         );
-        eprintln!("TRANSFORM_INIT_STAGE limit={limit} stage=engine_ready");
         poll_initialization(&device, limit, "engine_ready");
         let mut active = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
         let mut idle = iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());

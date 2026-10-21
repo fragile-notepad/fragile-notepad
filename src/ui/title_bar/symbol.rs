@@ -1,5 +1,5 @@
 use iced::advanced::widget::{Tree, Widget};
-use iced::advanced::{Layout, image, layout, mouse, renderer};
+use iced::advanced::{Layout, graphics::geometry, layout, mouse, renderer};
 use iced::{Border, Color, Length, Rectangle, Size, Theme};
 
 use super::{Action, ControlStyle, HEIGHT, MAC_CONTROL_WIDTH};
@@ -14,7 +14,7 @@ pub(super) struct Symbol {
 
 impl<Message, Renderer> Widget<Message, Theme, Renderer> for Symbol
 where
-    Renderer: image::Renderer<Handle = image::Handle>,
+    Renderer: geometry::Renderer,
 {
     fn size(&self) -> Size<Length> {
         Size::new(
@@ -116,12 +116,7 @@ where
                 iced::Point::new(center.x - size / 2.0, center.y - size / 2.0),
                 Size::new(size, size),
             );
-            renderer.draw_image(
-                image::Image::new(hero::handle_with_color(icon, ink))
-                    .filter_method(image::FilterMethod::Linear),
-                bounds,
-                bounds,
-            );
+            hero::draw(renderer, icon, bounds, bounds, ink, iced::Radians(0.0));
         } else {
             // Geometry keeps maximize/restore crisp without depending on OS fonts.
             let square = |renderer: &mut Renderer, x, y, size| {

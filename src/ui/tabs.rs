@@ -3,7 +3,7 @@ use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Layout, Renderer as _, Shell, Widget};
-use iced::widget::{button, container, image, row, text, tooltip};
+use iced::widget::{button, container, row, text, tooltip};
 use iced::{
     Background, Border, Center, Color, Element, Event, Fill, Length, Point, Rectangle, Size,
 };
@@ -163,10 +163,7 @@ fn tab(
 
     let title_area = container(
         row![
-            image::Image::new(tab_state_icon(TabFileState::from_document(document)))
-                .width(14)
-                .height(14)
-                .filter_method(image::FilterMethod::Linear),
+            colored::icon(tab_state_icon(TabFileState::from_document(document)), 14),
             text(compact_title)
                 .size(TAB_TEXT_SIZE)
                 .wrapping(text::Wrapping::None)
@@ -195,12 +192,10 @@ fn tab(
     .style(styles::tab_pin_button(is_active, document.is_pinned))
     .on_press(Message::TabPinToggled(document.id));
 
-    let close_button = button(centered_button_content(
-        image::Image::new(close_icon())
-            .width(22)
-            .height(22)
-            .filter_method(image::FilterMethod::Linear),
-    ))
+    let close_button = button(centered_button_content(colored::icon(
+        ColoredIcon::TabClose,
+        22,
+    )))
     .width(TAB_CLOSE_WIDTH)
     .height(23)
     .padding(0)
@@ -543,15 +538,11 @@ impl TabFileState {
     }
 }
 
-fn tab_state_icon(state: TabFileState) -> image::Handle {
+fn tab_state_icon(state: TabFileState) -> ColoredIcon {
     match state {
-        TabFileState::Saved => colored::handle(ColoredIcon::DocumentSaved),
-        TabFileState::Unsaved => colored::handle(ColoredIcon::DocumentUnsaved),
+        TabFileState::Saved => ColoredIcon::DocumentSaved,
+        TabFileState::Unsaved => ColoredIcon::DocumentUnsaved,
     }
-}
-
-fn close_icon() -> image::Handle {
-    colored::handle(ColoredIcon::TabClose)
 }
 
 #[cfg(test)]

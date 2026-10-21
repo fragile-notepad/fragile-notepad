@@ -1,8 +1,8 @@
-use crate::core::{Size, Transformation};
+use crate::core::{Rectangle, Size, Transformation};
 use crate::graphics;
 
 use std::num::NonZeroU64;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 
 #[derive(Debug, Clone)]
 pub struct Pipeline {
@@ -12,7 +12,13 @@ pub struct Pipeline {
     constant_layout: wgpu::BindGroupLayout,
     texture_layout: wgpu::BindGroupLayout,
     sample_count: u32,
-    targets: Arc<RwLock<Option<Targets>>>,
+    targets: Arc<RwLock<TargetPool>>,
+}
+
+#[derive(Debug, Default)]
+struct TargetPool {
+    retained: Vec<Arc<Targets>>,
+    shared: Vec<Weak<Targets>>,
 }
 
 impl Pipeline {
@@ -113,52 +119,68 @@ impl Pipeline {
             constant_layout,
             texture_layout,
             sample_count: antialiasing.sample_count(),
-            targets: Arc::new(RwLock::new(None)),
+            targets: Arc::new(RwLock::new(TargetPool::default())),
         }
     }
 
-    fn targets(&self, device: &wgpu::Device, region_size: Size<u32>) -> Targets {
+    fn targets(&self, device: &wgpu::Device, size: Size<u32>) -> Arc<Targets> {
         let mut targets = self.targets.write().expect("Write MSAA targets");
-
-        match targets.as_mut() {
-            Some(targets)
-                if region_size.width <= targets.size.width
-                    && region_size.height <= targets.size.height => {}
-            _ => {
-                *targets = Some(Targets::new(
-                    device,
-                    self.format,
-                    &self.texture_layout,
-                    self.sample_count,
-                    region_size,
-                ));
+        targets.shared.retain(|target| target.strong_count() > 0);
+        let shared = targets
+            .shared
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|target| target.size == size);
+        if let Some(target) = shared {
+            if let Some(index) = targets
+                .retained
+                .iter()
+                .position(|retained| Arc::ptr_eq(retained, &target))
+            {
+                let target = targets.retained.remove(index);
+                targets.retained.push(target);
             }
+            return target;
         }
-
-        targets.as_ref().unwrap().clone()
+        let target = Arc::new(Targets::new(
+            device,
+            self.format,
+            &self.texture_layout,
+            self.sample_count,
+            size,
+        ));
+        // Passes use these attachments sequentially, including across windows
+        // on the shared queue. Weak entries also share oversized attachments
+        // while passes own them, without retaining them beyond those passes.
+        const BUDGET: u64 = 32 * 1024 * 1024;
+        let bytes = |size: Size<u32>| {
+            u64::from(size.width) * u64::from(size.height) * 4 * u64::from(self.sample_count + 1)
+        };
+        if bytes(size) <= BUDGET {
+            while !targets.retained.is_empty()
+                && (targets.retained.len() >= 8
+                    || targets
+                        .retained
+                        .iter()
+                        .map(|target| bytes(target.size))
+                        .sum::<u64>()
+                        + bytes(size)
+                        > BUDGET)
+            {
+                let _ = targets.retained.remove(0);
+            }
+            targets.retained.push(target.clone());
+        }
+        targets.shared.push(Arc::downgrade(&target));
+        target
     }
+}
 
-    pub fn render_pass<'a>(&self, encoder: &'a mut wgpu::CommandEncoder) -> wgpu::RenderPass<'a> {
-        let targets = self.targets.read().expect("Read MSAA targets");
-        let targets = targets.as_ref().unwrap();
-
-        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("iced_wgpu.triangle.render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &targets.attachment,
-                depth_slice: None,
-                resolve_target: Some(&targets.resolve),
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        })
-    }
+fn bucket_size(size: Size<u32>, viewport: Size<u32>) -> Size<u32> {
+    Size::new(
+        size.width.next_power_of_two().min(viewport.width),
+        size.height.next_power_of_two().min(viewport.height),
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +263,8 @@ pub struct State {
     ratio: wgpu::Buffer,
     constants: wgpu::BindGroup,
     last_ratio: Option<Ratio>,
+    targets: Option<Arc<Targets>>,
+    bounds: Rectangle<u32>,
 }
 
 impl State {
@@ -271,6 +295,8 @@ impl State {
             ratio,
             constants,
             last_ratio: None,
+            targets: None,
+            bounds: Rectangle::default(),
         }
     }
 
@@ -280,9 +306,15 @@ impl State {
         encoder: &mut wgpu::CommandEncoder,
         belt: &mut wgpu::util::StagingBelt,
         pipeline: &Pipeline,
-        region_size: Size<u32>,
+        bounds: Rectangle<u32>,
+        viewport: Size<u32>,
     ) -> Transformation {
-        let targets = pipeline.targets(device, region_size);
+        let region_size = Size::new(bounds.width, bounds.height);
+        let size = bucket_size(region_size, viewport);
+        let targets = match self.targets.as_ref() {
+            Some(targets) if targets.size == size => targets.clone(),
+            _ => pipeline.targets(device, size),
+        };
 
         let ratio = Ratio {
             u: region_size.width as f32 / targets.size.width as f32,
@@ -302,11 +334,39 @@ impl State {
             self.last_ratio = Some(ratio);
         }
 
-        Transformation::orthographic(targets.size.width, targets.size.height)
+        let projection = Transformation::orthographic(targets.size.width, targets.size.height)
+            * Transformation::translate(-(bounds.x as f32), -(bounds.y as f32));
+        self.targets = Some(targets);
+        self.bounds = bounds;
+        projection
     }
 
     pub fn invalidate_ratio(&mut self) {
         self.last_ratio = None;
+    }
+
+    pub fn bounds(&self) -> Rectangle<u32> {
+        self.bounds
+    }
+
+    pub fn render_pass<'a>(&self, encoder: &'a mut wgpu::CommandEncoder) -> wgpu::RenderPass<'a> {
+        let targets = self.targets.as_ref().expect("Prepared MSAA target");
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("iced_wgpu.triangle.render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &targets.attachment,
+                depth_slice: None,
+                resolve_target: Some(&targets.resolve),
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Discard,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
     }
 
     pub fn render(
@@ -314,7 +374,7 @@ impl State {
         pipeline: &Pipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        bounds: crate::core::Rectangle,
+        bounds: Rectangle,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("iced_wgpu::triangle::msaa render pass"),
@@ -338,19 +398,103 @@ impl State {
         } else {
             return;
         }
+        render_pass.set_viewport(
+            self.bounds.x as f32,
+            self.bounds.y as f32,
+            self.bounds.width as f32,
+            self.bounds.height as f32,
+            0.0,
+            1.0,
+        );
         render_pass.set_pipeline(&pipeline.raw);
         render_pass.set_bind_group(0, &self.constants, &[]);
         render_pass.set_bind_group(
             1,
-            &pipeline
+            &self
                 .targets
-                .read()
-                .expect("Read MSAA targets")
                 .as_ref()
-                .unwrap()
+                .expect("Prepared MSAA target")
                 .bind_group,
             &[],
         );
         render_pass.draw(0..6, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unavailable(reason: &str) {
+        const REQUIRE_GPU: &str = "FRAGILE_REQUIRE_GPU_TESTS";
+        let required = match std::env::var(REQUIRE_GPU) {
+            Ok(value) => match value.as_str() {
+                "1" => true,
+                "0" => false,
+                _ => panic!("{REQUIRE_GPU} must be 0 or 1, got {value:?}"),
+            },
+            Err(std::env::VarError::NotPresent) => std::env::var_os("CI").is_some(),
+            Err(error) => panic!("cannot read {REQUIRE_GPU}: {error}"),
+        };
+        assert!(
+            !required,
+            "GPU validation is required ({REQUIRE_GPU}=1 or CI is set): {reason}"
+        );
+        eprintln!("Skipping GPU validation: {reason}; set {REQUIRE_GPU}=1 to require it");
+    }
+
+    #[test]
+    fn oversized_scratch_targets_share_until_released() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = match futures::executor::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        ) {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                unavailable(&format!("MSAA scratch validation: {error}"));
+                return;
+            }
+        };
+        let (device, _queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .expect("create Vulkan MSAA scratch test device");
+        let pipeline = Pipeline::new(
+            &device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            graphics::Antialiasing::MSAAx4,
+        );
+        // Four samples and a resolve texture exceed the 32 MiB strong pool.
+        let first = pipeline.targets(&device, Size::new(1920, 1080));
+        let second = pipeline.targets(&device, Size::new(1920, 1080));
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "equal oversized passes allocated separate scratch attachments"
+        );
+        assert!(
+            pipeline.targets.read().unwrap().retained.is_empty(),
+            "the pool retained an oversized scratch attachment"
+        );
+        let lifetime = Arc::downgrade(&first);
+        drop(first);
+        assert!(lifetime.upgrade().is_some());
+        drop(second);
+        assert!(
+            lifetime.upgrade().is_none(),
+            "scratch attachments outlived their last prepared pass"
+        );
+    }
+
+    #[test]
+    fn scratch_targets_fit_the_viewport() {
+        let viewport = Size::new(1536, 1152);
+        assert_eq!(bucket_size(Size::new(19, 23), viewport), Size::new(32, 32));
+        assert_eq!(
+            bucket_size(Size::new(1000, 21), viewport),
+            Size::new(1024, 32)
+        );
+        assert_eq!(bucket_size(viewport, viewport), viewport);
     }
 }

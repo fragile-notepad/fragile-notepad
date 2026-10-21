@@ -2,7 +2,7 @@
 mod msaa;
 
 use crate::Buffer;
-use crate::core::{Point, Rectangle, Size, Transformation, Vector};
+use crate::core::{Rectangle, Size, Transformation};
 use crate::graphics::Antialiasing;
 use crate::graphics::mesh::{self, Mesh};
 
@@ -10,7 +10,7 @@ use crate::nudge;
 
 use rustc_hash::FxHashMap;
 use std::collections::hash_map;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 const INITIAL_INDEX_COUNT: usize = 1_000;
 const INITIAL_VERTEX_COUNT: usize = 1_000;
@@ -32,14 +32,31 @@ pub enum Item {
 #[derive(Debug)]
 struct Upload {
     layer: Layer,
-    transformation: Transformation,
-    version: usize,
+    owner: Weak<()>,
     batch: Arc<[Mesh]>,
+    used: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct UploadKey {
+    id: mesh::Id,
+    version: usize,
+    transformation: [u32; 16],
+}
+
+impl UploadKey {
+    fn new(cache: &mesh::Cache, transformation: Transformation) -> Self {
+        Self {
+            id: cache.id(),
+            version: cache.version(),
+            transformation: transformation.as_ref().map(f32::to_bits),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct Storage {
-    uploads: FxHashMap<mesh::Id, Upload>,
+    uploads: FxHashMap<UploadKey, Upload>,
 }
 
 impl Storage {
@@ -47,12 +64,12 @@ impl Storage {
         Self::default()
     }
 
-    fn get(&self, cache: &mesh::Cache) -> Option<&Upload> {
+    fn get(&self, cache: &mesh::Cache, transformation: Transformation) -> Option<&Upload> {
         if cache.is_empty() {
             return None;
         }
 
-        self.uploads.get(&cache.id())
+        self.uploads.get(&UploadKey::new(cache, transformation))
     }
 
     fn prepare(
@@ -65,28 +82,16 @@ impl Storage {
         cache: &mesh::Cache,
         new_transformation: Transformation,
     ) {
-        match self.uploads.entry(cache.id()) {
+        if cache.is_empty() {
+            return;
+        }
+
+        match self
+            .uploads
+            .entry(UploadKey::new(cache, new_transformation))
+        {
             hash_map::Entry::Occupied(entry) => {
-                let upload = entry.into_mut();
-
-                if upload.version != cache.version() || upload.transformation != new_transformation
-                {
-                    if !cache.is_empty() {
-                        upload.layer.prepare(
-                            device,
-                            encoder,
-                            belt,
-                            solid,
-                            gradient,
-                            cache.batch(),
-                            new_transformation,
-                        );
-                    }
-
-                    upload.batch = cache.batch().clone();
-                    upload.version = cache.version();
-                    upload.transformation = new_transformation;
-                }
+                entry.into_mut().used = true;
             }
             hash_map::Entry::Vacant(entry) => {
                 let mut layer = Layer::new(device, solid, gradient);
@@ -103,9 +108,9 @@ impl Storage {
 
                 let _ = entry.insert(Upload {
                     layer,
-                    transformation: new_transformation,
-                    version: 0,
+                    owner: cache.weak_owner(),
                     batch: cache.batch().clone(),
+                    used: true,
                 });
 
                 log::debug!(
@@ -117,9 +122,14 @@ impl Storage {
         }
     }
 
-    pub fn trim(&mut self) {
-        self.uploads
-            .retain(|_id, upload| Arc::strong_count(&upload.batch) > 1);
+    pub fn trim(&mut self, prepared: bool) {
+        self.uploads.retain(|_key, upload| {
+            let retain = upload.owner.strong_count() > 0 && (!prepared || upload.used);
+            if prepared {
+                upload.used = false;
+            }
+            retain
+        });
     }
 }
 
@@ -131,19 +141,26 @@ pub struct Pipeline {
 }
 
 pub struct State {
-    msaa: Option<msaa::State>,
+    passes: Vec<PreparedPass>,
+    prepare_pass: usize,
+    render_pass: usize,
     layers: Vec<Layer>,
     prepare_layer: usize,
     storage: Storage,
 }
 
+struct PreparedPass {
+    projection: Transformation,
+    bounds: Option<Rectangle<u32>>,
+    msaa: Option<msaa::State>,
+}
+
 impl State {
-    pub fn new(device: &wgpu::Device, pipeline: &Pipeline) -> Self {
+    pub fn new(_device: &wgpu::Device, _pipeline: &Pipeline) -> Self {
         Self {
-            msaa: pipeline
-                .msaa
-                .as_ref()
-                .map(|pipeline| msaa::State::new(device, pipeline)),
+            passes: Vec::new(),
+            prepare_pass: 0,
+            render_pass: 0,
             layers: Vec::new(),
             prepare_layer: 0,
             storage: Storage::new(),
@@ -159,13 +176,32 @@ impl State {
         items: &[Item],
         scale: Transformation,
         target_size: Size<u32>,
+        bounds: Rectangle,
     ) {
-        let projection =
-            if let Some((state, pipeline)) = self.msaa.as_mut().zip(pipeline.msaa.as_ref()) {
-                state.prepare(device, encoder, belt, pipeline, target_size) * scale
-            } else {
-                Transformation::orthographic(target_size.width, target_size.height) * scale
-            };
+        if self.passes.len() <= self.prepare_pass {
+            self.passes.push(PreparedPass {
+                projection: Transformation::IDENTITY,
+                bounds: None,
+                msaa: pipeline
+                    .msaa
+                    .as_ref()
+                    .map(|pipeline| msaa::State::new(device, pipeline)),
+            });
+        }
+        let pass = &mut self.passes[self.prepare_pass];
+        pass.bounds = mesh_bounds(items, scale, bounds);
+        let projection = if let Some(((state, pipeline), bounds)) = pass
+            .msaa
+            .as_mut()
+            .zip(pipeline.msaa.as_ref())
+            .zip(pass.bounds)
+        {
+            state.prepare(device, encoder, belt, pipeline, bounds, target_size) * scale
+        } else {
+            Transformation::orthographic(target_size.width, target_size.height) * scale
+        };
+        pass.projection = projection;
+        self.prepare_pass += 1;
 
         for item in items {
             match item {
@@ -215,8 +251,10 @@ impl State {
     /// than the first presented frame. Refreshing this small uniform at that
     /// boundary avoids relying on the driver's visibility of the warm-up copy.
     pub fn invalidate_msaa_ratio(&mut self) {
-        if let Some(msaa) = &mut self.msaa {
-            msaa.invalidate_ratio();
+        for pass in &mut self.passes {
+            if let Some(msaa) = &mut pass.msaa {
+                msaa.invalidate_ratio();
+            }
         }
     }
 
@@ -230,6 +268,14 @@ impl State {
         bounds: Rectangle,
         screen_transformation: Transformation,
     ) -> usize {
+        let pass = &self.passes[self.render_pass];
+        self.render_pass += 1;
+        if pass.bounds.is_none() {
+            return batch
+                .iter()
+                .filter(|item| matches!(item, Item::Group { .. }))
+                .count();
+        }
         let mut layer_count = 0;
 
         let items = batch.iter().filter_map(|item| match item {
@@ -250,7 +296,7 @@ impl State {
                 transformation,
                 cache,
             } => {
-                let upload = self.storage.get(cache)?;
+                let upload = self.storage.get(cache, pass.projection * *transformation)?;
 
                 Some((
                     &upload.layer,
@@ -263,7 +309,7 @@ impl State {
         render(
             encoder,
             target,
-            self.msaa.as_ref().zip(pipeline.msaa.as_ref()),
+            pass.msaa.as_ref().zip(pipeline.msaa.as_ref()),
             &pipeline.solid,
             &pipeline.gradient,
             bounds,
@@ -274,9 +320,148 @@ impl State {
     }
 
     pub fn trim(&mut self) {
-        self.storage.trim();
+        self.storage.trim(self.prepare_pass > 0);
+        if self.prepare_pass > 0 {
+            self.passes.truncate(self.prepare_pass);
+        }
 
         self.prepare_layer = 0;
+        self.prepare_pass = 0;
+        self.render_pass = 0;
+    }
+}
+
+fn mesh_bounds(items: &[Item], scale: Transformation, bounds: Rectangle) -> Option<Rectangle<u32>> {
+    items
+        .iter()
+        .flat_map(|item| {
+            let (transformation, meshes) = match item {
+                Item::Group {
+                    transformation,
+                    meshes,
+                } => (transformation, meshes.as_slice()),
+                Item::Cached {
+                    transformation,
+                    cache,
+                } => (transformation, cache.batch().as_ref()),
+            };
+            meshes.iter().filter_map(move |mesh| {
+                (mesh.clip_bounds() * (scale * *transformation)).intersection(&bounds)
+            })
+        })
+        .reduce(|union, clip| union.union(&clip))
+        .and_then(nudge::snap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{Color, Point};
+
+    fn mesh() -> Mesh {
+        Mesh::Solid {
+            buffers: mesh::Indexed {
+                vertices: [[0.0, 0.0], [20.0, 0.0], [0.0, 10.0]]
+                    .map(|position| mesh::SolidVertex2D {
+                        position,
+                        color: crate::graphics::color::pack(Color::WHITE),
+                    })
+                    .to_vec(),
+                indices: vec![0, 1, 2],
+            },
+            transformation: Transformation::IDENTITY,
+            clip_bounds: Rectangle::with_size(Size::new(20.0, 10.0)),
+        }
+    }
+
+    #[test]
+    fn scratch_bounds_clip_transformed_meshes() {
+        let cache = mesh::Cache::new(Arc::from([mesh()]));
+        let items = [
+            Item::Group {
+                transformation: Transformation::translate(10.0, 20.0),
+                meshes: vec![mesh()],
+            },
+            Item::Cached {
+                transformation: Transformation::translate(100.0, 50.0),
+                cache,
+            },
+        ];
+        let scale = Transformation::scale(1.5);
+        assert_eq!(
+            mesh_bounds(
+                &items,
+                scale,
+                Rectangle::with_size(Size::new(1500.0, 1000.0))
+            ),
+            Some(Rectangle {
+                x: 15,
+                y: 30,
+                width: 165,
+                height: 60,
+            })
+        );
+        assert_eq!(
+            mesh_bounds(
+                &items,
+                scale,
+                Rectangle::new(Point::new(160.0, 80.0), Size::new(5.0, 4.0))
+            ),
+            Some(Rectangle {
+                x: 160,
+                y: 80,
+                width: 5,
+                height: 4,
+            })
+        );
+        assert_eq!(
+            mesh_bounds(
+                &items,
+                scale,
+                Rectangle::new(Point::new(500.0, 500.0), Size::new(5.0, 4.0))
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn uploads_distinguish_versions_and_positions() {
+        let mut current = mesh::Cache::new(Arc::from([mesh()]));
+        let previous = current.clone();
+        current.update(Arc::from([mesh()]));
+        assert_eq!(previous.id(), current.id());
+
+        let projection = Transformation::orthographic(32, 32);
+        assert_ne!(
+            UploadKey::new(&previous, projection),
+            UploadKey::new(&current, projection),
+            "cache versions share an upload key"
+        );
+        assert_ne!(
+            UploadKey::new(&current, projection),
+            UploadKey::new(&current, projection * Transformation::translate(8.0, 0.0)),
+            "different positions share an upload key"
+        );
+    }
+
+    #[test]
+    fn uploads_do_not_extend_cache_lifetime() {
+        let mut current = mesh::Cache::new(Arc::from([mesh()]));
+        let previous = current.clone();
+        current.update(Arc::from([mesh()]));
+        let uploads = [
+            (current.batch().clone(), current.weak_owner()),
+            (previous.batch().clone(), previous.weak_owner()),
+            (current.batch().clone(), current.weak_owner()),
+        ];
+        assert!(Weak::ptr_eq(&uploads[0].1, &uploads[1].1));
+        assert!(uploads.iter().all(|(_, owner)| owner.strong_count() == 2));
+
+        drop(current);
+        assert!(uploads.iter().all(|(_, owner)| owner.strong_count() == 1));
+        drop(previous);
+        assert!(uploads.iter().all(|(_, owner)| owner.strong_count() == 0));
+        assert!(uploads.iter().all(|(batch, _)| !batch.is_empty()));
     }
 }
 
@@ -297,15 +482,19 @@ impl Pipeline {
 fn render<'a>(
     encoder: &mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
-    mut msaa: Option<(&msaa::State, &msaa::Pipeline)>,
+    msaa: Option<(&msaa::State, &msaa::Pipeline)>,
     solid: &solid::Pipeline,
     gradient: &gradient::Pipeline,
     bounds: Rectangle,
     group: impl Iterator<Item = (&'a Layer, &'a [Mesh], Transformation)>,
 ) {
+    let origin = msaa.map_or((0, 0), |(state, _)| {
+        let bounds = state.bounds();
+        (bounds.x, bounds.y)
+    });
     {
-        let mut render_pass = if let Some((_state, pipeline)) = &mut msaa {
-            pipeline.render_pass(encoder)
+        let mut render_pass = if let Some((state, _pipeline)) = &msaa {
+            state.render_pass(encoder)
         } else {
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("iced_wgpu.triangle.render_pass"),
@@ -332,6 +521,7 @@ fn render<'a>(
                 meshes,
                 bounds,
                 transformation,
+                origin,
                 &mut render_pass,
             );
         }
@@ -407,19 +597,9 @@ impl Layer {
         let mut index_offset = 0;
 
         for mesh in meshes {
-            let clip_bounds = mesh.clip_bounds() * transformation;
-            let snap_distance = nudge::snap(clip_bounds)
-                .map(|snapped_bounds| {
-                    Point::new(snapped_bounds.x as f32, snapped_bounds.y as f32)
-                        - clip_bounds.position()
-                })
-                .unwrap_or(Vector::ZERO);
-
-            let uniforms = Uniforms::new(
-                transformation
-                    * mesh.transformation()
-                    * Transformation::translate(snap_distance.x, snap_distance.y),
-            );
+            // Snapping vertices here would shift them when the MSAA target resizes.
+            // Snap only the physical scissor rectangles.
+            let uniforms = Uniforms::new(transformation * mesh.transformation());
 
             let indices = mesh.indices();
 
@@ -467,6 +647,7 @@ impl Layer {
         meshes: &[Mesh],
         bounds: Rectangle,
         transformation: Transformation,
+        origin: (u32, u32),
         render_pass: &mut wgpu::RenderPass<'a>,
     ) {
         let mut num_solids = 0;
@@ -491,12 +672,13 @@ impl Layer {
                         num_gradients += 1;
                     }
                 }
+                index_offset += mesh.indices().len();
                 continue;
             };
 
             render_pass.set_scissor_rect(
-                clip_bounds.x,
-                clip_bounds.y,
+                clip_bounds.x - origin.0,
+                clip_bounds.y - origin.1,
                 clip_bounds.width,
                 clip_bounds.height,
             );

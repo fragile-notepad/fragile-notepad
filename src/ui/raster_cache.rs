@@ -400,9 +400,9 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct ProbeState(bool);
+    struct WidgetState(bool);
 
-    impl focusable::Focusable for ProbeState {
+    impl focusable::Focusable for WidgetState {
         fn is_focused(&self) -> bool {
             self.0
         }
@@ -415,14 +415,14 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct Probe {
+    struct TestWidget {
         next_frame: Rc<Cell<window::RedrawRequest>>,
         updates: Rc<Cell<usize>>,
         draws: Rc<Cell<usize>>,
         overlays: Rc<Cell<usize>>,
     }
 
-    impl Default for Probe {
+    impl Default for TestWidget {
         fn default() -> Self {
             Self {
                 next_frame: Rc::new(Cell::new(window::RedrawRequest::Wait)),
@@ -433,12 +433,12 @@ mod tests {
         }
     }
 
-    impl Widget<(), Theme, RecordingRenderer> for Probe {
+    impl Widget<(), Theme, RecordingRenderer> for TestWidget {
         fn tag(&self) -> tree::Tag {
-            tree::Tag::of::<ProbeState>()
+            tree::Tag::of::<WidgetState>()
         }
         fn state(&self) -> tree::State {
-            tree::State::new(ProbeState::default())
+            tree::State::new(WidgetState::default())
         }
         fn size(&self) -> Size<Length> {
             Size::new(Length::Fill, Length::Fill)
@@ -488,9 +488,9 @@ mod tests {
             operation: &mut dyn Operation,
         ) {
             operation.focusable(
-                Some(&Id::new("cache-probe")),
+                Some(&Id::new("cache-test-widget")),
                 layout.bounds(),
-                tree.state.downcast_mut::<ProbeState>(),
+                tree.state.downcast_mut::<WidgetState>(),
             );
         }
         fn mouse_interaction(
@@ -512,13 +512,13 @@ mod tests {
             _translation: Vector,
         ) -> Option<overlay::Element<'a, (), Theme, RecordingRenderer>> {
             self.overlays.set(self.overlays.get() + 1);
-            Some(overlay::Element::new(Box::new(ProbeOverlay)))
+            Some(overlay::Element::new(Box::new(TestOverlay)))
         }
     }
 
-    struct ProbeOverlay;
+    struct TestOverlay;
 
-    impl overlay::Overlay<(), Theme, RecordingRenderer> for ProbeOverlay {
+    impl overlay::Overlay<(), Theme, RecordingRenderer> for TestOverlay {
         fn layout(&mut self, _renderer: &RecordingRenderer, _bounds: Size) -> layout::Node {
             layout::Node::new(Size::new(16.0, 16.0))
         }
@@ -548,7 +548,7 @@ mod tests {
         (tree, node)
     }
 
-    fn update_probe(
+    fn update_widget(
         content: &mut Element<'_, (), Theme, RecordingRenderer>,
         tree: &mut Tree,
         node: &layout::Node,
@@ -580,7 +580,7 @@ mod tests {
         (result.0, messages.len(), result.2)
     }
 
-    fn draw_probe(
+    fn draw_widget(
         content: &Element<'_, (), Theme, RecordingRenderer>,
         tree: &Tree,
         node: &layout::Node,
@@ -602,8 +602,8 @@ mod tests {
 
     #[test]
     fn app_controlled_motion_draws_live_then_refreshes_before_reusing_pixels() {
-        let probe = Probe::default();
-        let mut content = RasterCache::new(Element::new(probe.clone()));
+        let widget = TestWidget::default();
+        let mut content = RasterCache::new(Element::new(widget.clone()));
         let mut renderer = RecordingRenderer::default();
         let mut tree = Tree::new(&content as &dyn Widget<(), Theme, RecordingRenderer>);
         content.diff(&mut tree);
@@ -624,13 +624,13 @@ mod tests {
             );
         }
         assert_eq!((renderer.hits, renderer.misses), (2, 2));
-        assert_eq!(probe.draws.get(), 4);
+        assert_eq!(widget.draws.get(), 4);
     }
 
     #[test]
     fn rebuilt_paint_stays_live_until_unchanged_then_captures_and_hits() {
-        let probe = Probe::default();
-        let mut content = RasterCache::new(Element::new(probe.clone())).settle_before_capture();
+        let widget = TestWidget::default();
+        let mut content = RasterCache::new(Element::new(widget.clone())).settle_before_capture();
         let mut renderer = RecordingRenderer::default();
         let mut tree = Tree::new(&content as &dyn Widget<(), Theme, RecordingRenderer>);
         content.diff(&mut tree);
@@ -656,20 +656,20 @@ mod tests {
             }
         }
         assert_eq!((renderer.hits, renderer.misses), (2, 1));
-        assert_eq!(probe.draws.get(), 5);
+        assert_eq!(widget.draws.get(), 5);
     }
 
     #[test]
     fn unrelated_redraws_reuse_pixels_and_input_preserves_the_caret_deadline() {
-        let probe = Probe::default();
+        let widget = TestWidget::default();
         let now = Instant::now();
         let deadline = now + Duration::from_millis(500);
-        probe.next_frame.set(window::RedrawRequest::At(deadline));
-        let mut content = Element::new(RasterCache::new(Element::new(probe.clone())));
+        widget.next_frame.set(window::RedrawRequest::At(deadline));
+        let mut content = Element::new(RasterCache::new(Element::new(widget.clone())));
         let mut renderer = RecordingRenderer::default();
         let (mut tree, node) = mount(&mut content, &renderer, SIZE);
         let viewport = Rectangle::with_size(SIZE);
-        update_probe(
+        update_widget(
             &mut content,
             &mut tree,
             &node,
@@ -677,7 +677,7 @@ mod tests {
             Event::Window(window::Event::RedrawRequested(now)),
             true,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -686,7 +686,7 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        update_probe(
+        update_widget(
             &mut content,
             &mut tree,
             &node,
@@ -696,7 +696,7 @@ mod tests {
             )),
             true,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -708,8 +708,8 @@ mod tests {
         assert_eq!((renderer.hits, renderer.misses), (1, 1));
 
         // A child can ignore a pointer event without re-requesting its timer.
-        probe.next_frame.set(window::RedrawRequest::Wait);
-        update_probe(
+        widget.next_frame.set(window::RedrawRequest::Wait);
+        update_widget(
             &mut content,
             &mut tree,
             &node,
@@ -719,7 +719,7 @@ mod tests {
             }),
             false,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -728,10 +728,10 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        probe.next_frame.set(window::RedrawRequest::At(
+        widget.next_frame.set(window::RedrawRequest::At(
             deadline + Duration::from_millis(500),
         ));
-        update_probe(
+        update_widget(
             &mut content,
             &mut tree,
             &node,
@@ -739,7 +739,7 @@ mod tests {
             Event::Window(window::Event::RedrawRequested(deadline)),
             false,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -749,17 +749,17 @@ mod tests {
             viewport,
         );
         assert_eq!((renderer.hits, renderer.misses), (1, 3));
-        assert_eq!(probe.updates.get(), 4);
+        assert_eq!(widget.updates.get(), 4);
     }
 
     #[test]
     fn focus_hover_theme_scale_and_relayout_refresh_the_surface() {
-        let probe = Probe::default();
-        let mut content = Element::new(RasterCache::new(Element::new(probe)));
+        let widget = TestWidget::default();
+        let mut content = Element::new(RasterCache::new(Element::new(widget)));
         let mut renderer = RecordingRenderer::default();
         let (mut tree, mut node) = mount(&mut content, &renderer, SIZE);
         let viewport = Rectangle::with_size(SIZE);
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -768,7 +768,7 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -777,7 +777,7 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -787,7 +787,7 @@ mod tests {
             viewport,
         );
         let cursor = mouse::Cursor::Available(Point::new(12.0, 8.0));
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -797,7 +797,7 @@ mod tests {
             viewport,
         );
         renderer.hint(1.5);
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -810,10 +810,10 @@ mod tests {
             &mut tree,
             Layout::new(&node),
             &renderer,
-            &mut focusable::focus::<()>(Id::new("cache-probe")),
+            &mut focusable::focus::<()>(Id::new("cache-test-widget")),
         );
-        assert!(tree.children[0].state.downcast_ref::<ProbeState>().0);
-        draw_probe(
+        assert!(tree.children[0].state.downcast_ref::<WidgetState>().0);
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -828,7 +828,7 @@ mod tests {
             &renderer,
             &layout::Limits::new(Size::ZERO, Size::new(400.0, 150.0)),
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -842,17 +842,17 @@ mod tests {
 
     #[test]
     fn continuous_animation_draws_early_frames_live_and_caches_the_final_frame() {
-        let probe = Probe::default();
+        let widget = TestWidget::default();
         let now = Instant::now();
         let deadline = now + Duration::from_millis(100);
-        probe.next_frame.set(window::RedrawRequest::At(deadline));
+        widget.next_frame.set(window::RedrawRequest::At(deadline));
         let mut content =
-            Element::new(RasterCache::new(Element::new(probe.clone())).animated(true));
+            Element::new(RasterCache::new(Element::new(widget.clone())).animated(true));
         let mut renderer = RecordingRenderer::default();
         let (mut tree, node) = mount(&mut content, &renderer, SIZE);
         let viewport = Rectangle::with_size(SIZE);
         for at in [now, now + Duration::from_millis(16)] {
-            update_probe(
+            update_widget(
                 &mut content,
                 &mut tree,
                 &node,
@@ -860,7 +860,7 @@ mod tests {
                 Event::Window(window::Event::RedrawRequested(at)),
                 false,
             );
-            draw_probe(
+            draw_widget(
                 &content,
                 &tree,
                 &node,
@@ -870,10 +870,10 @@ mod tests {
                 viewport,
             );
         }
-        assert_eq!(probe.draws.get(), 2);
+        assert_eq!(widget.draws.get(), 2);
         assert_eq!((renderer.hits, renderer.misses), (0, 0));
-        probe.next_frame.set(window::RedrawRequest::Wait);
-        update_probe(
+        widget.next_frame.set(window::RedrawRequest::Wait);
+        update_widget(
             &mut content,
             &mut tree,
             &node,
@@ -881,7 +881,7 @@ mod tests {
             Event::Window(window::Event::RedrawRequested(deadline)),
             false,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -890,7 +890,7 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -905,17 +905,17 @@ mod tests {
     #[test]
     fn local_paint_changes_refresh_without_an_event_and_live_paint_rejoins_the_cache() {
         fn snapshot(tree: &Tree) -> (u64, bool) {
-            let value = tree.state.downcast_ref::<ProbeState>().0;
+            let value = tree.state.downcast_ref::<WidgetState>().0;
             (u64::from(value), value)
         }
-        let probe = Probe::default();
-        let mut cache = RasterCache::new(Element::new(probe));
+        let widget = TestWidget::default();
+        let mut cache = RasterCache::new(Element::new(widget));
         cache.paint_state = Some(snapshot);
         let mut content = Element::new(cache);
         let mut renderer = RecordingRenderer::default();
         let (mut tree, node) = mount(&mut content, &renderer, SIZE);
         let viewport = Rectangle::with_size(SIZE);
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -924,8 +924,8 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        tree.children[0].state.downcast_mut::<ProbeState>().0 = true;
-        draw_probe(
+        tree.children[0].state.downcast_mut::<WidgetState>().0 = true;
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -935,8 +935,8 @@ mod tests {
             viewport,
         );
         assert_eq!((renderer.hits, renderer.misses), (0, 1));
-        tree.children[0].state.downcast_mut::<ProbeState>().0 = false;
-        draw_probe(
+        tree.children[0].state.downcast_mut::<WidgetState>().0 = false;
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -945,7 +945,7 @@ mod tests {
             mouse::Cursor::Unavailable,
             viewport,
         );
-        draw_probe(
+        draw_widget(
             &content,
             &tree,
             &node,
@@ -959,13 +959,13 @@ mod tests {
 
     #[test]
     fn cached_draws_keep_messages_capture_mouse_and_overlays_live() {
-        let probe = Probe::default();
-        let mut content = Element::new(RasterCache::new(Element::new(probe.clone())));
+        let widget = TestWidget::default();
+        let mut content = Element::new(RasterCache::new(Element::new(widget.clone())));
         let mut renderer = RecordingRenderer::default();
         let (mut tree, node) = mount(&mut content, &renderer, SIZE);
         let viewport = Rectangle::with_size(SIZE);
         for _ in 0..2 {
-            draw_probe(
+            draw_widget(
                 &content,
                 &tree,
                 &node,
@@ -987,8 +987,8 @@ mod tests {
                     .is_some()
             );
         }
-        assert_eq!(probe.draws.get(), 1);
-        assert_eq!(probe.overlays.get(), 2);
+        assert_eq!(widget.draws.get(), 1);
+        assert_eq!(widget.overlays.get(), 2);
         assert_eq!(
             content.as_widget().mouse_interaction(
                 &tree,
@@ -999,7 +999,7 @@ mod tests {
             ),
             mouse::Interaction::Pointer
         );
-        let (_, messages, captured) = update_probe(
+        let (_, messages, captured) = update_widget(
             &mut content,
             &mut tree,
             &node,

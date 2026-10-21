@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# GitHub's Linux runners have no physical GPU. Exercise the real wgpu Vulkan
-# pipeline through Mesa Lavapipe rather than skipping renderer parity tests.
+# GitHub's Linux runners have no physical GPU. Run Vulkan rendering tests
+# through Mesa Lavapipe.
 : "${GITHUB_ENV:?This script configures a GitHub Actions job}"
 : "${RUNNER_TEMP:?GitHub Actions runner temporary directory is required}"
 

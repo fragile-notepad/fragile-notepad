@@ -742,7 +742,7 @@ mod tests {
             window::RedrawRequest::Wait
         );
 
-        // Restore the resize gate so zero-opacity scheduling is tested on its own.
+        // Restore a nonzero window size before checking zero-opacity scheduling.
         update(
             &mut widget,
             &mut tree,
@@ -1023,10 +1023,10 @@ mod tests {
             renderer::Settings::default(),
             Some("wgpu"),
         )) else {
-            eprintln!("Skipping Vulkan shader parity validation: renderer unavailable");
+            eprintln!("Skipping Vulkan trail comparison: renderer unavailable");
             return;
         };
-        assert_trail_parity(renderer);
+        assert_trail_matches_cpu(renderer);
 
         // Also render the uniform-buffer path on a device without immediates.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -1036,13 +1036,13 @@ mod tests {
         let Some(adapter) =
             futures::executor::block_on(instance.request_adapter(&Default::default())).ok()
         else {
-            eprintln!("Skipping Vulkan uniform parity validation: no Vulkan adapter");
+            eprintln!("Skipping Vulkan uniform-buffer trail comparison: no Vulkan adapter");
             return;
         };
         let Ok((device, queue)) =
             futures::executor::block_on(adapter.request_device(&Default::default()))
         else {
-            eprintln!("Skipping Vulkan uniform parity validation: device unavailable");
+            eprintln!("Skipping Vulkan uniform-buffer trail comparison: device unavailable");
             return;
         };
         let engine = iced_wgpu::Engine::new(
@@ -1053,14 +1053,14 @@ mod tests {
             None,
             iced_wgpu::graphics::Shell::headless(),
         );
-        assert_trail_parity(Renderer::Primary(iced_wgpu::Renderer::new(
+        assert_trail_matches_cpu(Renderer::Primary(iced_wgpu::Renderer::new(
             engine,
             renderer::Settings::default(),
         )));
     }
 
     #[cfg(feature = "hybrid-rendering")]
-    fn assert_trail_parity(mut renderer: Renderer) {
+    fn assert_trail_matches_cpu(mut renderer: Renderer) {
         use iced_wgpu::primitive::Renderer as _;
         let instances = [gpu::Instance::default(), gpu::Instance::default()];
         let surface = Rectangle::with_size(Size::new(640.0, 128.0));

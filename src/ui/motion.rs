@@ -912,13 +912,13 @@ mod tests {
         (redraw, messages)
     }
 
-    struct LayoutProbe {
+    struct LayoutCounter {
         content: Element<'static, Message>,
         calls: Rc<Cell<usize>>,
         invalidate_next_frame: Rc<Cell<bool>>,
     }
 
-    impl Widget<Message, Theme, Renderer> for LayoutProbe {
+    impl Widget<Message, Theme, Renderer> for LayoutCounter {
         fn size(&self) -> Size<Length> {
             self.content.as_widget().size()
         }
@@ -1006,7 +1006,7 @@ mod tests {
         calls: &Rc<Cell<usize>>,
         invalidate_next_frame: &Rc<Cell<bool>>,
     ) -> Element<'static, Message> {
-        Element::new(LayoutProbe {
+        Element::new(LayoutCounter {
             content: button(Space::new().width(Fill).height(40))
                 .padding(0)
                 .width(Fill)

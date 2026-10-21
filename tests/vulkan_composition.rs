@@ -658,6 +658,140 @@ fn draw_without_clear_preserves_external_pixels_and_discards_retention() {
 }
 
 #[test]
+fn cached_mesh_instances_repaint_after_changes() {
+    let _guard = lock_vulkan_test();
+    let triangle = |paint| -> std::sync::Arc<[mesh::Mesh]> {
+        std::sync::Arc::from([mesh::Mesh::Solid {
+            buffers: mesh::Indexed {
+                vertices: [[0.0, 0.0], [12.0, 0.0], [0.0, 10.0]]
+                    .map(|position| mesh::SolidVertex2D {
+                        position,
+                        color: color::pack(paint),
+                    })
+                    .into(),
+                indices: vec![0, 1, 2],
+            },
+            transformation: Transformation::IDENTITY,
+            clip_bounds: rect(0.0, 0.0, 12.0, 10.0),
+        }])
+    };
+    for antialiasing in [None, Some(Antialiasing::MSAAx4)] {
+        let Some(gpu) = Gpu::new(wgpu::TextureFormat::Rgba8Unorm, antialiasing) else {
+            return;
+        };
+        for scale in [1.0, 2.0] {
+            for cropped_layers in [false, true] {
+                let mut cached = gpu.renderer(true);
+                let mut direct = gpu.renderer(false);
+                let batch = triangle(Color::from_rgb(1.0, 0.0, 0.0));
+                let mut shared = mesh::Cache::new(batch.clone());
+                // Separate reference caches prevent one instance from
+                // overwriting the other's transform.
+                let mut reference = [mesh::Cache::new(batch.clone()), mesh::Cache::new(batch)];
+                let mut previous = Vec::new();
+                // Recolor both meshes, then move and remove the second. Each
+                // change is followed by a frame that should reuse pixels.
+                for step in 0..8 {
+                    if step == 2 {
+                        let batch = triangle(Color::from_rgb(0.0, 1.0, 0.0));
+                        shared.update(batch.clone());
+                        for cache in &mut reference {
+                            cache.update(batch.clone());
+                        }
+                    }
+                    let viewport = begin(&mut cached, SIZE, scale);
+                    begin(&mut direct, SIZE, scale);
+                    let positions = [
+                        Point::new(8.0, 8.0),
+                        Point::new(if step < 4 { 30.0 } else { 38.0 }, 12.0),
+                    ];
+                    for (renderer, caches, cropped) in [
+                        (&mut cached, [&shared, &shared], cropped_layers),
+                        (&mut direct, [&reference[0], &reference[1]], false),
+                    ] {
+                        fill(
+                            renderer,
+                            Rectangle::with_size(viewport.logical_size()),
+                            Color::from_rgb(0.0, 0.0, 1.0),
+                        );
+                        for (index, position) in positions.into_iter().enumerate() {
+                            if index == 1 && step >= 6 {
+                                continue;
+                            }
+                            let draw = |renderer: &mut iced_wgpu::Renderer| {
+                                renderer.with_transformation(
+                                    Transformation::translate(position.x, position.y),
+                                    |renderer| renderer.draw_mesh_cache(caches[index].clone()),
+                                );
+                            };
+                            if cropped {
+                                renderer.with_layer(rect(position.x, position.y, 12.0, 10.0), draw);
+                            } else {
+                                draw(renderer);
+                            }
+                        }
+                    }
+                    let before = cached.composition_cache_statistics();
+                    let actual = cached.screenshot(&viewport, Color::BLACK);
+                    let expected = direct.screenshot(&viewport, Color::BLACK);
+                    assert_pixels(
+                        &actual,
+                        &expected,
+                        SIZE,
+                        &format!(
+                            "cached mesh {antialiasing:?}, scale {scale}, cropped {cropped_layers}, step {step}"
+                        ),
+                    );
+                    let after = cached.composition_cache_statistics();
+                    match step {
+                        0 => assert_eq!(after.full_repaints, before.full_repaints + 1),
+                        1 | 3 | 5 | 7 => assert_reused(before, after),
+                        _ => {
+                            assert_partial(before, after);
+                            assert_ne!(actual, previous, "mesh change must alter pixels");
+                        }
+                    }
+                    let paint = if step < 2 {
+                        [255, 0, 0, 255]
+                    } else {
+                        [0, 255, 0, 255]
+                    };
+                    for (index, position) in positions.into_iter().enumerate() {
+                        assert_eq!(
+                            pixel(
+                                &actual,
+                                ((position.x + 2.0) * scale) as u32,
+                                ((position.y + 2.0) * scale) as u32,
+                            ),
+                            if index == 1 && step >= 6 {
+                                [0, 0, 255, 255]
+                            } else {
+                                paint
+                            },
+                            "mesh instance rendered at the wrong position"
+                        );
+                    }
+                    if step > 0 {
+                        for y in 0..SIZE.height {
+                            for x in 0..SIZE.width {
+                                if x as f32 > 52.0 * scale + 2.0 || y as f32 > 24.0 * scale + 2.0 {
+                                    assert_eq!(
+                                        pixel(&actual, x, y),
+                                        pixel(&previous, x, y),
+                                        "mesh repaint changed pixels outside its bounds"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    previous = actual;
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn msaa_mesh_partial_repaints_preserve_pixels_outside_the_clipped_layer() {
     let _guard = lock_vulkan_test();
     for format in FORMATS {

@@ -501,7 +501,7 @@ impl Document {
         self.revision
     }
 
-    /// Reuses language evidence across redraws, wrapping, and renderer handoffs.
+    /// Reuses detected CJK languages across redraws, wrapping, and renderer handoffs.
     pub fn cjk_context(&self) -> Arc<CjkContext> {
         self.cjk_context
             .borrow_mut()

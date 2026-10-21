@@ -102,7 +102,7 @@ impl PerfTrace {
 
     fn open(path: PathBuf) -> Option<Self> {
         // Iced may already be writing to this shared trace. Unlinking it here
-        // strands those handles on a different file and loses handoff evidence.
+        // strands those handles on a different file and loses handoff trace records.
         // Profiling runners choose a fresh directory or reset before startup.
         let file = OpenOptions::new()
             .create(true)

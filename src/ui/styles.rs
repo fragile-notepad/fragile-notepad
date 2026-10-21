@@ -394,11 +394,15 @@ pub fn tool_bar(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: Some(Background::Color(palette.chrome)),
+        background: Some(Background::Color(tool_bar_background(theme))),
         text_color: Some(palette.text),
         border: hairline(palette.border_soft),
         ..container::Style::default()
     }
+}
+
+pub fn tool_bar_background(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).chrome
 }
 
 pub fn tab_strip(theme: &Theme) -> container::Style {

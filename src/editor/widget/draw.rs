@@ -1,4 +1,4 @@
-use iced::advanced::{image as advanced_image, renderer, text};
+use iced::advanced::{graphics::geometry, renderer, text};
 use iced::{Background, Color, Font, Pixels, Point, Rectangle, Size, alignment};
 
 use crate::editor::cjk::CjkContext;
@@ -133,9 +133,7 @@ pub(super) fn draw_plan<Renderer>(
     line_geometries: &mut LineGeometryCache<Renderer::Paragraph>,
     cjk_context: Option<&CjkContext>,
 ) where
-    Renderer: iced::advanced::Renderer
-        + text::Renderer<Font = Font>
-        + advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font> + geometry::Renderer,
 {
     let metrics = layout.metrics;
     let active_guide = active_indent_guide(plan);
@@ -712,9 +710,7 @@ fn draw_fold_control<Renderer>(
     decorations: &DecorationModel,
     style: EditorStyle,
 ) where
-    Renderer: iced::advanced::Renderer
-        + text::Renderer<Font = Font>
-        + advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font> + geometry::Renderer,
 {
     let icon_size = metrics.fold_lane_width.min(metrics.line_height * 0.8);
     let x = bounds.x + metrics.text_origin_x(decorations)
@@ -826,13 +822,15 @@ fn draw_icon<Renderer>(
     clip_bounds: Rectangle,
     color: Color,
 ) where
-    Renderer: advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: geometry::Renderer,
 {
-    renderer.draw_image(
-        advanced_image::Image::new(hero::handle_with_color(icon, color))
-            .filter_method(advanced_image::FilterMethod::Linear),
+    hero::draw(
+        renderer,
+        icon,
         bounds,
         clip_bounds,
+        color,
+        iced::Radians(0.0),
     );
 }
 

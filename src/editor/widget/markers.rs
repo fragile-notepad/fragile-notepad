@@ -1,4 +1,4 @@
-use iced::advanced::{image as advanced_image, renderer, text};
+use iced::advanced::{graphics::geometry, renderer, text};
 use iced::{Background, Font, Rectangle};
 
 use crate::editor::decoration::DecorationModel;
@@ -22,9 +22,7 @@ pub(super) fn draw_row_markers<Renderer>(
     style: EditorStyle,
     clip_bounds: Rectangle,
 ) where
-    Renderer: iced::advanced::Renderer
-        + text::Renderer<Font = Font>
-        + advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font> + geometry::Renderer,
 {
     let collapsed_eol_x = row.eol.and_then(|_| {
         row.collapsed_delimiter().and_then(|delimiter| {
@@ -65,7 +63,7 @@ struct MarkerRenderContext<'a> {
 
 fn draw_fast_row_markers<Renderer>(renderer: &mut Renderer, context: MarkerRenderContext<'_>)
 where
-    Renderer: iced::advanced::Renderer + advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: iced::advanced::Renderer + geometry::Renderer,
 {
     let MarkerRenderContext {
         bounds,
@@ -166,8 +164,7 @@ fn draw_measured_row_markers<Renderer>(
     context: MarkerRenderContext<'_>,
     line_geometry: &LineGeometry<Renderer::Paragraph>,
 ) where
-    Renderer:
-        advanced_image::Renderer<Handle = advanced_image::Handle> + text::Renderer<Font = Font>,
+    Renderer: geometry::Renderer + text::Renderer<Font = Font>,
 {
     for whitespace in &context.row.whitespace {
         if context
@@ -234,7 +231,7 @@ fn draw_marker_icon<Renderer>(
     visual_column: usize,
     icon: HeroIcon,
 ) where
-    Renderer: advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: geometry::Renderer,
 {
     let x = scrolled_text_origin_x(context.layout, context.decorations)
         + visual_column as f32 * context.layout.metrics.character_width;
@@ -248,7 +245,7 @@ fn draw_marker_icon_at_x<Renderer>(
     x: f32,
     icon: HeroIcon,
 ) where
-    Renderer: advanced_image::Renderer<Handle = advanced_image::Handle>,
+    Renderer: geometry::Renderer,
 {
     let metrics = context.layout.metrics;
     let size = metrics
@@ -262,13 +259,12 @@ fn draw_marker_icon_at_x<Renderer>(
         height: size,
     };
 
-    renderer.draw_image(
-        advanced_image::Image::new(hero::handle_with_color(
-            icon,
-            context.style.whitespace_markers,
-        ))
-        .filter_method(advanced_image::FilterMethod::Linear),
+    hero::draw(
+        renderer,
+        icon,
         bounds,
         context.clip_bounds,
+        context.style.whitespace_markers,
+        iced::Radians(0.0),
     );
 }

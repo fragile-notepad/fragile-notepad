@@ -489,7 +489,7 @@ fn decoded_utf16le_bom_document_saves_back_as_utf16le() {
 }
 
 #[test]
-fn loading_document_text_index_gates_full_document_analysis_until_completion() {
+fn loading_document_defers_analysis_until_complete() {
     let generation = fragile_notepad::core::DocumentLoadGeneration::next();
     let mut document = Document::loading(DocumentId::new(15), fixture_path("large.rs"), generation);
 

@@ -734,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_search_probes_one_extra_match_and_snapshots_the_entire_scope() {
+    fn search_limit_keeps_all_documents_for_counting() {
         let first = Document::from_path(DocumentId::new(16), "first.txt", &"a".repeat(500));
         let empty = Document::from_path(DocumentId::new(17), "empty.txt", "none");
         let overflow = Document::from_path(DocumentId::new(18), "overflow.txt", "a");

@@ -1,5 +1,4 @@
 use iced::advanced::Renderer as _;
-use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::text::Renderer as _;
 use iced::advanced::widget::operation::Focusable;
 use iced::advanced::widget::{Operation, Tree, tree};
@@ -1000,15 +999,16 @@ fn draw_chevron(
     rotation: f32,
     clip: Rectangle,
 ) {
-    renderer.draw_image(
-        image::Image::new(hero::handle_with_color(HeroIcon::ChevronRight, color))
-            .filter_method(image::FilterMethod::Linear)
-            .rotation(iced::Radians(rotation)),
+    hero::draw(
+        renderer,
+        HeroIcon::ChevronRight,
         Rectangle::new(
             Point::new(center.x - size / 2.0, center.y - size / 2.0),
             Size::new(size, size),
         ),
         clip,
+        color,
+        iced::Radians(rotation),
     );
 }
 

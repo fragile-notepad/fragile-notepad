@@ -1,6 +1,7 @@
 //! cargo run --locked -j 1 --example profile_composition -- --frames 32
 //! Add --uncached for the same scenes with retained composition disabled.
 //! --compare measures each uncached/cached pair consecutively on one device.
+//! --antialiasing off|msaa4 selects mesh antialiasing [msaa4, matching the app].
 //! --help lists case, fixture, physical size, scale, and warm-up options.
 //! WGPU_ADAPTER_NAME selects a Vulkan adapter by case-insensitive substring.
 //!
@@ -11,8 +12,8 @@
 //! and main-pass composition. They exclude queued uploads, presentation, and
 //! desktop composition. CPU timing includes update, recording, and submission,
 //! excluding GPU completion waits, timestamp mapping, and frame pacing.
-//! --uncached retains the new trail and vendor batching; the investigation
-//! report is the historical baseline before those optimizations.
+//! --uncached disables child-surface and final-frame caches; batching, the
+//! reduced-resolution trail, and editor optimizations remain enabled.
 //! --case app-scroll-reversal sends eight wheel lines/frame, reversing every six.
 //! --case app-fade deterministically closes/opens About every ten measured frames.
 //! Widget and transition clocks use real redraw timestamps, paced at most 60 Hz;
@@ -44,12 +45,13 @@ mod profile {
     use fragile_notepad::message::Message;
     use fragile_notepad::services::types::OpenedFile;
     use fragile_notepad::ui;
+    use futures::StreamExt;
     use iced::advanced::graphics::core::shell::Waker;
     use iced::advanced::mouse;
     use iced::advanced::renderer::{self, Renderer as _};
     use iced::{Color, Element, Event, Point, Size, Theme, window};
     use iced_runtime::user_interface::{self, UserInterface};
-    use iced_wgpu::graphics::{Shell as GraphicsShell, Viewport};
+    use iced_wgpu::graphics::{Antialiasing, Shell as GraphicsShell, Viewport};
     use std::error::Error;
     use std::path::{Path, PathBuf};
     use std::str::FromStr;
@@ -66,6 +68,7 @@ mod profile {
   --width PX       Physical target width [1536]
   --height PX      Physical target height [1152]
   --scale FACTOR   Logical-to-physical scale [1.5]
+  --antialiasing AA Mesh antialiasing: off or msaa4 [msaa4]
   --frames N       Measured frames per case, 1..240 [32]
   --warmup N       Unmeasured frames per case, 1..32 [8]
   --uncached       Set both raster and final-frame cache budgets to zero
@@ -107,6 +110,7 @@ mod profile {
         width: u32,
         height: u32,
         scale: f32,
+        antialiasing: Option<Antialiasing>,
         frames: u32,
         warmup: u32,
         uncached: bool,
@@ -121,6 +125,7 @@ mod profile {
                 width: 1536,
                 height: 1152,
                 scale: 1.5,
+                antialiasing: Some(Antialiasing::MSAAx4),
                 frames: 32,
                 warmup: 8,
                 uncached: false,
@@ -144,6 +149,17 @@ mod profile {
                     "--width" => options.width = number(&mut args, &flag)?,
                     "--height" => options.height = number(&mut args, &flag)?,
                     "--scale" => options.scale = number(&mut args, &flag)?,
+                    "--antialiasing" => {
+                        options.antialiasing = match value(&mut args, &flag)?.as_str() {
+                            "off" => None,
+                            "msaa4" => Some(Antialiasing::MSAAx4),
+                            mode => {
+                                return Err(format!(
+                                    "unknown antialiasing: {mode}; use off or msaa4"
+                                ));
+                            }
+                        };
+                    }
                     "--frames" => options.frames = number(&mut args, &flag)?,
                     "--warmup" => options.warmup = number(&mut args, &flag)?,
                     "--uncached" => options.uncached = true,
@@ -199,13 +215,28 @@ mod profile {
     }
 
     impl Scene {
-        fn new(case: Case, options: &Options, source: &str) -> Self {
+        fn new(case: Case, options: &Options, source: &str) -> Result<(Self, window::Id)> {
             if case == Case::Vfx {
-                return Self::Vfx;
+                return Ok((Self::Vfx, window::Id::unique()));
             }
-            // Returned tasks are dropped: no real windows, file writes, settings
-            // reads, or background application subscriptions run in this probe.
-            let (mut app, _) = App::new();
+            let (mut app, startup) = App::new();
+            // The first startup action carries the window ID registered by App.
+            // Inspect it without opening a native window, then drop the remaining
+            // tasks before any settings reads or background work are polled.
+            // A fabricated ID would draw App::view's empty-window fallback.
+            let mut startup = iced_runtime::task::into_stream(startup)
+                .ok_or("application did not schedule its initial window")?;
+            let Some(iced_runtime::Action::Window(iced_runtime::window::Action::Open(
+                window_id,
+                _,
+                _,
+            ))) = futures::executor::block_on(startup.next())
+            else {
+                return Err(
+                    "first application startup action must open its registered window".into(),
+                );
+            };
+            drop(startup);
             let mut settings = EditorSettings::default();
             settings.set_appearance(AppearanceMode::Light);
             let _ = app.update(Message::SettingsLoaded(Ok(Some(settings))));
@@ -228,7 +259,7 @@ mod profile {
                     now + Duration::from_millis(200),
                 ));
             }
-            Self::App(Box::new(app))
+            Ok((Self::App(Box::new(app)), window_id))
         }
 
         fn view(&self, window_id: window::Id) -> Element<'_, Message> {
@@ -241,9 +272,13 @@ mod profile {
             }
         }
 
-        fn update(&mut self, message: Message) {
+        fn update(&mut self, window_id: window::Id, message: Message) {
             match self {
                 Self::App(app) => {
+                    let message = match message {
+                        Message::ForWindow(_, _) => message,
+                        message => Message::ForWindow(window_id, Box::new(message)),
+                    };
                     let _ = app.update(message);
                 }
                 Self::Vfx => unreachable!("isolated InfoVfx must not publish app messages"),
@@ -256,6 +291,13 @@ mod profile {
                 Self::Vfx => Theme::Light,
             }
         }
+    }
+
+    fn unscoped(mut message: &Message) -> &Message {
+        while let Message::ForWindow(_, inner) = message {
+            message = inner;
+        }
+        message
     }
 
     struct Gpu {
@@ -345,7 +387,7 @@ mod profile {
                 device.clone(),
                 queue.clone(),
                 FORMAT,
-                None,
+                options.antialiasing,
                 GraphicsShell::headless(),
             );
             let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -489,8 +531,7 @@ mod profile {
         let mut renderer = iced::Renderer::Primary(renderer);
         renderer.hint(options.scale);
         let size = gpu.viewport.logical_size();
-        let window_id = window::Id::unique();
-        let mut scene = Scene::new(case, options, source);
+        let (mut scene, window_id) = Scene::new(case, options, source)?;
         let mut interface = UserInterface::build(
             scene.view(window_id),
             size,
@@ -579,7 +620,7 @@ mod profile {
             if scroll_input
                 && !messages.iter().any(|message| {
                     matches!(
-                        message,
+                        unscoped(message),
                         Message::EditorAction(
                             _,
                             fragile_notepad::editor::EditorAction::ScrollLines(_)
@@ -611,7 +652,7 @@ mod profile {
                     if case == Case::Fade
                         && let Some(measured_frame) = measured_frame
                     {
-                        match &message {
+                        match unscoped(&message) {
                             Message::AboutClosed => {
                                 counters.fade_close_messages += 1;
                                 counters.last_fade_toggle = Some((measured_frame, true));
@@ -623,7 +664,7 @@ mod profile {
                             _ => {}
                         }
                     }
-                    scene.update(message);
+                    scene.update(window_id, message);
                 }
                 interface = UserInterface::build(scene.view(window_id), size, cache, &mut renderer);
                 counters.rebuilds += 1;
@@ -732,10 +773,15 @@ mod profile {
             include_str!("../src/app.rs").to_owned()
         };
         println!(
-            "physical={}x{} scale={} frames={} warmup={} cache={} debug_assertions={} forced_redraw_hz=60 theme=light",
+            "physical={}x{} scale={} antialiasing={} frames={} warmup={} cache={} debug_assertions={} forced_redraw_hz=60 theme=light",
             options.width,
             options.height,
             options.scale,
+            if options.antialiasing.is_some() {
+                "msaa4"
+            } else {
+                "off"
+            },
             options.frames,
             options.warmup,
             if options.compare {

@@ -1,4 +1,4 @@
-//! Application admission, startup window readiness, and coordinated shutdown.
+//! Application startup and coordinated shutdown.
 
 use super::App;
 use crate::message::{Message, ShutdownDelivery};

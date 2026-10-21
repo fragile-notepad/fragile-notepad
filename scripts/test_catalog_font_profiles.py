@@ -1,4 +1,4 @@
-"""Selection invariants for the shared font-profile catalog (stdlib only)."""
+"""Tests for regional font selection."""
 
 import unittest
 

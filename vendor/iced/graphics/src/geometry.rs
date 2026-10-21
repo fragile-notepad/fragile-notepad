@@ -33,6 +33,14 @@ pub trait Renderer: core::Renderer {
     /// Creates a new [`Self::Frame`].
     fn new_frame(&self, bounds: Rectangle) -> Self::Frame;
 
+    /// Identifies the active backend when a renderer can switch between backends.
+    ///
+    /// Geometry caches must include this value in their keys to avoid loading
+    /// geometry produced by a different backend after a renderer handoff.
+    fn cache_backend(&self) -> usize {
+        0
+    }
+
     /// Draws the given [`Self::Geometry`].
     fn draw_geometry(&mut self, geometry: Self::Geometry);
 }

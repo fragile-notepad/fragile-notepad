@@ -406,8 +406,8 @@ async fn publish(path: &Path, prepared: &Prepared, chunk_bytes: usize) -> Result
         }
     }
     let previous = previous_path(path);
-    // Only rotate a fully validated snapshot. A corrupt current manifest is
-    // retained separately as evidence instead of overwriting good recovery.
+    // Only rotate a validated snapshot. Save a corrupt manifest separately
+    // so it cannot replace the last valid recovery copy.
     if let Some(bytes) = read_limited(path, MAX_SESSION_BYTES).await? {
         let original = bytes.clone();
         let check_root = root.clone();
@@ -429,10 +429,13 @@ async fn publish(path: &Path, prepared: &Prepared, chunk_bytes: usize) -> Result
     super::atomic_write::write_private(path, &prepared.encoded)
         .await
         .map_err(|error| error.to_string())?;
-    // Cleanup is best effort after commit. Keep chunks from the last valid
-    // manifest and any damaged evidence until the user removes that evidence.
-    let evidence = path.with_extension("unreadable.json");
-    if !tokio::fs::try_exists(evidence).await.unwrap_or(true) {
+    // Cleanup is best effort after commit. Keep chunks while a damaged
+    // manifest remains, since some of them may still be recoverable.
+    let unreadable_manifest = path.with_extension("unreadable.json");
+    if !tokio::fs::try_exists(unreadable_manifest)
+        .await
+        .unwrap_or(true)
+    {
         let mut keep: HashSet<String> = prepared
             .manifest
             .recovery

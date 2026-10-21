@@ -671,6 +671,9 @@ impl Renderer {
                     &layer.triangles,
                     Transformation::scale(scale_factor),
                     viewport.physical_size(),
+                    physical_bounds
+                        .intersection(&clip_bounds)
+                        .expect("visible triangle layer"),
                 );
 
                 prepare_span.finish();

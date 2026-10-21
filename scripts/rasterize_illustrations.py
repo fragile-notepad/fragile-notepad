@@ -1,6 +1,6 @@
 """Render the original Info illustration to reproducible, straight RGBA pixels.
 
-Uses the project's existing SVG path parser and Pillow. SVG features here are
+Uses the illustration SVG path parser and Pillow. SVG features here are
 intentionally limited to paths, flat fills/strokes, and a single path clip.
 """
 from pathlib import Path
@@ -8,7 +8,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageChops
 
-from rasterize_svg_icons import draw_filled_path, draw_round_line, parse_path
+from illustration_raster_helpers import draw_filled_path, draw_round_line, parse_path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/illustrations/macaw-quill.svg"

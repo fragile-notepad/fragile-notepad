@@ -12,7 +12,7 @@ hybrid-rendering = ["iced/wgpu-bare", "dep:iced_wgpu", "dep:wgpu"]
 blake3 = "1"
 encoding_rs = { path = "vendor/encoding_rs" }
 futures = "0.3"
-iced = { path = "vendor/iced", default-features = false, features = ["tiny-skia", "tokio", "image-without-codecs", "highlighter", "advanced", "web-colors", "linux-theme-detection", "x11", "wayland"] }
+iced = { path = "vendor/iced", default-features = false, features = ["tiny-skia", "tokio", "image-without-codecs", "canvas", "highlighter", "advanced", "web-colors", "linux-theme-detection", "x11", "wayland"] }
 iced_wgpu = { path = "vendor/iced/wgpu", optional = true, default-features = false }
 rfd = "0.16"
 regex = "1"

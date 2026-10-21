@@ -1,13 +1,12 @@
 //! Retain the final composed frame and repaint a conservative damage rectangle.
 //!
-//! This owns a bounded root surface, not a child Renderer. The caller supplies
-//! flushed/merged layers to `plan`, performs the requested paint, then calls
-//! `completed` with asset readiness. Presentation copies the retained pixels
-//! with replacement blending; it must not clear or alpha-blend them again.
+//! The caller supplies flushed and merged layers to `plan`, performs the requested
+//! paint, then tells `completed` whether assets have finished loading. Presentation
+//! copies the retained surface with replacement blending to preserve its pixels.
 
 use crate::core::{Color, Rectangle, Size, Transformation};
-use crate::graphics::{self, Viewport};
-use crate::{Engine, layer, raster, text};
+use crate::graphics::{self, Viewport, mesh};
+use crate::{Engine, layer, raster, text, triangle};
 
 use std::sync::Arc;
 
@@ -68,6 +67,46 @@ struct RasterSnapshot {
     bounds: Rectangle,
 }
 
+#[derive(PartialEq)]
+struct MeshSnapshot {
+    stamp: Option<(mesh::Id, usize)>,
+    transformation: Transformation,
+    bounds: Vec<Rectangle>,
+}
+
+impl MeshSnapshot {
+    fn new(item: &triangle::Item) -> Self {
+        let (stamp, transformation, meshes) = match item {
+            triangle::Item::Group {
+                transformation,
+                meshes,
+            } => (None, *transformation, meshes.as_slice()),
+            triangle::Item::Cached {
+                transformation,
+                cache,
+            } => (
+                Some((cache.id(), cache.version())),
+                *transformation,
+                cache.batch().as_ref(),
+            ),
+        };
+        Self {
+            stamp,
+            transformation,
+            bounds: meshes
+                .iter()
+                .map(|mesh| mesh.clip_bounds() * transformation)
+                .collect(),
+        }
+    }
+
+    fn add_damage(&self, region: &mut Region, layer_bounds: Rectangle) {
+        for bounds in &self.bounds {
+            region.add_mesh(*bounds, layer_bounds);
+        }
+    }
+}
+
 struct LayerSnapshot {
     bounds: Rectangle,
     quads: QuadSnapshot,
@@ -75,7 +114,7 @@ struct LayerSnapshot {
     images: Vec<graphics::Image>,
     rasters: Vec<RasterSnapshot>,
     primitive_bounds: Vec<Rectangle>,
-    triangles: bool,
+    triangles: Vec<MeshSnapshot>,
 }
 
 impl LayerSnapshot {
@@ -131,7 +170,7 @@ impl LayerSnapshot {
                 .iter()
                 .map(|instance| instance.bounds)
                 .collect(),
-            triangles: !layer.triangles.is_empty(),
+            triangles: layer.triangles.iter().map(MeshSnapshot::new).collect(),
         }
     }
 
@@ -139,8 +178,12 @@ impl LayerSnapshot {
         for bounds in &self.primitive_bounds {
             region.add_clipped(*bounds, self.bounds);
         }
-        if self.triangles {
-            region.add(self.bounds);
+        for meshes in self
+            .triangles
+            .iter()
+            .filter(|meshes| meshes.stamp.is_none())
+        {
+            meshes.add_damage(region, self.bounds);
         }
     }
 }
@@ -401,8 +444,16 @@ fn always_dirty_region(layers: &layer::Stack, viewport: &Viewport) -> Damage {
         for primitive in &layer.primitives {
             region.add_clipped(primitive.bounds, layer.bounds);
         }
-        if !layer.triangles.is_empty() {
-            region.add(layer.bounds);
+        for item in &layer.triangles {
+            if let triangle::Item::Group {
+                transformation,
+                meshes,
+            } = item
+            {
+                for mesh in meshes {
+                    region.add_mesh(mesh.clip_bounds() * *transformation, layer.bounds);
+                }
+            }
         }
         for item in &layer.text {
             match item {
@@ -434,6 +485,7 @@ fn worth_retaining(layers: &layer::Stack) -> bool {
             return true;
         }
         work = work.saturating_add(layer.quads.len());
+        work = work.saturating_add(layer.triangles.len().saturating_mul(4));
         for item in &layer.text {
             work = work.saturating_add(match item {
                 text::Item::Group { text, .. } => text.len().saturating_mul(4),
@@ -501,6 +553,18 @@ fn changed_region(
                         }
                         if let Some(image) = after {
                             region.add_image(image, new.bounds);
+                        }
+                    }
+                }
+                for mesh_index in 0..old.triangles.len().max(new.triangles.len()) {
+                    let before = old.triangles.get(mesh_index);
+                    let after = new.triangles.get(mesh_index);
+                    if before != after {
+                        if let Some(meshes) = before {
+                            meshes.add_damage(&mut region, old.bounds);
+                        }
+                        if let Some(meshes) = after {
+                            meshes.add_damage(&mut region, new.bounds);
                         }
                     }
                 }
@@ -612,6 +676,14 @@ impl Region {
         } else if clip == Rectangle::INFINITE {
             self.add_clipped(bounds, layer_bounds);
         } else if let Some(bounds) = bounds.intersection(&clip) {
+            self.add_clipped(bounds, layer_bounds);
+        }
+    }
+
+    fn add_mesh(&mut self, bounds: Rectangle, layer_bounds: Rectangle) {
+        if bounds == Rectangle::INFINITE {
+            self.add(layer_bounds);
+        } else {
             self.add_clipped(bounds, layer_bounds);
         }
     }
@@ -780,7 +852,7 @@ mod tests {
             images: Vec::new(),
             rasters: Vec::new(),
             primitive_bounds: Vec::new(),
-            triangles: false,
+            triangles: Vec::new(),
         }
     }
 
@@ -821,6 +893,78 @@ mod tests {
         assert_eq!(
             changed_region(&[snapshot()], &[snapshot()], &viewport()),
             Damage::Reuse
+        );
+    }
+
+    fn mesh_snapshot(cache: &mesh::Cache, x: f32) -> LayerSnapshot {
+        let mut scene = snapshot();
+        scene
+            .triangles
+            .push(MeshSnapshot::new(&triangle::Item::Cached {
+                transformation: Transformation::translate(x, 0.0),
+                cache: cache.clone(),
+            }));
+        scene
+    }
+
+    fn test_mesh() -> mesh::Mesh {
+        mesh::Mesh::Solid {
+            buffers: mesh::Indexed {
+                vertices: Vec::new(),
+                indices: Vec::new(),
+            },
+            transformation: Transformation::IDENTITY,
+            clip_bounds: rect(10.0, 20.0, 8.0, 6.0),
+        }
+    }
+
+    #[test]
+    fn cached_mesh_changes_limit_frame_damage() {
+        let mut cache = mesh::Cache::new(vec![test_mesh()].into());
+        let old = mesh_snapshot(&cache, 0.0);
+        assert_eq!(
+            changed_region(&[old], &[mesh_snapshot(&cache, 0.0)], &viewport()),
+            Damage::Reuse,
+        );
+        let old = mesh_snapshot(&cache, 0.0);
+        cache.update(vec![test_mesh()].into());
+        assert_eq!(
+            changed_region(&[old], &[mesh_snapshot(&cache, 0.0)], &viewport()),
+            partial(9, 19, 10, 8),
+        );
+        assert_eq!(
+            changed_region(
+                &[mesh_snapshot(&cache, 0.0)],
+                &[mesh_snapshot(&cache, 20.0)],
+                &viewport()
+            ),
+            partial(9, 19, 30, 8),
+        );
+        assert_eq!(
+            changed_region(&[mesh_snapshot(&cache, 0.0)], &[snapshot()], &viewport()),
+            partial(9, 19, 10, 8),
+        );
+    }
+
+    #[test]
+    fn uncached_mesh_damage_stays_within_its_clip() {
+        let mut scene = snapshot();
+        scene
+            .triangles
+            .push(MeshSnapshot::new(&triangle::Item::Group {
+                transformation: Transformation::translate(20.0, 0.0),
+                meshes: vec![test_mesh()],
+            }));
+        let mut same_scene = snapshot();
+        same_scene
+            .triangles
+            .push(MeshSnapshot::new(&triangle::Item::Group {
+                transformation: Transformation::translate(20.0, 0.0),
+                meshes: vec![test_mesh()],
+            }));
+        assert_eq!(
+            changed_region(&[scene], &[same_scene], &viewport()),
+            partial(29, 19, 10, 8),
         );
     }
 

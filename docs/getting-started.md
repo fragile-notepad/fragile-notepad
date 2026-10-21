@@ -64,8 +64,3 @@ The editor restores the previous session by default. To start without restoring
 it, close the running instance and launch with `--no-session`.
 See [Settings and session files](reference/runtime-options.md#settings-and-session-files)
 for storage locations.
-
-## Related topics
-
-- [Runtime and build options](reference/runtime-options.md)
-- [Optional file-manager integrations](../components/README.md)

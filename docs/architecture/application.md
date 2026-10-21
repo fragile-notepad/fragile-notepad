@@ -136,10 +136,3 @@ delivery policy for every new asynchronous message.
 | Window-local state and tab transfers | [editors.rs](../../src/app/windowing/editors.rs), [tabs.rs](../../src/app/windowing/tabs.rs) |
 | File and session workflows | [files.rs](../../src/app/files.rs), [session.rs](../../src/app/session.rs) |
 | Admission and shutdown | [lifecycle.rs](../../src/app/lifecycle.rs), [message.rs](../../src/message.rs) |
-
-## Related documentation
-
-- [Application source overview](../../src/app/README.md)
-- [Rendering architecture](rendering.md)
-- [Syntax configuration reference](../../assets/syntax/README.md)
-- [Testing](../development/testing.md)

@@ -53,15 +53,16 @@ Headless tests also use `xvfb` and `xauth`; see [Test and validate](testing.md).
    python3 -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
    ```
 
-3. Generate the embedded artwork for your platform:
+3. Generate illustrations and platform application icons:
 
    | Platform | Command |
    | --- | --- |
    | Windows PowerShell | `.\scripts\generate_icon_assets.ps1` |
    | Linux or macOS | `bash scripts/generate_icon_assets.sh` |
 
-   The scripts create raster assets under `assets/` and application icons under
-   `target/app-icons/`.
+   The scripts create illustration rasters under `assets/illustrations/` and
+   application icons under `target/app-icons/`. Cargo compiles UI icon SVGs into
+   vector geometry automatically.
    See [Generate assets](assets.md) for the source inventory and regeneration
    commands.
 
@@ -98,9 +99,3 @@ Default builds start with software rendering and can switch to Vulkan according
 to the saved rendering policy. See [Rendering architecture](../architecture/rendering.md)
 for the handoff and [Runtime and build options](../reference/runtime-options.md)
 for overrides and offline font preparation.
-
-## Related topics
-
-- [Test and validate](testing.md)
-- [Package the editor](packaging.md)
-- [Generate assets](assets.md)

@@ -2,9 +2,9 @@
 
 # Icon sources
 
-This directory contains editable icon sources and their artwork notices.
-Follow [Generate application assets](../../docs/development/assets.md) to
-regenerate the application's embedded rasters.
+Editable icon sources and their artwork notices. See
+[Compile UI icons](../../docs/development/assets.md#compile-ui-icons) for build
+instructions.
 
 ## Inventory
 
@@ -15,18 +15,19 @@ regenerate the application's embedded rasters.
 | `bootstrap/svg/` | Modified shortcut-key and pin icons | SVG using `currentColor` |
 | `file-types/svg/` | Large and small file-type artwork | SVG; entries and extensions in [catalog.json](file-types/catalog.json) |
 
-The standard generation scripts rasterize `colored`, `heroicons`, and
-`bootstrap` into 22 × 22 straight RGBA files in each family's `rgba/` directory.
-Generated rasters are ignored by Git. The `file-types` collection is maintained
-as SVG sources and is not processed by those scripts.
+Cargo compiles `colored`, `heroicons`, and `bootstrap` into Rust vector geometry
+in its `OUT_DIR`. The application draws these paths at the requested size in both
+rendering backends. The `file-types` collection is maintained as SVG sources and
+is not embedded in the application.
 
 ## SVG contract
 
-The small-icon rasterizer supports paths, flat six-digit hexadecimal colors,
-`currentColor`, and rounded caps and joins. Keep these sources free of transforms,
-inherited group paint, and gradients. Use `fill-rule="evenodd"` for filled shapes
-with holes. The file-type SVGs use a broader SVG feature set and are outside this
-rasterizer's contract.
+The UI icon compiler preserves straight lines, quadratic and cubic curves, and
+elliptical arcs. It supports flat six-digit hexadecimal colors, `currentColor`,
+inherited paint on SVG groups, fill rules, and stroke widths, caps, and joins.
+Use `fill-rule="evenodd"` for filled shapes with holes. Transforms, gradients,
+CSS styles, images, and text are rejected during compilation. The file-type SVGs
+use additional SVG features and are not processed by this compiler.
 
 ## Licenses and distribution
 

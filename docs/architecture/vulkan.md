@@ -8,10 +8,6 @@ keeping live input and animation responsive. The
 [hybrid handoff](rendering.md#handoff-lifecycle) owns backend preparation and
 rollback.
 
-The application owns document, file, session, and analysis workflows. Ropey holds
-text. `AdvancedEditor` lays out the visible viewport, including wrapping, folding,
-decorations, and CJK font selection.
-
 ## Resource ownership
 
 Pipelines, caches, workers, and buffers initialize on demand. Engine clones share
@@ -61,14 +57,22 @@ texture copy when the surface supports one and replacement drawing otherwise.
 The renderer never assumes that swapchain contents survive between frames.
 
 DPI, dimensions, background, fonts, and pending image uploads force fresh
-painting. Custom primitives and meshes remain conservatively dirty. Calls that
-load an external target use ordinary rendering. Dirty tiles and GPU scroll
+painting. The renderer compares cached mesh IDs, versions, and positions before
+reusing pixels. Changed meshes repaint their previous and current clipped bounds.
+Meshes without a cache and custom primitives repaint within their bounds. Calls
+that load an external target use ordinary rendering. Dirty tiles and GPU scroll
 copying remain future work.
+
+Icons reuse cached paths and tessellated meshes when they move. Each backend has
+a limited-size geometry cache. Vulkan keeps separate uploads when one cached mesh
+appears at several positions. Its 4× MSAA passes cover only visible geometry
+inside the damaged region. Sequential passes share scratch textures and keep
+separate shader parameters.
 
 ### When retention is bypassed
 
-Retention is opportunistic. Sparse decorations draw directly because copying a
-whole window can cost more than painting them. Damage covering more than half
+Sparse decorations draw directly because copying a whole window can cost more
+than painting them. Damage covering more than half
 the window also draws directly, avoiding an extra full-frame copy during rapid
 scrolling or large fades.
 
@@ -122,9 +126,3 @@ Compatible quad and text batching preserves ordering and clip boundaries, as
 described in [Qt's scene graph renderer](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph-renderer.html).
 Preserving completed pictures also follows
 [WebRender's caching approach](https://firefox-source-docs.mozilla.org/gfx/RenderingOverview.html#caching).
-
-## Related documentation
-
-- [Hybrid rendering](rendering.md): policy, backend preparation, and rollback.
-- [Test and profile rendering](../development/rendering.md): focused checks and dated measurement evidence.
-- [Iced patch notes](../../vendor/iced/LOCAL_CHANGES.md): local framework changes.

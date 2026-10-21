@@ -18,8 +18,8 @@ different revision. macOS support is experimental.
 | --- | --- |
 | Set up and run a development build | [Build from source](development/building.md) |
 | Select checks for a change | [Test and validate](development/testing.md) |
-| Regenerate icons, illustrations, or font profiles | [Generate assets](development/assets.md) |
-| Diagnose rendering or reproduce a benchmark | [Test and profile rendering](development/rendering.md) |
+| Compile icons or regenerate illustrations and font profiles | [Generate assets](development/assets.md) |
+| Diagnose rendering or measure drawing time | [Test and profile rendering](development/rendering.md) |
 | Create portable archives and macOS app bundles | [Package the editor](development/packaging.md) |
 | Prepare a contribution | [Contributing](../CONTRIBUTING.md) |
 | Write or reorganize a documentation page | [Writing documentation](development/documentation.md) |

@@ -95,9 +95,3 @@ separate release steps.
 The [native components](../../components/README.md) are standalone and are not
 included in application builds, CI, or portable archives. Build and install them
 separately. Installer integration, including NSIS integration, is deferred.
-
-## Related topics
-
-- [Get started with a release archive](../getting-started.md)
-- [Vulkan runtime setup](rendering.md#prepare-a-vulkan-runtime)
-- [Generate assets](assets.md)

@@ -1,6 +1,8 @@
 # Local Iced changes
 
-These patches adapt Iced to Fragile Notepad's rendering and window workflows.
+These patches adapt Iced to Fragile Notepad's
+[rendering](../../docs/architecture/rendering.md) and window workflows. See the
+[dependency update process](../README.md#updates) before updating the base.
 
 - Base revision: `ddd7c42a9ba625b219e5e8062ff9be83eea467c5`
 - Upstream: https://github.com/iced-rs/iced
@@ -48,6 +50,19 @@ These patches adapt Iced to Fragile Notepad's rendering and window workflows.
 
 - Join adjacent compatible quad runs and text groups after layer merging,
   preserving transformation, clip, and cached-text ordering boundaries.
+- Geometry caches identify their backend so a handoff cannot mix software and
+  hardware geometry. Cached geometry owns its data.
+- Compare cached mesh IDs, versions, and positions when finding frame damage.
+  Changed meshes repaint their previous and current clipped bounds; meshes
+  without a cache repaint within their bounds.
+- Limit mesh MSAA passes to visible geometry inside the damaged region. Share
+  scratch textures between sequential passes, including oversized textures
+  while in use. Each pass keeps separate blit parameters; discard multisample
+  contents after resolving them.
+- Keep separate GPU mesh uploads when one cache appears at several positions.
+  Remove unused transforms after painting and release uploads when their cache
+  owner is dropped, including uploads held by other renderers. Advance index
+  offsets when a mesh is clipped out.
 - Provide explicit cached-layer tokens and paint keys, with a 32 MiB per-window GPU
   surface budget and ordinary clipped drawing on software. Cached surfaces
   share the window's image atlas and the engine's pipelines; nested caches,
@@ -69,12 +84,3 @@ These patches adapt Iced to Fragile Notepad's rendering and window workflows.
   preserving glyph positions when fold placeholders add color spans.
 - Software rounded quads honor pixel-grid snapping after scaling and translation,
   keeping fold placeholder backgrounds inside their painted bounds.
-
-## Related documentation
-
-- [Documentation index](../../docs/README.md)
-- [Rendering architecture](../../docs/architecture/rendering.md)
-- [Vulkan renderer](../../docs/architecture/vulkan.md)
-- [Rendering development](../../docs/development/rendering.md)
-- [Testing](../../docs/development/testing.md)
-- [Dependency update process](../README.md#updates)

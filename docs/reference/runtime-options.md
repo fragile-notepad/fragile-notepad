@@ -133,9 +133,3 @@ their own workload-specific options in
 
 Font preparation is invoked by [build.rs](../../build.rs); the preparation
 script is [prepare_font_profiles.py](../../scripts/prepare_font_profiles.py).
-
-## Related topics
-
-- [Get started](../getting-started.md)
-- [Build from source](../development/building.md)
-- [Generate assets](../development/assets.md)

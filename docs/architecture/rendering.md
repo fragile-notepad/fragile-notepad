@@ -31,8 +31,9 @@ requests are suppressed. A failed handoff retains software and disables further
 attempts for that application session. Selecting software does not reverse an
 already active GPU handoff.
 
-Startup disables antialiasing and vsync. The Vulkan handoff keeps antialiasing
-disabled and enables vsync. All windows share the selected renderer backend.
+Startup disables antialiasing and vsync. The Vulkan handoff enables vsync and
+4× multisample antialiasing for vector icon meshes. Text, images, and quads use
+their existing rendering paths. All windows share the selected renderer backend.
 
 ## Handoff lifecycle
 
@@ -59,9 +60,3 @@ how the renderer keeps submitted resources alive.
 | Initial backend settings | [`src/startup.rs`](../../src/startup.rs) |
 | Runtime handoff, first presentation, and rollback | [`vendor/iced/winit/src/lib.rs`](../../vendor/iced/winit/src/lib.rs) |
 | Local framework changes | [Iced patch notes](../../vendor/iced/LOCAL_CHANGES.md) |
-
-## Related documentation
-
-- [Vulkan rendering](vulkan.md): resource ownership, retained painting, and editor work.
-- [Test and profile rendering](../development/rendering.md): runtime setup, checks, traces, and measurements.
-- [Runtime options](../reference/runtime-options.md): backend and adapter overrides.

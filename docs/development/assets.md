@@ -2,11 +2,11 @@
 
 # Generate application assets
 
-Generate artwork before the first application build and after changing icon or
-illustration SVGs. Prepare font profiles when inspecting calibration or priming
-the build cache. The application embeds generated rasters and font data; the
-platform icon files are also used for packaging. Run all commands from the
-repository root.
+Generate rasters from the [illustration sources](../../assets/illustrations/README.md)
+before the first application build and after changing their SVGs. Cargo compiles
+UI icon SVGs into vector geometry and prepares font data automatically. Platform
+application icons are also used for packaging. Run commands from the repository
+root.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ repository root.
 The [font preparation task](#prepare-font-profiles) has separate Python
 dependencies and caching. Cargo also runs that preparation automatically.
 
-## Generate all icons and illustrations
+## Generate illustrations and platform icons
 
 1. Install the asset dependencies:
 
@@ -39,15 +39,14 @@ dependencies and caching. Cargo also runs that preparation automatically.
    | Windows PowerShell | `.\scripts\generate_icon_assets.ps1` |
    | Linux or macOS | `bash scripts/generate_icon_assets.sh` |
 
-   The scripts generate colored icons, monochrome controls and shortcuts, the
-   quill, bunny animation layers, and platform application icons. They do not
-   process the file-type SVG collection or the README banners.
+   The scripts generate the quill, bunny animation layers, and platform
+   application icons. They do not process UI icons, the file-type SVG collection,
+   or the README banners.
 
 3. Check that the expected outputs exist:
 
    | Location | Contents |
    | --- | --- |
-   | `assets/icons/{colored,heroicons,bootstrap}/rgba/` | 22 × 22 straight RGBA icons |
    | `assets/illustrations/macaw-quill.rgba` | 400 × 440 straight RGBA illustration |
    | `assets/illustrations/bunny/*.rgba` | Application, title-bar, and About animation rasters; [sizes and filenames](../../assets/illustrations/bunny/README.md#generated-assets) |
    | `target/app-icons/` | `app.ico`, `app.icns`, and `app.png` |
@@ -56,23 +55,47 @@ dependencies and caching. Cargo also runs that preparation automatically.
    Generated files are ignored by Git. Keep the editable SVGs as the source of
    truth and regenerate assets in each build checkout.
 
-## Regenerate a single family
+## Compile UI icons
+
+Cargo runs [compile_vector_icons.py](../../scripts/compile_vector_icons.py) when
+the UI icon sources change. The compiler writes Rust vector geometry into Cargo's
+`OUT_DIR`; no icon RGBA files or manual generation step are needed. Both software
+and Vulkan rendering draw these paths at the requested icon size.
+
+The compiler uses only the Python standard library.
+
+Edit the SVGs in `assets/icons/{colored,heroicons,bootstrap}/svg/` and rebuild the
+application. Colored icons preserve their fill and stroke colors; disabled
+toolbar icons blend those colors toward the toolbar background. Monochrome
+controls and shortcuts use the active theme. Follow the
+[icon SVG contract](../../assets/icons/README.md#svg-contract) when editing those
+sources.
+
+## Regenerate an illustration family
 
 Use `python3` instead of `python` on Linux or macOS.
 
 | Family | Command |
 | --- | --- |
-| Colored action icons | `python scripts/generate_colored_rgba.py` |
-| Heroicons controls | `python scripts/rasterize_svg_icons.py --svg-dir assets/icons/heroicons/svg --out-dir assets/icons/heroicons/rgba --size 22` |
-| Bootstrap shortcuts and pins | `python scripts/rasterize_svg_icons.py --svg-dir assets/icons/bootstrap/svg --out-dir assets/icons/bootstrap/rgba --size 22` |
 | Quill | `python scripts/rasterize_illustrations.py` |
 | Bunny layers and platform application icons | `python scripts/generate_app_icons.py` |
 
-The small-icon rasterizer defaults to 8× supersampling. Its monochrome output
-uses `#64748b` unless overridden with `--color`; the colored-icon wrapper
-preserves the SVG's fill and stroke colors. Follow the
-[icon SVG contract](../../assets/icons/README.md#svg-contract) when editing
-those sources. Bunny artwork uses resvg and supports gradients and transforms.
+The quill renderer uses Pillow and supports paths, flat fills and strokes, and a
+path clip. Bunny artwork uses resvg and supports gradients and transforms.
+
+## Check icons and illustrations
+
+Choose the check for the assets you changed. Generate illustration rasters before
+testing them.
+
+```sh
+python -m unittest discover -s scripts -p test_compile_vector_icons.py
+cargo test --locked -j 1 --test vector_icons -- --test-threads=1
+python scripts/test_illustration_assets.py
+```
+
+Use `python3` on Linux or macOS. The Vulkan icon test needs a
+[Vulkan runtime](rendering.md#prepare-a-vulkan-runtime).
 
 ## Prepare font profiles
 
@@ -140,19 +163,3 @@ cargo run --locked -j 1 --example preview_branding -- --vulkan
 Vulkan outputs appear under `target/bunny-review-vulkan/`. This mode requires
 the default `hybrid-rendering` feature and a working Vulkan adapter. See
 [Rendering setup and diagnostics](rendering.md) for runtime setup.
-
-For focused automated checks of the sources and generated rasters, run:
-
-```powershell
-python -m unittest discover -s scripts -p test_icon_assets.py
-```
-
-Use `python3` on Linux or macOS. Generate the assets first, and run resource-heavy
-previews or builds one at a time. See [Testing](testing.md) for the other checks.
-
-## Related documentation
-
-- [Icon inventory and notices](../../assets/icons/README.md)
-- [Illustration inventory and rights](../../assets/illustrations/README.md)
-- [Bunny sources and generated formats](../../assets/illustrations/bunny/README.md)
-- [Package the application](packaging.md)

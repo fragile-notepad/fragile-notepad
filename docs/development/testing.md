@@ -20,7 +20,7 @@ choose the rows that apply to your change.
 | Document model | `cargo test --locked -j 1 --test core_document -- --test-threads=1` |
 | Command-line parsing and instance forwarding | `cargo test --locked -j 1 --test cli -- --test-threads=1` |
 | Outline configuration | `cargo test --locked -j 1 --test outline_configuration_regressions -- --test-threads=1` |
-| Generated icons and illustrations | `python scripts/test_icon_assets.py` |
+| Icons and illustrations | [Asset checks](assets.md#check-icons-and-illustrations) |
 | Font tooling | `python -m unittest discover -s scripts -p 'test_*font_profiles.py'` |
 | Software-only compilation | `cargo check --locked --no-default-features -j 1` |
 | Rendering and local GPU patches | [Rendering checks](rendering.md#check-a-rendering-change) |
@@ -74,9 +74,3 @@ source scripts/ci.sh
 The [CI workflow](../../.github/workflows/ci.yml) runs validation on Windows,
 Linux, and macOS. Its software Vulkan setup is documented in the
 [rendering guide](rendering.md).
-
-## Related topics
-
-- [Generate assets](assets.md)
-- [Test and profile rendering](rendering.md)
-- [Contributing](../../CONTRIBUTING.md)

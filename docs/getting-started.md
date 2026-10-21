@@ -2,7 +2,6 @@
 
 # Get started
 
-Download Fragile Notepad, open a file, and adjust the editor's preferences.
 Windows and Linux are supported; macOS support is experimental.
 
 ## Download and launch
@@ -10,7 +9,7 @@ Windows and Linux are supported; macOS support is experimental.
 1. Open [Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
    and choose the archive for your platform. Nightly builds are prereleases.
 2. Extract the complete archive into a directory you can keep in place.
-3. Launch the editor using the entry below.
+3. Launch the editor for your platform:
 
 | Platform | Launch |
 | --- | --- |

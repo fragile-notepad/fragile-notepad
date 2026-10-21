@@ -2,9 +2,6 @@
 
 # Runtime and build options
 
-Look up command-line arguments, persistent file locations, and environment
-variables used by the editor and its build tooling.
-
 ## Command line
 
 ```text
@@ -28,9 +25,7 @@ fragile-notepad -- -draft.txt
 ```
 
 Unknown options and empty path arguments produce errors. A second process
-forwards its file paths to the running instance and exits; it does not start an
-independent session. Parsing is implemented in [startup.rs](../../src/startup.rs),
-and process forwarding is wired in [main.rs](../../src/main.rs).
+forwards its file paths to the running instance and exits.
 
 ## Settings and session files
 
@@ -40,7 +35,7 @@ directory.
 
 Recovery text is stored in `session.chunks/` in chunks of up to 8 MiB.
 The `session.json` manifest allows 16 MiB and 100,000 chunk references;
-legacy inline sessions allow 256 MiB. Restoration needs enough available RAM.
+legacy inline sessions allow 256 MiB.
 If the latest snapshot is damaged, the editor tries `session.previous.json`
 and warns that recent edits may be missing. Damaged manifests are retained as
 `session.unreadable.json`. To clear recovery, close the editor and remove these
@@ -58,11 +53,6 @@ The compiled outline cache is `outline-registry.xml` in the cache directory:
 | Windows | `%LOCALAPPDATA%\FragileNotepad\Cache\`; falls back to `%APPDATA%\FragileNotepad\Cache\` |
 | Linux and macOS | `$XDG_CACHE_HOME/fragile-notepad/` when set; otherwise `$HOME/.cache/fragile-notepad/` |
 
-macOS uses the Unix paths above. See [platform paths](../../src/platform/paths.rs),
-[settings persistence](../../src/services/settings_store.rs), and
-[session persistence](../../src/services/session_store.rs) for the file formats
-and path resolution.
-
 ## Runtime environment
 
 Set variables before launching the primary instance. Values passed to a secondary
@@ -70,25 +60,22 @@ process do not reconfigure the running editor.
 
 | Variable | Values and behavior |
 | --- | --- |
-| `FRAGILE_NOTEPAD_RENDER_BACKEND` | `software`, `lazy-gpu`, or `hardware-diagnostic`. A valid value overrides the saved rendering policy; an invalid value is ignored and reported in About debug information. |
+| `FRAGILE_NOTEPAD_RENDER_BACKEND` | Overrides the saved rendering policy using the values below. An invalid value is ignored and reported in About debug information. |
 | `FRAGILE_NOTEPAD_UI_SCALE` | Additional interface scale from `0.75` through `3.0`, inclusive. Defaults to `1.0` for unset, invalid, nonfinite, or out-of-range values. The operating system's display scale still applies. |
 | `FRAGILE_NOTEPAD_OUTLINE_CACHE_PATH` | Override the full path to the compiled outline cache. |
 | `WGPU_BACKEND` | Leave unset or set to `vulkan` for this application's hardware renderer. |
 | `WGPU_POWER_PREF` | `low`, `high`, or `none`; overrides the adapter power preference. |
 
-Rendering policy values map to these requests:
-
-| Value | Request |
+| `FRAGILE_NOTEPAD_RENDER_BACKEND` | Handoff request |
 | --- | --- |
 | `software` | Suppress hardware handoff requests. |
 | `lazy-gpu` | Prefer a low-power Vulkan adapter. |
 | `hardware-diagnostic` | Prefer a high-performance Vulkan adapter. |
 
-The default saved setting is **Hybrid rendering**. The editor starts in software
-and requests a hardware handoff when a hardware policy is active. A software-only
-build excludes Vulkan regardless of environment overrides. See
-[Rendering architecture](../architecture/rendering.md) for failure handling and
-the handoff lifecycle.
+The default saved setting is **Hybrid rendering**. A software-only build excludes
+Vulkan regardless of environment overrides. See
+[Rendering architecture](../architecture/rendering.md) for software startup,
+hardware handoff, and failure handling.
 
 For example, force software rendering for a new instance in PowerShell:
 
@@ -105,8 +92,6 @@ FRAGILE_NOTEPAD_RENDER_BACKEND=software ./fragile-notepad
 
 ## Diagnostic environment
 
-These variables support development and profiling.
-
 | Variable | Behavior |
 | --- | --- |
 | `FRAGILE_PERF_TRACE` | Presence enables CSV tracing when the output file can be opened; use `1` by convention. |
@@ -116,8 +101,7 @@ These variables support development and profiling.
 | `FRAGILE_NOTEPAD_TITLE_BAR` | Debug builds only: `windows` or `macos` selects the window control style. |
 
 See [Test and profile rendering](../development/rendering.md) for trace capture,
-adapter selection, and profiling commands. The profiling examples also describe
-their own workload-specific options in
+adapter selection, and profiling commands. For workload-specific options, see
 [profile_composition.rs](../../examples/profile_composition.rs) and
 [profile_scroll.rs](../../examples/profile_scroll.rs).
 
@@ -131,5 +115,5 @@ their own workload-specific options in
 | `CARGO_BUILD_JOBS` | Use `1` on a shared development machine to limit concurrent compilation. |
 | `RUST_TEST_THREADS` | Use `1` for graphics and font-intensive test runs, including full validation scripts. |
 
-Font preparation is invoked by [build.rs](../../build.rs); the preparation
-script is [prepare_font_profiles.py](../../scripts/prepare_font_profiles.py).
+See [Prepare font profiles](../development/assets.md#prepare-font-profiles) for
+cache preparation and generated outputs.

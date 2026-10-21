@@ -86,12 +86,10 @@ Distribute the complete package. Launch `Fragile Notepad.app` from Finder or use
 the adjacent `fragile-notepad` launcher. Optional interface scaling is documented
 under [Runtime environment](../reference/runtime-options.md#runtime-environment).
 
-The script collects runtime notices online and applies ad-hoc signatures to the
-bundled libraries and application. Developer ID signing and notarization require
-separate release steps.
+The script applies ad-hoc signatures to the bundled libraries and application.
+Developer ID signing and notarization require separate release steps.
 
 ## Optional file-manager integrations
 
-The [native components](../../components/README.md) are standalone and are not
-included in application builds, CI, or portable archives. Build and install them
-separately. Installer integration, including NSIS integration, is deferred.
+Build and install the [native file-manager integrations](../../components/README.md)
+separately from the editor. Application archives exclude these components.

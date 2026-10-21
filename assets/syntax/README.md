@@ -2,9 +2,10 @@
 
 # Syntax configuration reference
 
-The application embeds these XML files at compile time. Rebuild after changing
-them. The rules recognize language structure for navigation and folding; source
-ranges use UTF-8 byte offsets with exclusive ends.
+The application embeds these XML files at compile time.
+[Rebuild the application](../../docs/development/building.md) after changing them.
+The rules recognize language structure for navigation and folding; source ranges
+use UTF-8 byte offsets with exclusive ends.
 
 | File | Purpose |
 | --- | --- |
@@ -18,9 +19,11 @@ Use the bundled language rules as examples. The
 
 ## Families and bodies
 
-A language selects its family with `use-family`. Adapter names are validated
-metadata. `delimiter` pairs match outside comments and literals; brace bodies add
-their pair. A `syntax-token` element specifies a `role` and one-character `value`.
+A language selects its family with `use-family`. Its `adapter` must be supported
+by the compiler and declared by that family. The parser matches `delimiter` pairs
+outside comments and literals. It also matches each brace body's `open`/`close`
+pair automatically. A `syntax-token` element specifies a `role` and one-character
+`value`.
 
 | Roles | Purpose |
 | --- | --- |
@@ -56,14 +59,15 @@ member names. List attributes are comma-separated.
 | `line-skip-pattern` | `value` regex consumes directive lines at their first significant position, including continuations |
 | `opaque-block` | `prefix-pattern`, balanced `open`/`close`; shields bodies after comment/string masking |
 
-Unterminated literals stay shielded through the end of the file. Regex context represents closed
-control conditions as keyword + `()`, completed blocks as owner + `{}`, and
-members with their prefix. Use the bundled language rules as examples.
+Unterminated literals stay shielded through the end of the file. Regex context
+represents closed control conditions as keyword + `()`, completed blocks as
+owner + `{}`, and members with their prefix.
 
 ## Declarations
 
 `container` and `declaration` rules select keywords, names, bodies, terminators,
-and callable filters. Language `signature-modifiers` includes preceding modifiers.
+and callable filters. The language's `signature-modifiers` attribute lists
+preceding modifier keywords to include in declaration signatures.
 
 | Rule field | Behavior |
 | --- | --- |
@@ -98,11 +102,8 @@ Empty delimiters, invalid or empty-matching patterns, missing name captures, and
 incomplete generic configurations produce diagnostics. Invalid lexical rules
 exclude the language.
 
+Run the [outline configuration check](../../docs/development/testing.md#choose-focused-checks)
+after changing language rules.
+
 `outline-registry.xml` caches compiled plans. The registry rebuilds the cache
 when source hashes or its structure fail validation.
-
-## Related documentation
-
-- [Application architecture](../../docs/architecture/application.md)
-- [Build the application](../../docs/development/building.md)
-- [Testing](../../docs/development/testing.md)

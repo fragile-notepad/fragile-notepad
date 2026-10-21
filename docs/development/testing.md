@@ -11,8 +11,7 @@ tests. Reuse existing build and asset caches.
 
 ## Choose focused checks
 
-Run commands from the repository root. Each command below checks a specific area;
-choose the rows that apply to your change.
+Run commands from the repository root.
 
 | Changed area | Check |
 | --- | --- |

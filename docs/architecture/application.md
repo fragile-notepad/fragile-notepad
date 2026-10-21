@@ -2,10 +2,7 @@
 
 # Application architecture
 
-`App` coordinates editor workflows, task cancellation, and native windows.
-Services return typed results. UI widgets borrow state through `WorkbenchView`
-and emit commands. The application dispatches those commands, records mutations,
-and schedules the work needed to bring dependent features up to date.
+`App` routes commands and coordinates editor workflows across native windows.
 
 ## Responsibilities
 
@@ -27,8 +24,7 @@ Subscribers receive their feature state and required inputs. They do not receive
 1. `App::update` applies the message's admission policy and resolves its editor
    window.
 2. Command routing dispatches the message to its feature handler.
-3. Workspace operations publish journaled changes. Settings edits recorded at
-   their mutation sites publish settings changes.
+3. The application publishes workspace and settings changes to the event bus.
 4. The event bus delivers mutation events in FIFO order. Subscribers mark
    dependent work as pending.
 5. Reactions run in dependency order until synchronous work settles. Scheduled
@@ -36,9 +32,6 @@ Subscribers receive their feature state and required inputs. They do not receive
 
 Asynchronous completion order is independent of the order in which work was
 prepared. Features must check whether results still apply before using them.
-
-[message.rs](../../src/message.rs) declares feature routing and shutdown policy;
-[update.rs](../../src/app/update.rs) wires event subscribers.
 
 ## Document ownership and identity
 
@@ -52,11 +45,11 @@ views, and load generations. `documents()` enumerates the process registry;
 `document_ids()` enumerates the current editor's tabs. Bulk commands must use an
 explicit scope.
 
-Workspace operations journal changes. Document access compares scalar stamps at
-update boundaries. Use document editing and setter methods to maintain
-revisions and immutable IDs. Structural reorderings rebuild the ID index.
-Session persistence observes workspace changes; record intentional settings
-edits at their mutation sites.
+At update boundaries, the mutation journal compares metadata snapshots for
+documents borrowed mutably and emits the corresponding change events. Use
+document editing and setter methods to maintain revisions and immutable IDs.
+Structural reorderings rebuild the ID index. Record intentional settings edits
+at their mutation sites.
 
 ## Editor-window state and routing
 
@@ -115,7 +108,8 @@ windows.
 
 The event bus preserves lifecycle events and coalesces invalidations only while
 they are queued. It removes coalescing keys before delivery so subscribers can
-publish a fresh invalidation during handling. Events carry IDs and facts.
+publish a fresh invalidation during handling. Document-specific events carry the
+affected document's ID.
 
 Reaction dependencies place file work before search, search before workers and
 session persistence, and analysis before syntax. Save-then-close operations are
@@ -130,9 +124,9 @@ delivery policy for every new asynchronous message.
 
 | Area | Entry points |
 | --- | --- |
-| Application state and Iced entry points | [app.rs](../../src/app.rs) |
-| Command dispatch and presentation | [routing.rs](../../src/app/routing.rs), [presentation.rs](../../src/app/presentation.rs) |
+| Application state and bootstrap | [app.rs](../../src/app.rs), [bootstrap.rs](../../src/app/bootstrap.rs) |
+| Command dispatch and presentation | [routing.rs](../../src/app/routing.rs), [presentation.rs](../../src/app/presentation.rs), [view_model.rs](../../src/ui/view_model.rs) |
 | Events and reactions | [events.rs](../../src/app/events.rs), [bus.rs](../../src/app/bus.rs), [update.rs](../../src/app/update.rs), [scheduler.rs](../../src/app/scheduler.rs) |
-| Window-local state and tab transfers | [editors.rs](../../src/app/windowing/editors.rs), [tabs.rs](../../src/app/windowing/tabs.rs) |
+| Window-local state and tab transfers | [windowing/mod.rs](../../src/app/windowing/mod.rs), [editors.rs](../../src/app/windowing/editors.rs), [tabs.rs](../../src/app/windowing/tabs.rs) |
 | File and session workflows | [files.rs](../../src/app/files.rs), [session.rs](../../src/app/session.rs) |
 | Admission and shutdown | [lifecycle.rs](../../src/app/lifecycle.rs), [message.rs](../../src/message.rs) |

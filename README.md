@@ -22,7 +22,6 @@ macOS support.
 
 Download an archive from [Releases](https://github.com/fragile-notepad/fragile-notepad/releases),
 extract it, and follow the [getting started guide](docs/getting-started.md).
-To build the editor, see [Build from source](docs/development/building.md).
 
 ## Screenshots
 
@@ -43,23 +42,12 @@ To build the editor, see [Build from source](docs/development/building.md).
 - Unicode, CJK text, legacy encodings, and configurable line endings.
 - Session recovery for unsaved text, customizable shortcuts, and themes.
 
-## Build from source
-
-The [build guide](docs/development/building.md) covers prerequisites, generated
-assets, platform dependencies, and software-only builds.
-
-## Checks
-
-Use the [testing guide](docs/development/testing.md) to select focused checks or
-run the full validation scripts.
-
 ## Documentation
 
 | Goal | Guide |
 | --- | --- |
-| Install and open files | [Get started](docs/getting-started.md) |
-| Find a guide or reference | [Documentation index](docs/README.md) |
-| Change the editor | [Contributing](CONTRIBUTING.md) |
+| Build the editor | [Build from source](docs/development/building.md) |
+| Validate a change | [Test and validate](docs/development/testing.md) |
 | Create a release archive | [Packaging](docs/development/packaging.md) |
 | Understand the implementation | [Application architecture](docs/architecture/application.md) |
 

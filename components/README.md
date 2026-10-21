@@ -7,12 +7,11 @@ platform's file manager. Each launches the separately installed editor with
 `--` followed by the selected file paths. Selections must contain between 1 and
 4,096 files.
 
-## Integration status
+## Build and installation
 
-The components are independent of the application build. Normal Cargo builds,
-CI, and application packages do not build or install them. Building a component
-does not activate it; follow its installation or registration procedure.
-Installer integration, including NSIS, is deferred.
+Application builds, CI, and [packages](../docs/development/packaging.md) exclude
+these components. Build and install them separately using the platform guides
+below.
 
 | Platform | Component | Installation guide |
 | --- | --- | --- |
@@ -20,11 +19,6 @@ Installer integration, including NSIS, is deferred.
 | Linux | Nautilus API 4 extension and Dolphin service menu | [Linux file managers](linux-shell/README.md) |
 | macOS | Finder Services bundle | [macOS Finder](macos-shell/README.md) |
 
-These integrations use native launch arguments and include no shell-script
-launchers. Build and install the editor before installing a component. Keep the
-editor at a stable path; moving it requires updating the integration.
-
-## Related documentation
-
-- [Build the application](../docs/development/building.md)
-- [Package the application](../docs/development/packaging.md)
+Build and install the [editor](../docs/development/building.md) before installing
+a component. Keep the editor at a stable path; moving it requires updating the
+integration.

@@ -2,7 +2,6 @@
 
 # Illustration sources
 
-This directory contains the original branding and About-dialog artwork.
 Follow [Generate application assets](../../docs/development/assets.md) for
 requirements, commands, generated outputs, and preview instructions.
 

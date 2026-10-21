@@ -3,9 +3,6 @@
 # Windows Explorer integration
 
 This native DLL adds **Edit with Fragile Notepad** to Explorer for selected files.
-It is independent of the editor and excluded from normal application builds,
-CI, and portable packages. NSIS integration is deferred. Building the DLL does
-not register it.
 
 | Windows version | Registration method | Menu location |
 | --- | --- | --- |
@@ -63,8 +60,7 @@ Use [AppxManifest.xml](AppxManifest.xml) as the package manifest. Place the sign
 | Package identity | Consistent across updates |
 
 Set `FRAGILE_SHELL_PUBLISHER` before the Cargo build when using a publisher other
-than the default. Package signing and deployment preparation are manual; there
-is no integrated installer workflow.
+than the default. Prepare and sign the package manually before registration.
 
 ## Remove the integration
 
@@ -78,8 +74,3 @@ is no integrated installer workflow.
 2. Remove the DLL and package assets after unregistration succeeds. The
    unregistration routine removes this component's modern package and classic
    registration. Explorer may retain the loaded DLL until sign-out.
-
-## Related documentation
-
-- [File-manager integrations](../README.md)
-- [Application packaging](../../docs/development/packaging.md)

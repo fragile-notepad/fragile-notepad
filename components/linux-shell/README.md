@@ -3,12 +3,7 @@
 # Linux file-manager integration
 
 These native C components add **Edit with Fragile Notepad** to Nautilus
-(GNOME Files 43+, API 4) and KDE Dolphin (Frameworks 5/6). They launch the
-separately installed editor with native file arguments.
-
-The components are independent of normal application builds, CI, and packages.
-They are not included in the application distribution and require explicit
-installation. There are no shell-script launchers.
+(GNOME Files 43+, API 4) and KDE Dolphin (Frameworks 5/6).
 
 ## Requirements
 
@@ -38,7 +33,7 @@ installation. There are no shell-script launchers.
    `fragile-notepad-nautilus.so` when Nautilus support is enabled. Build files
    remain under `target/linux-shell/`.
 
-3. Ensure the editor exists at the configured path, then install explicitly:
+3. Ensure the editor exists at the configured path, then install:
 
    ```sh
    sudo cmake --install target/linux-shell
@@ -77,8 +72,3 @@ the paths before rebuilding.
 To uninstall, remove those three installed artifacts, or the two Dolphin
 artifacts if Nautilus was disabled. Restart the file manager or sign out after
 removal.
-
-## Related documentation
-
-- [File-manager integrations](../README.md)
-- [Build the application](../../docs/development/building.md)

@@ -10,19 +10,9 @@ Vulkan support.
 
 ## Rendering policy
 
-[The application rendering module](../../src/app/rendering.rs) resolves the saved
-hardware acceleration setting and the `FRAGILE_NOTEPAD_RENDER_BACKEND` override.
-
-| Policy value | Behavior |
-| --- | --- |
-| `software` | Suppress hardware requests. |
-| `lazy-gpu` | Request Vulkan with a low-power adapter preference. |
-| `hardware-diagnostic` | Request Vulkan with a high-performance adapter preference. |
-
-A valid environment override takes precedence over the saved setting. Invalid
-values are ignored and reported in About debug information. See
-[runtime options](../reference/runtime-options.md) for environment variables and
-adapter overrides.
+The application resolves the saved hardware acceleration setting and
+[runtime overrides](../reference/runtime-options.md#runtime-environment) before
+requesting a handoff.
 
 Hardware policies request a handoff when the main window opens. Opening About
 also requests a handoff if a hardware policy is active and the renderer is still

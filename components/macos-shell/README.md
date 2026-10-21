@@ -6,9 +6,6 @@ This native `.service` bundle adds **Edit with Fragile Notepad** to Finder's
 Services menu. It accepts between 1 and 4,096 local regular files, including
 symlinks to files.
 
-The component is independent of normal application builds, CI, and packages.
-Building it does not install or activate the service.
-
 ## Requirements
 
 - macOS 11 or later.
@@ -57,8 +54,3 @@ Reconfigure, rebuild, and reinstall the bundle after moving the editor.
 
 Remove `~/Library/Services/Fragile Notepad.service`, then sign out and back in to
 refresh Services.
-
-## Related documentation
-
-- [File-manager integrations](../README.md)
-- [macOS application packaging](../../docs/development/packaging.md)

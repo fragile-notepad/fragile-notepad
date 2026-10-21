@@ -2,9 +2,8 @@
 
 # Icon sources
 
-Editable icon sources and their artwork notices. See
-[Compile UI icons](../../docs/development/assets.md#compile-ui-icons) for build
-instructions.
+See [Compile UI icons](../../docs/development/assets.md#compile-ui-icons) for
+build instructions.
 
 ## Inventory
 

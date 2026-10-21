@@ -2,8 +2,7 @@
 
 # Test and profile rendering
 
-Run focused rendering tests, collect application traces, or profile offscreen
-drawing. Run commands from the repository root.
+Run commands from the repository root.
 
 ## Prepare a Vulkan runtime
 
@@ -34,9 +33,9 @@ overrides the application's adapter preference. See
 
 ## Check a rendering change
 
-Run commands from the repository root. Start with the tests that cover the changed
-renderer layer; run one resource-intensive command at a time. Use one Cargo build
-job and one test thread for graphics checks.
+Start with the tests that cover the changed renderer layer; run one
+resource-intensive command at a time. Use one Cargo build job and one test thread
+for graphics checks.
 
 Alongside the [application checks](testing.md), renderer changes use these library
 checks:
@@ -115,4 +114,4 @@ utilization nor native window-drag latency.
 Fade clocks use real elapsed time, so opacity progress and first-time shaping
 can vary with machine load. The scroll-reversal case sends eight wheel lines per
 frame and reverses direction every six frames. The fade case closes and reopens
-About every ten measured frames. Run one resource-intensive command at a time.
+About every ten measured frames.

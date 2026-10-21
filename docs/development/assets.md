@@ -3,10 +3,8 @@
 # Generate application assets
 
 Generate rasters from the [illustration sources](../../assets/illustrations/README.md)
-before the first application build and after changing their SVGs. Cargo compiles
-UI icon SVGs into vector geometry and prepares font data automatically. Platform
-application icons are also used for packaging. Run commands from the repository
-root.
+before the first application build and after changing their SVGs. Run commands
+from the repository root.
 
 ## Requirements
 
@@ -14,9 +12,6 @@ root.
 - Pillow and resvg-py, installed using the versions in
   [requirements-assets.txt](../../scripts/requirements-assets.txt).
 - For the Rust preview example, the [application build prerequisites](building.md).
-
-The [font preparation task](#prepare-font-profiles) has separate Python
-dependencies and caching. Cargo also runs that preparation automatically.
 
 ## Generate illustrations and platform icons
 
@@ -40,8 +35,7 @@ dependencies and caching. Cargo also runs that preparation automatically.
    | Linux or macOS | `bash scripts/generate_icon_assets.sh` |
 
    The scripts generate the quill, bunny animation layers, and platform
-   application icons. They do not process UI icons, the file-type SVG collection,
-   or the README banners.
+   application icons.
 
 3. Check that the expected outputs exist:
 
@@ -59,10 +53,8 @@ dependencies and caching. Cargo also runs that preparation automatically.
 
 Cargo runs [compile_vector_icons.py](../../scripts/compile_vector_icons.py) when
 the UI icon sources change. The compiler writes Rust vector geometry into Cargo's
-`OUT_DIR`; no icon RGBA files or manual generation step are needed. Both software
-and Vulkan rendering draw these paths at the requested icon size.
-
-The compiler uses only the Python standard library.
+`OUT_DIR`. Both software and Vulkan rendering draw these paths at the requested
+icon size.
 
 Edit the SVGs in `assets/icons/{colored,heroicons,bootstrap}/svg/` and rebuild the
 application. Colored icons preserve their fill and stroke colors; disabled
@@ -73,15 +65,13 @@ sources.
 
 ## Regenerate an illustration family
 
-Use `python3` instead of `python` on Linux or macOS.
-
 | Family | Command |
 | --- | --- |
 | Quill | `python scripts/rasterize_illustrations.py` |
 | Bunny layers and platform application icons | `python scripts/generate_app_icons.py` |
 
-The quill renderer uses Pillow and supports paths, flat fills and strokes, and a
-path clip. Bunny artwork uses resvg and supports gradients and transforms.
+See the [illustration source guide](../../assets/illustrations/README.md) for
+renderer capabilities.
 
 ## Check icons and illustrations
 
@@ -94,7 +84,7 @@ cargo test --locked -j 1 --test vector_icons -- --test-threads=1
 python scripts/test_illustration_assets.py
 ```
 
-Use `python3` on Linux or macOS. The Vulkan icon test needs a
+The Vulkan icon test needs a
 [Vulkan runtime](rendering.md#prepare-a-vulkan-runtime).
 
 ## Prepare font profiles
@@ -110,25 +100,22 @@ before a build.
    python -m pip install -r scripts/requirements-font-profiles.txt
    ```
 
-   Use `python3` on Linux or macOS. The requirements pin Pillow and fontTools.
-
 2. Prepare profiles for the target platform. This example targets Windows:
 
    ```powershell
    python scripts/prepare_font_profiles.py --out-dir target/font-profiles/prepared --target-os windows --cache-dir target/font-profiles
    ```
 
-   Set `--target-os` to `windows`, `linux`, or `macos`. Use `python3` on Linux
-   or macOS. The script inventories installed fonts, measures the selected
-   families, and downloads a pinned, checksum-verified Noto CJK fallback and
-   license when needed. Downloads, measurement reports, and dependency caches
-   stay under the cache directory.
+   Set `--target-os` to `windows`, `linux`, or `macos`. The script inventories
+   installed fonts, measures the selected families, and downloads a pinned,
+   checksum-verified Noto CJK fallback and license when needed. Downloads,
+   measurement reports, and dependency caches stay under the cache directory.
 
 3. Inspect the prepared outputs under `target/font-profiles/prepared/`:
 
    | Output | Purpose |
    | --- | --- |
-   | `font_profiles.rs`, `font_assets.rs`, `font_families.rs`, `font_collections.rs` | Rust expressions for calibration, embedded font data, preferred families, and coherent collections |
+   | `font_profiles.rs`, `font_assets.rs`, `font_families.rs`, `font_collections.rs` | Rust expressions for calibration, embedded font data, preferred families, and regional font fallback sets |
    | `font_profiles_manifest.json` | Selected families, inputs, verified files, and cache provenance |
    | `rerun-paths.txt` | Font and source inputs that Cargo tracks for rebuilds |
    | `FONT-NOTICES.txt` | Bundled fallback-font notice and license text; empty when no fallback font is embedded |

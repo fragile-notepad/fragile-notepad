@@ -1,8 +1,6 @@
-# Fragile Notepad documentation
+[Project overview](../README.md)
 
-Find instructions for using, developing, and packaging Fragile Notepad. These
-pages describe the source in this checkout; release archives may contain a
-different revision. macOS support is experimental.
+# Fragile Notepad documentation
 
 ## Use the editor
 
@@ -43,5 +41,3 @@ different revision. macOS support is experimental.
 | Windows Explorer integration | [Windows shell component](../components/windows-shell/README.md) |
 | Nautilus and Dolphin integration | [Linux shell components](../components/linux-shell/README.md) |
 | Finder Services integration | [macOS shell component](../components/macos-shell/README.md) |
-
-Return to the [project overview](../README.md) for features, screenshots, and licensing.

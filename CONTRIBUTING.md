@@ -22,8 +22,6 @@ Follow [Build from source](docs/development/building.md), then use the
 2. Keep the change focused. Update its canonical documentation page when commands,
    configuration, or behavior change.
 3. Run the [focused checks](docs/development/testing.md#choose-focused-checks)
-   for the affected area. Use one Cargo build job and run graphics tests with one
-   test thread. Run one resource-intensive command at a time.
 4. Describe the problem, resulting behavior, and validation in the pull request.
    Include screenshots when a visual change needs review.
 

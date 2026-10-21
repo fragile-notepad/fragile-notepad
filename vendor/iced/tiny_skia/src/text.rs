@@ -363,7 +363,7 @@ fn draw_pixmap_clipped(
     clip_bounds: Option<Rectangle>,
     clip_scratch: &mut Vec<u8>,
 ) {
-    let Some(clip_bounds) = clip_bounds else {
+    if clip_bounds.is_none() && x >= 0 && y >= 0 {
         pixels.draw_pixmap(
             x,
             y,
@@ -372,6 +372,22 @@ fn draw_pixmap_clipped(
             tiny_skia::Transform::identity(),
             clip_mask,
         );
+        return;
+    }
+
+    // Tiny-skia rounds negative rectangle origins toward zero, repeating an
+    // edge row or column. Crop to the destination before drawing, including
+    // glyphs with negative bearings painted into an unclipped paragraph raster.
+    let canvas_bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: pixels.width() as f32,
+        height: pixels.height() as f32,
+    };
+    let Some(clip_bounds) = clip_bounds
+        .unwrap_or(canvas_bounds)
+        .intersection(&canvas_bounds)
+    else {
         return;
     };
 
@@ -385,7 +401,14 @@ fn draw_pixmap_clipped(
         && source.width() == pixmap.width()
         && source.height() == pixmap.height()
     {
-        pixels.draw_pixmap(x, y, pixmap, paint, tiny_skia::Transform::identity(), None);
+        pixels.draw_pixmap(
+            x,
+            y,
+            pixmap,
+            paint,
+            tiny_skia::Transform::identity(),
+            clip_mask,
+        );
         return;
     }
 
@@ -405,7 +428,7 @@ fn draw_pixmap_clipped(
             cropped,
             paint,
             tiny_skia::Transform::identity(),
-            None,
+            clip_mask,
         );
         return;
     }
@@ -424,7 +447,7 @@ fn draw_pixmap_clipped(
         cropped,
         paint,
         tiny_skia::Transform::identity(),
-        None,
+        clip_mask,
     );
 }
 
@@ -837,6 +860,65 @@ impl GlyphCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_pixmap_origins_match_a_translated_reference() {
+        let mut source = tiny_skia::Pixmap::new(9, 7).unwrap();
+        for (index, pixel) in source.pixels_mut().iter_mut().enumerate() {
+            *pixel = tiny_skia::ColorU8::from_rgba(
+                (index * 7) as u8,
+                (index * 13) as u8,
+                (index * 3) as u8,
+                160,
+            )
+            .premultiply();
+        }
+
+        let mut mask = tiny_skia::Mask::new(16, 12).unwrap();
+        mask.data_mut().fill(128);
+        let mut reference_mask = tiny_skia::Mask::new(32, 28).unwrap();
+        reference_mask.data_mut().fill(128);
+        let mut scratch = Vec::new();
+        for clip in [
+            None,
+            Some(Rectangle::new(
+                Point::new(-10.0, -10.0),
+                crate::core::Size::new(50.0, 50.0),
+            )),
+        ] {
+            for masked in [false, true] {
+                for (x, y) in [(-1, 2), (3, -1), (-1, -1), (-5, -3)] {
+                    let mut actual = tiny_skia::Pixmap::new(16, 12).unwrap();
+                    let mut reference = tiny_skia::Pixmap::new(32, 28).unwrap();
+                    reference.draw_pixmap(
+                        x + 8,
+                        y + 8,
+                        source.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        tiny_skia::Transform::identity(),
+                        masked.then_some(&reference_mask),
+                    );
+                    let expected = reference
+                        .clone_rect(tiny_skia::IntRect::from_xywh(8, 8, 16, 12).unwrap())
+                        .unwrap();
+                    draw_pixmap_clipped(
+                        &mut actual.as_mut(),
+                        x,
+                        y,
+                        source.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        masked.then_some(&mask),
+                        clip,
+                        &mut scratch,
+                    );
+                    assert!(
+                        actual.data() == expected.data(),
+                        "position={x},{y}, clip={clip:?}, masked={masked}",
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn clipped_draw_matches_allocating_reference_with_transparency_and_opacity() {

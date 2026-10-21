@@ -153,13 +153,19 @@ fn assert_projection_text_matches_flat_code(
         !plates.is_empty(),
         "Projected folds must paint filled placeholders"
     );
-    assert!(
-        changed_pixels(expected, projected, size.width)
-            .into_iter()
-            .filter(|&(x, y)| x as f32 >= text_origin && y >= row_y && y < row_y + 20)
-            .all(|(x, _)| plates.iter().any(|plate| plate.contains(&x))),
-        "The prefix and closing-line suffix must render like the exact flat visible code"
-    );
+    let mismatch = changed_pixels(expected, projected, size.width)
+        .into_iter()
+        .filter(|&(x, y)| x as f32 >= text_origin && y >= row_y && y < row_y + 20)
+        .find(|(x, _)| !plates.iter().any(|plate| plate.contains(x)));
+    if let Some((x, y)) = mismatch {
+        let offset = (y * size.width as usize + x) * 4;
+        panic!(
+            "The prefix and closing-line suffix must render like the exact flat visible code: \
+             row {row_index}, pixel ({x}, {y}), expected {:?}, projected {:?}, plates {plates:?}",
+            &expected[offset..offset + 4],
+            &projected[offset..offset + 4],
+        );
+    }
 }
 
 #[test]

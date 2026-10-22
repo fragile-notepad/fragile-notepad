@@ -40,6 +40,7 @@ pub(crate) struct WorkbenchView<'a> {
     pub rendering_debug_info: about_dialog::RenderingDebugInfo,
     pub window_list_entries: Option<Vec<WindowListEntry>>,
     pub window_list_query: &'a str,
+    pub tab_list_query: Option<&'a str>,
     pub file_status: Option<&'a str>,
     pub active_outline_state: Option<&'a OutlineState>,
 }

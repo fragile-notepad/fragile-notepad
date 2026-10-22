@@ -57,6 +57,8 @@ local_state! {
         about_tab: AboutTab = AboutTab::About,
         is_window_list_visible: bool = false,
         window_list_query: String = String::new(),
+        is_tab_list_visible: bool = false,
+        tab_list_query: String = String::new(),
         go_to_line_prompt: Option<crate::app::go_to_line::GoToLinePrompt> = None,
         hovered_drop_tab: Option<crate::core::DocumentId> = None,
         chrome_animation: ChromeAnimation = ChromeAnimation::new(),

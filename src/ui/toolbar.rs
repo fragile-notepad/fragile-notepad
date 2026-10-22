@@ -349,6 +349,7 @@ fn window_menu_entries(state: WindowMenuState, settings: &EditorSettings) -> Vec
     entries.extend([
         menu::separator(),
         menu::item("Windows...", Message::WindowListOpened),
+        menu::item("Tabs...", Message::TabListOpened),
         window_cycle_item("Next Window", Message::WindowFocusNext, &state),
         window_cycle_item("Previous Window", Message::WindowFocusPrevious, &state),
     ]);

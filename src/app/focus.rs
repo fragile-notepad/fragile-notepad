@@ -15,6 +15,7 @@ impl App {
             || self.go_to_line_prompt.is_some()
             || self.chrome_animation.about.rendered_visible()
             || self.is_window_list_visible
+            || self.is_tab_list_visible
             || self.workspace.active_document().is_none()
         {
             return Task::none();

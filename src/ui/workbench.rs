@@ -11,7 +11,7 @@ use crate::message::Message;
 use super::view_model::{ChromeAnimationInfo, WorkbenchView};
 use super::{
     about_dialog, dirty_close_dialog, editor, find_panel, function_list_panel, motion,
-    raster_cache, status_bar, styles, tabs, toolbar, window_list_dialog,
+    raster_cache, status_bar, styles, tab_list_dialog, tabs, toolbar, window_list_dialog,
 };
 
 const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 46.0;
@@ -38,6 +38,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         rendering_debug_info,
         window_list_entries,
         window_list_query,
+        tab_list_query,
         file_status,
         active_outline_state,
     } = model;
@@ -182,6 +183,12 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         stack![
             motion::fade(with_dialogs, 1.0, styles::editor_background, false),
             window_list_dialog::view(entries, window_list_query)
+        ]
+        .into()
+    } else if let Some(query) = tab_list_query {
+        stack![
+            motion::fade(with_dialogs, 1.0, styles::editor_background, false),
+            tab_list_dialog::view(workspace, editor_window, query)
         ]
         .into()
     } else {

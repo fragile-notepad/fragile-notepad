@@ -70,17 +70,29 @@ impl App {
             return Task::none();
         }
 
-        if self.main_window_id == Some(window_id) && self.is_window_list_visible {
+        if self.main_window_id == Some(window_id)
+            && (self.is_window_list_visible || self.is_tab_list_visible)
+        {
             if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
                 self.keyboard_modifiers = modifiers;
             }
             if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
                 use keyboard::key::Named;
                 return match key {
-                    keyboard::Key::Named(Named::Escape) => self.set_window_list_visible(false),
+                    keyboard::Key::Named(Named::Escape) => {
+                        if self.is_tab_list_visible {
+                            self.set_tab_list_visible(false)
+                        } else {
+                            self.set_window_list_visible(false)
+                        }
+                    }
                     keyboard::Key::Named(Named::Tab) => {
                         use iced::advanced::widget::{operate, operation};
-                        let scope = crate::ui::window_list_dialog::PANEL_ID;
+                        let scope = if self.is_tab_list_visible {
+                            crate::ui::tab_list_dialog::PANEL_ID
+                        } else {
+                            crate::ui::window_list_dialog::PANEL_ID
+                        };
                         if modifiers.shift() {
                             operate(operation::scope(
                                 scope.into(),

@@ -136,6 +136,17 @@ impl App {
                 )
             }
             ApplicationMessage::WindowListSubmitted => self.submit_window_list(),
+            ApplicationMessage::TabListOpened => self.set_tab_list_visible(true),
+            ApplicationMessage::TabListClosed => self.set_tab_list_visible(false),
+            ApplicationMessage::TabListQueryChanged(query) => {
+                self.tab_list_query = query;
+                iced::widget::operation::snap_to(
+                    crate::ui::tab_list_dialog::SCROLL_ID,
+                    iced::widget::scrollable::RelativeOffset::START,
+                )
+            }
+            ApplicationMessage::TabListSubmitted => self.submit_tab_list(),
+            ApplicationMessage::TabListSelected(id) => self.select_tab_from_list(id),
             ApplicationMessage::WindowFocusRequested(target) => self.focus_window(target),
             ApplicationMessage::WindowFocusNext => self.focus_adjacent_window(1),
             ApplicationMessage::WindowFocusPrevious => self.focus_adjacent_window(-1),

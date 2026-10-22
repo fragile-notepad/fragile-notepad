@@ -324,7 +324,11 @@ impl App {
     pub(crate) fn focus_window(&mut self, target: WindowTarget) -> Task<Message> {
         self.menu.close();
 
-        let restore_focus = self.set_window_list_visible(false);
+        let restore_focus = if self.is_tab_list_visible {
+            self.set_tab_list_visible(false)
+        } else {
+            self.set_window_list_visible(false)
+        };
 
         let Some(id) = self.window_id(target) else {
             return restore_focus;

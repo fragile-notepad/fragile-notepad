@@ -89,6 +89,8 @@ pub struct App {
     about_tab: AboutTab,
     is_window_list_visible: bool,
     window_list_query: String,
+    is_tab_list_visible: bool,
+    tab_list_query: String,
     settings_dialog: SettingsDialogState,
     search_dialog: SearchDialogState,
     go_to_line_prompt: Option<go_to_line::GoToLinePrompt>,
@@ -157,6 +159,7 @@ impl App {
                 Message::NewFile
                     | Message::NewWindow
                     | Message::TabSelected(_)
+                    | Message::TabListSelected(_)
                     | Message::TabClosed(_)
                     | Message::TabPinToggled(_)
                     | Message::CloseFile

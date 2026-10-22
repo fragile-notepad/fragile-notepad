@@ -211,6 +211,7 @@ impl App {
                 || ui.go_to_line_prompt.is_some()
                 || ui.chrome_animation.about.target_visible()
                 || *ui.is_window_list_visible
+                || *ui.is_tab_list_visible
             {
                 return None;
             }

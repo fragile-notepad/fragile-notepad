@@ -35,6 +35,7 @@ impl App {
                     || self.close_prompt.document().is_some()
                     || self.is_about_visible
                     || self.is_window_list_visible
+                    || self.is_tab_list_visible
                 {
                     return Task::none();
                 }

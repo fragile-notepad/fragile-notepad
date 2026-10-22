@@ -57,6 +57,7 @@ impl App {
                     .is_window_list_visible
                     .then(|| self.window_list_entries()),
                 window_list_query: ui.window_list_query,
+                tab_list_query: ui.is_tab_list_visible.then_some(ui.tab_list_query.as_str()),
                 file_status: ui.file_status.as_deref(),
                 active_outline_state: self
                     .workspace

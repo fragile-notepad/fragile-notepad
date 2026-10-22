@@ -13,7 +13,7 @@ use fragile_notepad::{
     search_dialog::SearchDialogState,
     settings_dialog::SettingsDialogState,
     ui::{
-        advanced_search_panel, go_to_line_prompt, settings_panel, styles,
+        advanced_search_panel, go_to_line_prompt, settings_panel, styles, tab_list_dialog,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -26,7 +26,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "Usage: preview_dialogs [--panel <name>]
-Panels: all (default), settings, search, go-to-line, windows, editor
+Panels: all (default), settings, search, go-to-line, windows, tabs, editor
 Output: target/dialog-review/
 Use --help to display this help.";
 
@@ -37,6 +37,7 @@ enum PreviewPanel {
     Search,
     GoToLine,
     Windows,
+    Tabs,
     Editor,
 }
 
@@ -48,6 +49,7 @@ impl PreviewPanel {
             "search" => Some(Self::Search),
             "go-to-line" => Some(Self::GoToLine),
             "windows" => Some(Self::Windows),
+            "tabs" => Some(Self::Tabs),
             "editor" => Some(Self::Editor),
             _ => None,
         }
@@ -130,7 +132,7 @@ fn main() -> ExitCode {
                         target: WindowTarget::Main,
                         title: "Release notes — September.md, main.rs and 59 more…".into(),
                         description: "Editor · 61 tabs · D:/Projects/FragileNotepad".into(),
-                        search_titles: vec![],
+                        search_titles: vec!["Cargo.toml".into()],
                         is_focused: true,
                     },
                     WindowListEntry {
@@ -150,11 +152,59 @@ fn main() -> ExitCode {
                 ];
                 render(
                     &mut renderer,
-                    window_list_dialog::view(entries, ""),
+                    window_list_dialog::view(entries.clone(), ""),
                     &theme,
                     Size::new(width, height),
                     &format!("windows-{name}-{size_name}"),
                 );
+                for (query, suffix) in [("CARGO", "filtered"), ("missing-file", "empty")] {
+                    render(
+                        &mut renderer,
+                        window_list_dialog::view(entries.clone(), query),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("windows-{suffix}-{name}-{size_name}"),
+                    );
+                }
+            }
+            if selected.includes(PreviewPanel::Tabs) {
+                let mut workspace = Workspace::new();
+                workspace.active_document_mut().unwrap().is_dirty = true;
+                let mut pinned = Document::from_path(
+                    DocumentId::new(20),
+                    "D:/Projects/FragileNotepad/README.md",
+                    "# Fragile Notepad\n",
+                );
+                pinned.is_pinned = true;
+                workspace.push_document(pinned);
+                workspace.push_document(Document::from_path(
+                    DocumentId::new(21),
+                    "D:/Projects/FragileNotepad/src/main.rs",
+                    "fn main() {}\n",
+                ));
+                workspace.push_document(Document::from_path(
+                    DocumentId::new(22),
+                    "D:/Projects/OtherEditor/src/main.rs",
+                    "fn main() {}\n",
+                ));
+                workspace.select(DocumentId::new(21));
+                let editor_window = workspace.current_window_id();
+                render(
+                    &mut renderer,
+                    tab_list_dialog::view(&workspace, editor_window, ""),
+                    &theme,
+                    Size::new(width, height),
+                    &format!("tabs-{name}-{size_name}"),
+                );
+                for (query, suffix) in [("MAIN", "filtered"), ("missing-file", "empty")] {
+                    render(
+                        &mut renderer,
+                        tab_list_dialog::view(&workspace, editor_window, query),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("tabs-{suffix}-{name}-{size_name}"),
+                    );
+                }
             }
         }
         if selected.includes(PreviewPanel::Search) {

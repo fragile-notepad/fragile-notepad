@@ -61,6 +61,7 @@ impl<'a> MenuModel<'a> {
                     || ui.go_to_line_prompt.is_some()
                     || ui.chrome_animation.about.target_visible()
                     || *ui.is_window_list_visible
+                    || *ui.is_tab_list_visible
             });
         let input_possible = auxiliary_focused
             || ui.as_ref().is_some_and(|ui| {
@@ -68,6 +69,7 @@ impl<'a> MenuModel<'a> {
                     || *ui.is_function_list_visible
                     || ui.go_to_line_prompt.is_some()
                     || *ui.is_window_list_visible
+                    || *ui.is_tab_list_visible
             });
         Self {
             state: MenuState {
@@ -155,6 +157,7 @@ fn allowed_during_dialog(message: &Message) -> bool {
             | Message::AboutOpened
             | Message::ToggleSettingsPanel
             | Message::WindowListOpened
+            | Message::TabListOpened
             | Message::WindowFocusNext
             | Message::WindowFocusPrevious
     )

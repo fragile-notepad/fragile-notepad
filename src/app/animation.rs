@@ -10,6 +10,7 @@ pub(super) struct ChromeAnimation {
     pub(super) inline_replace: RevealAnimation,
     pub(super) function_list: RevealAnimation,
     pub(super) about: RevealAnimation,
+    pub(super) selector: RevealAnimation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +29,7 @@ impl ChromeAnimation {
             inline_replace: RevealAnimation::hidden(),
             function_list: RevealAnimation::hidden(),
             about: RevealAnimation::hidden(),
+            selector: RevealAnimation::hidden(),
         }
     }
 
@@ -36,6 +38,7 @@ impl ChromeAnimation {
             || self.inline_replace.needs_frames()
             || self.function_list.needs_frames()
             || self.about.needs_frames()
+            || self.selector.needs_frames()
     }
 
     pub(super) fn update_frame(&mut self, at: Instant) {
@@ -43,6 +46,7 @@ impl ChromeAnimation {
         self.inline_replace.update_frame(at);
         self.function_list.update_frame(at);
         self.about.update_frame(at);
+        self.selector.update_frame(at);
     }
 }
 

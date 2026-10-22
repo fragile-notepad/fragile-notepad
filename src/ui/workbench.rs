@@ -62,6 +62,10 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
             chrome_animation.dirty_close_progress,
             chrome_animation.dirty_close_interactive,
         ),
+        (
+            chrome_animation.selector_progress,
+            chrome_animation.selector_interactive,
+        ),
     ]
     .into_iter()
     // Compare the target too: the first closing frame still has opacity 1,
@@ -182,13 +186,24 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     let with_window_list = if let Some(entries) = window_list_entries {
         stack![
             motion::fade(with_dialogs, 1.0, styles::editor_background, false),
-            window_list_dialog::view(entries, window_list_query)
+            window_list_dialog::view_animated(
+                entries,
+                window_list_query,
+                chrome_animation.selector_progress,
+                chrome_animation.selector_interactive,
+            )
         ]
         .into()
     } else if let Some(query) = tab_list_query {
         stack![
             motion::fade(with_dialogs, 1.0, styles::editor_background, false),
-            tab_list_dialog::view(workspace, editor_window, query)
+            tab_list_dialog::view_animated(
+                workspace,
+                editor_window,
+                query,
+                chrome_animation.selector_progress,
+                chrome_animation.selector_interactive,
+            )
         ]
         .into()
     } else {

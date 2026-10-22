@@ -1,9 +1,16 @@
 //! Application chrome and modal animation coordination.
 
 use super::App;
-use crate::message::{AboutTab, Message};
+use crate::core::DocumentId;
+use crate::message::{AboutTab, Message, WindowTarget};
 use iced::Task;
 use std::time::Instant;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SelectorCloseAction {
+    FocusWindow(WindowTarget),
+    SelectTab(DocumentId),
+}
 
 impl App {
     #[cfg(debug_assertions)]
@@ -25,26 +32,16 @@ impl App {
 
     pub(super) fn set_window_list_visible(&mut self, visible: bool) -> Task<Message> {
         if visible {
-            if self.close_prompt.document().is_some()
-                || self.go_to_line_prompt.is_some()
-                || self.chrome_animation.about.rendered_visible()
-            {
-                return Task::none();
-            }
-            self.menu.close();
-            self.window_list_query.clear();
-            self.is_tab_list_visible = false;
-        }
-        self.is_window_list_visible = visible;
-        iced::widget::operation::focus(if visible {
-            crate::ui::window_list_dialog::INPUT_ID
+            self.open_selector(false)
+        } else if self.is_window_list_visible {
+            self.close_selector()
         } else {
-            crate::ui::editor::EDITOR_ID
-        })
+            Task::none()
+        }
     }
 
     pub(super) fn submit_window_list(&mut self) -> Task<Message> {
-        if !self.is_window_list_visible {
+        if !self.is_window_list_visible || !self.chrome_animation.selector.target_visible() {
             return Task::none();
         }
         self.window_list_entries()
@@ -55,22 +52,82 @@ impl App {
 
     pub(super) fn set_tab_list_visible(&mut self, visible: bool) -> Task<Message> {
         if visible {
-            if self.close_prompt.document().is_some()
-                || self.go_to_line_prompt.is_some()
-                || self.chrome_animation.about.rendered_visible()
-            {
-                return Task::none();
-            }
-            self.menu.close();
-            self.tab_list_query.clear();
-            self.is_window_list_visible = false;
+            self.open_selector(true)
+        } else if self.is_tab_list_visible {
+            self.close_selector()
+        } else {
+            Task::none()
         }
-        self.is_tab_list_visible = visible;
-        iced::widget::operation::focus(if visible {
+    }
+
+    fn open_selector(&mut self, tabs: bool) -> Task<Message> {
+        if self.close_prompt.document().is_some()
+            || self.go_to_line_prompt.is_some()
+            || self.chrome_animation.about.rendered_visible()
+            || ((self.is_window_list_visible || self.is_tab_list_visible)
+                && !self.chrome_animation.selector.target_visible())
+        {
+            return Task::none();
+        }
+        self.menu.close();
+        self.selector_close_action = None;
+        self.is_window_list_visible = !tabs;
+        self.is_tab_list_visible = tabs;
+        if tabs {
+            self.tab_list_query.clear();
+        } else {
+            self.window_list_query.clear();
+        }
+        self.chrome_animation.selector.set_visible(true);
+        iced::widget::operation::focus(if tabs {
             crate::ui::tab_list_dialog::INPUT_ID
         } else {
-            crate::ui::editor::EDITOR_ID
+            crate::ui::window_list_dialog::INPUT_ID
         })
+    }
+
+    fn close_selector(&mut self) -> Task<Message> {
+        if !self.chrome_animation.selector.target_visible() {
+            return Task::none();
+        }
+        self.chrome_animation.selector.set_visible(false);
+        // Retain the modal and its input barrier until its last fade frame.
+        if self.chrome_animation.selector.rendered_visible() {
+            Task::none()
+        } else {
+            self.finish_selector_close()
+        }
+    }
+
+    pub(super) fn defer_selector_action(&mut self, action: SelectorCloseAction) -> Task<Message> {
+        if !self.chrome_animation.selector.target_visible() {
+            return Task::none();
+        }
+        self.selector_close_action = Some(action);
+        self.close_selector()
+    }
+
+    pub(super) fn dismiss_selectors(&mut self) {
+        self.is_window_list_visible = false;
+        self.is_tab_list_visible = false;
+        self.selector_close_action = None;
+        self.chrome_animation.selector = super::animation::RevealAnimation::hidden();
+    }
+
+    fn finish_selector_close(&mut self) -> Task<Message> {
+        let action = self.selector_close_action.take();
+        self.dismiss_selectors();
+        match action {
+            Some(SelectorCloseAction::FocusWindow(target)) => self.focus_window(target),
+            // A tab may have moved to another editor while the selector faded.
+            Some(SelectorCloseAction::SelectTab(id))
+                if self.workspace.owner_of(id) == Some(self.workspace.current_window_id()) =>
+            {
+                let select = self.update_file(crate::message::FileMessage::TabSelected(id));
+                Task::batch([select, self.focus_editor_after_close_prompt()])
+            }
+            _ => self.focus_editor_after_close_prompt(),
+        }
     }
 
     pub(super) fn submit_tab_list(&mut self) -> Task<Message> {
@@ -86,17 +143,17 @@ impl App {
 
     pub(super) fn select_tab_from_list(&mut self, id: crate::core::DocumentId) -> Task<Message> {
         if !self.is_tab_list_visible
+            || !self.chrome_animation.selector.target_visible()
             || self.workspace.owner_of(id) != Some(self.workspace.current_window_id())
         {
             return Task::none();
         }
-        let focus = self.set_tab_list_visible(false);
-        let select = self.update_file(crate::message::FileMessage::TabSelected(id));
-        Task::batch([select, focus])
+        self.defer_selector_action(SelectorCloseAction::SelectTab(id))
     }
 
     pub(super) fn open_about_dialog(&mut self) -> Task<Message> {
         self.menu.close();
+        self.dismiss_selectors();
 
         self.is_about_visible = true;
         if !self.chrome_animation.about.rendered_visible() {
@@ -130,12 +187,19 @@ impl App {
 
     pub(super) fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
         self.chrome_animation.update_frame(at);
+        let selector = if (self.is_window_list_visible || self.is_tab_list_visible)
+            && !self.chrome_animation.selector.rendered_visible()
+        {
+            self.finish_selector_close()
+        } else {
+            Task::none()
+        };
         self.settings_dialog.update_shortcut_notice_animation(at);
         let close = self
             .close_prompt
             .update_frame(at)
             .map(Message::DirtyCloseFadeFinished)
             .map_or_else(Task::none, Task::done);
-        Task::batch([close, self.update_go_to_line_frame(at)])
+        Task::batch([selector, close, self.update_go_to_line_frame(at)])
     }
 }

@@ -18,6 +18,8 @@ pub(crate) struct ChromeAnimationInfo {
     pub about_interactive: bool,
     pub dirty_close_progress: f32,
     pub dirty_close_interactive: bool,
+    pub selector_progress: f32,
+    pub selector_interactive: bool,
 }
 
 pub(crate) struct WorkbenchView<'a> {

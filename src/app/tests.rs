@@ -89,6 +89,9 @@ mod settings;
 #[path = "app_tests/go_to_line.rs"]
 mod go_to_line;
 
+#[path = "app_tests/selectors.rs"]
+mod selectors;
+
 #[path = "app_tests/recovery.rs"]
 mod recovery;
 

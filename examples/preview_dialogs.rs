@@ -132,7 +132,11 @@ fn main() -> ExitCode {
                         target: WindowTarget::Main,
                         title: "Release notes — September.md, main.rs and 59 more…".into(),
                         description: "Editor · 61 tabs".into(),
-                        search_titles: vec!["Cargo.toml".into()],
+                        search_titles: vec![
+                            "Release notes — September.md".into(),
+                            "main.rs".into(),
+                            "Cargo.toml".into(),
+                        ],
                         is_focused: true,
                     },
                     WindowListEntry {
@@ -156,6 +160,14 @@ fn main() -> ExitCode {
                     &theme,
                     Size::new(width, height),
                     &format!("windows-{name}-{size_name}"),
+                );
+                render_selector_transition(
+                    &mut renderer,
+                    window_list_dialog::view_animated(entries.clone(), "", 0.5, false),
+                    &theme,
+                    appearance,
+                    Size::new(width, height),
+                    &format!("windows-transition-{name}-{size_name}"),
                 );
                 for (query, suffix) in [("CARGO", "filtered"), ("missing-file", "empty")] {
                     render(
@@ -187,6 +199,27 @@ fn main() -> ExitCode {
                     "D:/Projects/OtherEditor/src/main.rs",
                     "fn main() {}\n",
                 ));
+                for (index, name) in [
+                    "openapi.yaml",
+                    "awa.c",
+                    "app.tsx",
+                    "schema.json",
+                    "index.html",
+                    "theme.css",
+                    "script.PY",
+                    "query.sql",
+                    "notes.txt",
+                    "unknown.qqq",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    workspace.push_document(Document::from_path(
+                        DocumentId::new(23 + index as u64),
+                        format!("D:/Projects/FragileNotepad/examples/{name}"),
+                        "",
+                    ));
+                }
                 workspace.select(DocumentId::new(21));
                 let editor_window = workspace.current_window_id();
                 render(
@@ -195,6 +228,14 @@ fn main() -> ExitCode {
                     &theme,
                     Size::new(width, height),
                     &format!("tabs-{name}-{size_name}"),
+                );
+                render_selector_transition(
+                    &mut renderer,
+                    tab_list_dialog::view_animated(&workspace, editor_window, "", 0.5, false),
+                    &theme,
+                    appearance,
+                    Size::new(width, height),
+                    &format!("tabs-transition-{name}-{size_name}"),
                 );
                 for (query, suffix) in [("MAIN", "filtered"), ("missing-file", "empty")] {
                     render(
@@ -435,6 +476,38 @@ fn main() -> ExitCode {
     }
     println!("Screenshots: target/dialog-review/");
     ExitCode::SUCCESS
+}
+
+fn render_selector_transition(
+    renderer: &mut Renderer,
+    content: Element<'_, Message>,
+    theme: &Theme,
+    appearance: AppearanceMode,
+    pixels: Size<u32>,
+    name: &str,
+) {
+    let settings = EditorSettings {
+        appearance,
+        ..EditorSettings::default()
+    };
+    let document = Document::from_path(
+        DocumentId::new(901),
+        "selector_dialog.rs",
+        include_str!("../src/ui/selector_dialog.rs"),
+    );
+    document
+        .ensure_syntax_cache(settings.resolved_syntax_theme(appearance == AppearanceMode::Dark));
+    render(
+        renderer,
+        iced::widget::stack![
+            fragile_notepad::ui::editor::view(&document, &settings),
+            content,
+        ]
+        .into(),
+        theme,
+        pixels,
+        name,
+    );
 }
 
 fn render(

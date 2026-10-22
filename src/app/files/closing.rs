@@ -76,8 +76,7 @@ impl App {
         }
 
         self.go_to_line_prompt = None;
-        self.is_window_list_visible = false;
-        self.is_tab_list_visible = false;
+        self.dismiss_selectors();
         self.close_prompt.show(document_id);
         Task::none()
     }

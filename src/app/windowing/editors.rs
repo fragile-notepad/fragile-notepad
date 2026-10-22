@@ -64,6 +64,7 @@ local_state! {
         chrome_animation: ChromeAnimation = ChromeAnimation::new(),
     }
     runtime {
+        selector_close_action: Option<crate::app::chrome::SelectorCloseAction> = None,
         is_about_visible: bool = false,
         dragged_tab: Option<crate::core::DocumentId> = None,
         keyboard_modifiers: iced::keyboard::Modifiers = iced::keyboard::Modifiers::default(),

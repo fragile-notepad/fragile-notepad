@@ -51,17 +51,24 @@ from the repository root.
 
 ## Compile UI icons
 
-Cargo runs [compile_vector_icons.py](../../scripts/compile_vector_icons.py) when
-the UI icon sources change. The compiler writes Rust vector geometry into Cargo's
-`OUT_DIR`. Both software and Vulkan rendering draw these paths at the requested
-icon size.
+Cargo prepares UI icons automatically during builds. Edit the relevant sources,
+then rebuild with `cargo build --locked -j 1`.
 
-Edit the SVGs in `assets/icons/{colored,heroicons,bootstrap}/svg/` and rebuild the
-application. Colored icons preserve their fill and stroke colors; disabled
-toolbar icons blend those colors toward the toolbar background. Monochrome
-controls and shortcuts use the active theme. Follow the
-[icon SVG contract](../../assets/icons/README.md#svg-contract) when editing those
-sources.
+| Family | SVG sources |
+| --- | --- |
+| Toolbar and document actions | `assets/icons/colored/svg/` |
+| Controls | `assets/icons/heroicons/svg/` |
+| Shortcut keys and pins | `assets/icons/bootstrap/svg/` |
+| File types | `assets/icons/file-types/svg/` |
+
+Toolbar, control, and shortcut icons compile to vector paths and must follow the
+[SVG contract](../../assets/icons/README.md#svg-contract). Toolbar icons retain
+their source colors; controls and shortcuts use theme colors. Disabled toolbar
+icons blend with the toolbar background.
+
+File-type icons use the large SVG variants, which Cargo renders to images. Update
+[catalog.json](../../assets/icons/file-types/catalog.json) to change which file
+extensions use each icon.
 
 ## Regenerate an illustration family
 

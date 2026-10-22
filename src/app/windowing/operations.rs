@@ -318,11 +318,12 @@ impl App {
     pub(crate) fn focus_window(&mut self, target: WindowTarget) -> Task<Message> {
         self.menu.close();
 
-        let restore_focus = if self.is_tab_list_visible {
-            self.set_tab_list_visible(false)
-        } else {
-            self.set_window_list_visible(false)
-        };
+        if self.is_window_list_visible || self.is_tab_list_visible {
+            return self.defer_selector_action(
+                crate::app::chrome::SelectorCloseAction::FocusWindow(target),
+            );
+        }
+        let restore_focus = self.focus_editor_after_close_prompt();
 
         let Some(id) = self.window_id(target) else {
             return restore_focus;

@@ -646,6 +646,25 @@ pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> b
     }
 }
 
+pub fn selector_entry(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let background = if selected || matches!(status, button::Status::Pressed) {
+            palette.accent_soft
+        } else if matches!(status, button::Status::Hovered) {
+            palette.surface_high
+        } else {
+            Color::TRANSPARENT
+        };
+        button::Style {
+            background: Some(background.into()),
+            text_color: palette.text,
+            border: border(0.0, Color::TRANSPARENT, 4.0),
+            ..Default::default()
+        }
+    }
+}
+
 pub fn settings_category_list(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 

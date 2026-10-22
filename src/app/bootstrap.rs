@@ -54,6 +54,7 @@ impl App {
             window_list_query: String::new(),
             is_tab_list_visible: false,
             tab_list_query: String::new(),
+            selector_close_action: None,
             settings_dialog: SettingsDialogState::new(&EditorSettings::default()),
             search_dialog: SearchDialogState::new(),
             go_to_line_prompt: None,

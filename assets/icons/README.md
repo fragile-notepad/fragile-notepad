@@ -16,8 +16,9 @@ build instructions.
 
 Cargo compiles `colored`, `heroicons`, and `bootstrap` into Rust vector geometry
 in its `OUT_DIR`. The application draws these paths at the requested size in both
-rendering backends. The `file-types` collection is maintained as SVG sources and
-is not embedded in the application.
+rendering backends. Cargo renders the `file-types` collection's large SVG variants
+to 64 × 64 RGBA images for embedding, with extension lookup generated from its
+catalog.
 
 The `other.svg` and `other-small.svg` sources provide generic file icons. Their
 `other` catalog entry uses an empty extension list for files without a listed
@@ -30,7 +31,7 @@ elliptical arcs. It supports flat six-digit hexadecimal colors, `currentColor`,
 inherited paint on SVG groups, fill rules, and stroke widths, caps, and joins.
 Use `fill-rule="evenodd"` for filled shapes with holes. Transforms, gradients,
 CSS styles, images, and text are rejected during compilation. The file-type SVGs
-use additional SVG features and are not processed by this compiler.
+use additional SVG features and are rendered separately with resvg during builds.
 
 ## Licenses and distribution
 

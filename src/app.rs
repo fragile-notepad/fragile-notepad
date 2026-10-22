@@ -91,6 +91,7 @@ pub struct App {
     window_list_query: String,
     is_tab_list_visible: bool,
     tab_list_query: String,
+    selector_close_action: Option<chrome::SelectorCloseAction>,
     settings_dialog: SettingsDialogState,
     search_dialog: SearchDialogState,
     go_to_line_prompt: Option<go_to_line::GoToLinePrompt>,

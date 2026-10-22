@@ -129,6 +129,10 @@ impl App {
             ApplicationMessage::WindowListOpened => self.set_window_list_visible(true),
             ApplicationMessage::WindowListClosed => self.set_window_list_visible(false),
             ApplicationMessage::WindowListQueryChanged(query) => {
+                if !self.is_window_list_visible || !self.chrome_animation.selector.target_visible()
+                {
+                    return Task::none();
+                }
                 self.window_list_query = query;
                 iced::widget::operation::snap_to(
                     crate::ui::window_list_dialog::SCROLL_ID,
@@ -139,6 +143,9 @@ impl App {
             ApplicationMessage::TabListOpened => self.set_tab_list_visible(true),
             ApplicationMessage::TabListClosed => self.set_tab_list_visible(false),
             ApplicationMessage::TabListQueryChanged(query) => {
+                if !self.is_tab_list_visible || !self.chrome_animation.selector.target_visible() {
+                    return Task::none();
+                }
                 self.tab_list_query = query;
                 iced::widget::operation::snap_to(
                     crate::ui::tab_list_dialog::SCROLL_ID,

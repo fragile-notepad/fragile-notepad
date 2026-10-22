@@ -159,6 +159,8 @@ impl App {
             about_interactive: about.target_visible(),
             dirty_close_progress: close_prompt.progress(),
             dirty_close_interactive: close_prompt.interactive(),
+            selector_progress: animation.selector.progress(),
+            selector_interactive: animation.selector.target_visible(),
         }
     }
 }

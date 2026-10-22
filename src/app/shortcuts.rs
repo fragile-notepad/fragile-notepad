@@ -52,6 +52,12 @@ impl App {
                 self.focused_window_id = None;
             }
             if self.main_window_id == Some(window_id) {
+                if matches!(
+                    self.selector_close_action,
+                    Some(super::chrome::SelectorCloseAction::FocusWindow(_))
+                ) {
+                    self.selector_close_action = None;
+                }
                 return self.queue_auto_save(self.workspace.active_document_id());
             }
             return Task::none();
@@ -75,6 +81,9 @@ impl App {
         {
             if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
                 self.keyboard_modifiers = modifiers;
+            }
+            if !self.chrome_animation.selector.target_visible() {
+                return Task::none();
             }
             if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
                 use keyboard::key::Named;

@@ -26,13 +26,22 @@ pub fn icon<Message: 'static>(
     size: u32,
     tone: IconTone,
 ) -> Element<'static, Message> {
+    icon_with_opacity(icon, size, tone, 1.0)
+}
+
+pub fn icon_with_opacity<Message: 'static>(
+    icon: HeroIcon,
+    size: u32,
+    tone: IconTone,
+    opacity: f32,
+) -> Element<'static, Message> {
     let color = match tone {
         IconTone::Text => crate::ui::styles::shortcut_text_color,
         IconTone::Muted => {
             |theme: &iced::Theme| crate::ui::styles::shortcut_text_color(theme).scale_alpha(0.72)
         }
     };
-    vector::icon(asset(icon), size, color, 1.0)
+    vector::icon(asset(icon), size, color, opacity.clamp(0.0, 1.0))
 }
 
 pub fn draw(

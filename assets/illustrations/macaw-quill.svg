@@ -1,12 +1,11 @@
 <!-- Copyright (c) 2026, Fragile Notepad authors. All rights reserved. See LICENSE. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="100" height="110" viewBox="0 0 100 110">
+  <title>Macaw quill</title>
   <defs>
     <clipPath id="vane">
       <path d="M81 5 C71 3 59 13 50 26 C43 36 38 47 35 57 L40 51 C34 62 28 68 27 77 L32 71 C27 81 25 88 28 96 C37 92 45 86 52 77 L46 80 C56 69 64 60 68 52 L61 56 C73 44 77 34 80 27 L75 32 C85 18 88 7 81 5 Z"/>
     </clipPath>
   </defs>
-  <!-- Original flat-color illustration. Uneven vanes and swept splits follow
-       the structure of a macaw feather, with no exterior ink outline. -->
   <g clip-path="url(#vane)">
     <path fill="#EC6B61" d="M0 0 H100 V110 H0 Z"/>
     <path fill="#D74E5B" d="M28 99 C43 69 60 39 83 6 L103 0 V111 H26 Z"/>
@@ -16,13 +15,11 @@
     <path fill="#389DCC" d="M34 0 V21 C48 29 50 31 53 40 C60 32 61 25 66 22 C72 29 78 30 90 31 L105 0 Z"/>
     <path fill="#326EAF" d="M56 37 C66 21 74 11 84 4 L100 2 V31 C80 36 71 31 66 22 C62 27 60 33 56 37 Z"/>
     <path fill="#6BC7D9" d="M49 26 C58 12 70 4 79 5 C69 11 60 20 53 33 Z"/>
-    <!-- Sparse, swept barb accents; gaps in the silhouette do most of the work. -->
     <path fill="none" stroke="#F7A082" stroke-width="0.65" stroke-linecap="round" d="M33 80 Q32 76 34 70 M39 67 Q38 61 40 57 M46 53 Q44 47 46 42"/>
     <path fill="none" stroke="#B54357" stroke-width="0.55" stroke-linecap="round" d="M36 81 Q43 79 48 75 M44 66 Q52 62 56 57"/>
     <path fill="none" stroke="#A8DDE4" stroke-width="0.6" stroke-linecap="round" d="M64 21 Q64 15 68 11 M59 28 Q57 23 59 20"/>
     <path fill="none" stroke="#609EC9" stroke-width="0.55" stroke-linecap="round" d="M67 23 Q73 21 77 17 M61 31 Q68 31 72 28"/>
   </g>
-  <!-- A tapered rachis and a short warm ivory calamus. -->
   <path fill="#FFE1AB" d="M21.5 105 C31 82 44 58 58 35 C66 23 74 13 81 7 C69 21 62 32 55 44 C43 65 31 87 24 106 Q23 108 21.5 105 Z"/>
   <path fill="#FFF0CB" d="M22 105 C28 91 32 82 38 72 C32 84 28 95 24 106 Q23 108 22 105 Z"/>
 </svg>

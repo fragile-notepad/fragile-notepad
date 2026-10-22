@@ -19,6 +19,10 @@ in its `OUT_DIR`. The application draws these paths at the requested size in bot
 rendering backends. The `file-types` collection is maintained as SVG sources and
 is not embedded in the application.
 
+The `other.svg` and `other-small.svg` sources provide generic file icons. Their
+`other` catalog entry uses an empty extension list for files without a listed
+extension.
+
 ## SVG contract
 
 The UI icon compiler preserves straight lines, quadratic and cubic curves, and
@@ -35,8 +39,8 @@ use additional SVG features and are not processed by this compiler.
 - Modified [Heroicons](heroicons/LICENSE) and [Bootstrap Icons](bootstrap/LICENSE)
   retain their MIT notices.
 - [File-type artwork](file-types/LICENSE) has its own MIT grant and third-party
-  notices. The grant limits reproduction of its bunny watermark to those icons;
-  it does not license the standalone logo or other project artwork.
+  notices. The grant does not license the standalone logo or other project
+  artwork.
 
 Redistribute [NOTICE.txt](NOTICE.txt) as `ICON-NOTICES.txt`. Preserve the
 file-type collection's [license and third-party notices](file-types/LICENSE)

@@ -1,7 +1,5 @@
-<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="64" height="64" viewBox="0 0 64 64">
-<title>小尺寸专用 · 兔子抱笔记本</title>
-<desc>Original-reference vector redraw. All visible artwork consists of editable paths, shapes and gradients. No embedded bitmap.</desc>
+<title>Bunny title bar icon</title>
 <defs>
 <linearGradient id="bg" x1="0" y1="1" x2="0.88" y2="0"><stop stop-color="#18365E"/><stop offset=".55" stop-color="#214C83"/><stop offset="1" stop-color="#396AA1"/></linearGradient>
 <linearGradient id="bgEdge" x1=".1" y1="1" x2=".8" y2="0"><stop stop-color="#365D88"/><stop offset=".5" stop-color="#426C9A"/><stop offset="1" stop-color="#719AC2"/></linearGradient>
@@ -33,7 +31,7 @@
 <linearGradient id="logo" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#A7CEF8"/><stop offset="1" stop-color="#E7F7FF"/></linearGradient>
 </defs>
 
-<g id="small-rabbit" inkscape:groupmode="layer" inkscape:label="02 | 兔子">
+<g id="small-rabbit" inkscape:groupmode="layer" inkscape:label="Bunny">
 <path d="M31 22C27 17 33 5 40 5C48 4 47 10 43 15L37 23Z" fill="url(#fur)"/>
 <path d="M34 20C34 16 39 8 42 9C45 10 40 16 37 21Z" fill="url(#earPink)"/>
 <path d="M26 23C27 16 22 14 18 17C12 20 8 27 11 30C15 33 19 24 21 24Z" fill="url(#fur)"/>
@@ -43,13 +41,13 @@
 <circle cx="27.5" cy="27.7" r=".55" fill="white"/><circle cx="38.5" cy="25.7" r=".55" fill="white"/>
 <path d="M19 47C12 45 13 56 20 55Z" fill="url(#fur)"/>
 </g>
-<g id="small-book" inkscape:groupmode="layer" inkscape:label="03 | 笔记本" transform="rotate(-10 35 43)">
+<g id="small-book" inkscape:groupmode="layer" inkscape:label="Notebook" transform="rotate(-10 35 43)">
 <rect x="22" y="31" width="27" height="27" rx="2.5" fill="#CFDFF2"/>
 <rect x="21" y="29" width="29" height="27" rx="2.5" fill="url(#cover)" stroke="#B6DBFF" stroke-width=".7"/>
 <path d="M45 29V58" stroke="#244474" stroke-width="3"/>
 <path d="M23 34C18 32 17 37 21 37M23 43C18 41 17 46 21 46M23 51C18 49 17 54 21 54" fill="none" stroke="#D5E8FA" stroke-width="1.5" stroke-linecap="round"/>
 <path d="M32 39L29 42L32 45M39 39L42 42L39 45M37 38L34 47" stroke="#D7F0FF" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
-<g id="small-paws" inkscape:groupmode="layer" inkscape:label="04 | 抱本双爪"><ellipse cx="20" cy="40" rx="4.3" ry="5" transform="rotate(32 20 40)" fill="url(#fur)"/><ellipse cx="48" cy="37.5" rx="4.3" ry="4.7" fill="url(#fur)"/></g>
+<g id="small-paws" inkscape:groupmode="layer" inkscape:label="Paws"><ellipse cx="20" cy="40" rx="4.3" ry="5" transform="rotate(32 20 40)" fill="url(#fur)"/><ellipse cx="48" cy="37.5" rx="4.3" ry="4.7" fill="url(#fur)"/></g>
 
 </svg>

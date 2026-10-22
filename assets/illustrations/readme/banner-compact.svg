@@ -1,8 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="340" viewBox="0 0 720 340" role="img" aria-labelledby="banner-title banner-description">
-  <!-- Original banner composition, 2026 Fragile Notepad authors. Bunny artwork is derived from ../bunny/app.svg; subject to ../LICENSE (all rights reserved). Georgia title lettering is outlined for consistent, self-contained rendering. No fonts or external resources are embedded. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="340" viewBox="0 0 720 340" role="img" aria-labelledby="banner-title">
+  <!-- Copyright (c) 2026, Fragile Notepad authors. All rights reserved. See ../LICENSE. Bunny artwork from ../bunny/app.svg. -->
   <title id="banner-title">Fragile Notepad</title>
-  <desc id="banner-description">Ink-blue Fragile Notepad lettering on warm ruled paper, beside the bunny holding a blue notebook.</desc>
   <defs>
     <linearGradient id="banner-paper" x1="0" y1="0" x2="1" y2="1">
       <stop stop-color="#FCFAF5" />

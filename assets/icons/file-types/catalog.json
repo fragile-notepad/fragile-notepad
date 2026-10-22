@@ -27,5 +27,6 @@
   {"id":"json","name":"JSON","badge":"JSON","color":"#CBCB41","resource_id":127,"extensions":[".json",".jsonc",".jsonl"]},
   {"id":"yaml","name":"YAML","badge":"YML","color":"#CB171E","resource_id":128,"extensions":[".yml",".yaml"]},
   {"id":"xml","name":"XML","badge":"XML","color":"#FF6600","resource_id":129,"extensions":[".xml",".xsd",".xsl",".xslt",".svg"]},
-  {"id":"text","name":"Plain text","badge":"TXT","color":"#667386","resource_id":130,"extensions":[".txt",".text",".log"]}
+  {"id":"text","name":"Plain text","badge":"TXT","color":"#667386","resource_id":130,"extensions":[".txt",".text",".log"]},
+  {"id":"other","name":"Other files","badge":"FILE","color":"#667386","resource_id":131,"extensions":[]}
 ]

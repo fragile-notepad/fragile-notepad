@@ -24,11 +24,9 @@
   <path d="M46 4.3 V11.8 C46 13.015 46.985 14 48.2 14 H55.7" fill="url(#doc-fold)" stroke="#CED5DE" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round" />
   <g id="foreground-icon">
     <g id="language-symbol" fill="#667386">
-      <circle cx="22" cy="29" r="2.7" />
-      <circle cx="32" cy="29" r="2.7" />
-      <circle cx="42" cy="29" r="2.7" />
+      <circle cx="22" cy="32" r="2.7" />
+      <circle cx="32" cy="32" r="2.7" />
+      <circle cx="42" cy="32" r="2.7" />
     </g>
-    <rect id="language-badge" x="16.5" y="46" width="31" height="11" rx="3.2" fill="#F3F4F5" />
-    <path id="badge-lettering" fill="#5C6879" d="M22.85 47.45 H27.25 V48.6 H24.15 V51 H26.8 V52.15 H24.15 V55.55 H22.85 Z M28.55 47.45 H29.85 V55.55 H28.55 Z M31.25 47.45 H32.55 V54.4 H35.35 V55.55 H31.25 Z M36.75 47.45 H41.15 V48.6 H38.05 V50.9 H40.7 V52.05 H38.05 V54.4 H41.15 V55.55 H36.75 Z" />
   </g>
 </svg>

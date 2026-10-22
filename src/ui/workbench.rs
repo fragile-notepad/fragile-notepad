@@ -37,6 +37,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         about_tab,
         rendering_debug_info,
         window_list_entries,
+        window_list_query,
         file_status,
         active_outline_state,
     } = model;
@@ -178,7 +179,11 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     };
 
     let with_window_list = if let Some(entries) = window_list_entries {
-        stack![with_dialogs, window_list_dialog::view(entries)].into()
+        stack![
+            motion::fade(with_dialogs, 1.0, styles::editor_background, false),
+            window_list_dialog::view(entries, window_list_query)
+        ]
+        .into()
     } else {
         with_dialogs
     };

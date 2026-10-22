@@ -51,6 +51,7 @@ impl App {
             is_about_visible: false,
             about_tab: AboutTab::About,
             is_window_list_visible: false,
+            window_list_query: String::new(),
             settings_dialog: SettingsDialogState::new(&EditorSettings::default()),
             search_dialog: SearchDialogState::new(),
             go_to_line_prompt: None,

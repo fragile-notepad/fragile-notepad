@@ -25,10 +25,31 @@ impl App {
 
     pub(super) fn set_window_list_visible(&mut self, visible: bool) -> Task<Message> {
         if visible {
+            if self.close_prompt.document().is_some()
+                || self.go_to_line_prompt.is_some()
+                || self.chrome_animation.about.rendered_visible()
+            {
+                return Task::none();
+            }
             self.menu.close();
+            self.window_list_query.clear();
         }
         self.is_window_list_visible = visible;
-        Task::none()
+        iced::widget::operation::focus(if visible {
+            crate::ui::window_list_dialog::INPUT_ID
+        } else {
+            crate::ui::editor::EDITOR_ID
+        })
+    }
+
+    pub(super) fn submit_window_list(&mut self) -> Task<Message> {
+        if !self.is_window_list_visible {
+            return Task::none();
+        }
+        self.window_list_entries()
+            .into_iter()
+            .find(|entry| entry.matches_query(&self.window_list_query))
+            .map_or_else(Task::none, |entry| self.focus_window(entry.target))
     }
 
     pub(super) fn open_about_dialog(&mut self) -> Task<Message> {

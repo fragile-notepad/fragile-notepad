@@ -406,6 +406,8 @@ message_catalog! {
         AboutClosed => Reject,
         WindowListOpened => Reject,
         WindowListClosed => Reject,
+        WindowListQueryChanged(arg0: String) => Reject,
+        WindowListSubmitted => Reject,
         WindowFocusRequested(arg0: WindowTarget) => Reject,
         WindowFocusNext => Reject,
         WindowFocusPrevious => Reject,

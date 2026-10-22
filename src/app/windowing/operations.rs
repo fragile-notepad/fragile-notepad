@@ -265,9 +265,56 @@ impl App {
             .into_iter()
             .filter_map(|target| {
                 let id = self.window_id(target)?;
+                let (title, description, search_titles) = if let Some(editor) = self.editor_id(id) {
+                    let active = self.workspace.active_document_in(editor);
+                    let titles: Vec<_> = active
+                        .into_iter()
+                        .chain(self.workspace.window_documents(editor).filter(|document| {
+                            Some(document.id) != active.map(|document| document.id)
+                        }))
+                        .map(|document| document.title())
+                        .collect();
+                    let mut title = titles
+                        .iter()
+                        .take(2)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if titles.len() > 2 {
+                        title.push_str(&format!(" and {} more…", titles.len() - 2));
+                    }
+                    if title.is_empty() {
+                        title = "Empty editor".into();
+                    }
+                    let count = titles.len();
+                    let mut description = format!(
+                        "Editor · {count} {}",
+                        if count == 1 { "tab" } else { "tabs" }
+                    );
+                    if let Some(parent) = active
+                        .and_then(|document| document.path.as_deref())
+                        .and_then(|path| path.parent())
+                    {
+                        description.push_str(&format!(" · {}", parent.display()));
+                    }
+                    (title, description, titles)
+                } else {
+                    let title = self
+                        .title(id)
+                        .trim_end_matches(" - Fragile Notepad")
+                        .to_owned();
+                    let description = match target {
+                        WindowTarget::Settings => "Preferences",
+                        WindowTarget::AdvancedSearch => "Find & Replace",
+                        _ => "Editor",
+                    };
+                    (title, description.into(), Vec::new())
+                };
                 Some(WindowListEntry {
                     target,
-                    title: self.title(id),
+                    title,
+                    description,
+                    search_titles,
                     is_focused: focused == Some(target),
                 })
             })
@@ -277,14 +324,17 @@ impl App {
     pub(crate) fn focus_window(&mut self, target: WindowTarget) -> Task<Message> {
         self.menu.close();
 
-        self.is_window_list_visible = false;
+        let restore_focus = self.set_window_list_visible(false);
 
         let Some(id) = self.window_id(target) else {
-            return Task::none();
+            return restore_focus;
         };
 
         self.focused_window_id = Some(id);
-        iced::window::gain_focus(id)
+        Task::batch([
+            restore_focus,
+            iced::window::minimize(id, false).chain(iced::window::gain_focus(id)),
+        ])
     }
 
     pub(crate) fn focus_adjacent_window(&mut self, direction: isize) -> Task<Message> {

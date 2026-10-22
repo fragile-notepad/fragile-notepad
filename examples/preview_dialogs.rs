@@ -128,23 +128,29 @@ fn main() -> ExitCode {
                 let entries = vec![
                     WindowListEntry {
                         target: WindowTarget::Main,
-                        title: "Release notes — September.md - Fragile Notepad".into(),
+                        title: "Release notes — September.md, main.rs and 59 more…".into(),
+                        description: "Editor · 61 tabs · D:/Projects/FragileNotepad".into(),
+                        search_titles: vec![],
                         is_focused: true,
                     },
                     WindowListEntry {
                         target: WindowTarget::AdvancedSearch,
-                        title: "Find and Replace - Fragile Notepad".into(),
+                        title: "Find and Replace".into(),
+                        description: "Find & Replace".into(),
+                        search_titles: vec![],
                         is_focused: false,
                     },
                     WindowListEntry {
                         target: WindowTarget::Settings,
-                        title: "Settings - Fragile Notepad".into(),
+                        title: "Settings".into(),
+                        description: "Preferences".into(),
+                        search_titles: vec![],
                         is_focused: false,
                     },
                 ];
                 render(
                     &mut renderer,
-                    window_list_dialog::view(entries),
+                    window_list_dialog::view(entries, ""),
                     &theme,
                     Size::new(width, height),
                     &format!("windows-{name}-{size_name}"),

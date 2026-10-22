@@ -60,12 +60,14 @@ impl<'a> MenuModel<'a> {
                 ui.close_prompt.document().is_some()
                     || ui.go_to_line_prompt.is_some()
                     || ui.chrome_animation.about.target_visible()
+                    || *ui.is_window_list_visible
             });
         let input_possible = auxiliary_focused
             || ui.as_ref().is_some_and(|ui| {
                 *ui.is_find_visible
                     || *ui.is_function_list_visible
                     || ui.go_to_line_prompt.is_some()
+                    || *ui.is_window_list_visible
             });
         Self {
             state: MenuState {

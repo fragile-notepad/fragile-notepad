@@ -128,6 +128,14 @@ impl App {
             ApplicationMessage::AboutClosed => self.close_about_dialog(),
             ApplicationMessage::WindowListOpened => self.set_window_list_visible(true),
             ApplicationMessage::WindowListClosed => self.set_window_list_visible(false),
+            ApplicationMessage::WindowListQueryChanged(query) => {
+                self.window_list_query = query;
+                iced::widget::operation::snap_to(
+                    crate::ui::window_list_dialog::SCROLL_ID,
+                    iced::widget::scrollable::RelativeOffset::START,
+                )
+            }
+            ApplicationMessage::WindowListSubmitted => self.submit_window_list(),
             ApplicationMessage::WindowFocusRequested(target) => self.focus_window(target),
             ApplicationMessage::WindowFocusNext => self.focus_adjacent_window(1),
             ApplicationMessage::WindowFocusPrevious => self.focus_adjacent_window(-1),

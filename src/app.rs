@@ -88,6 +88,7 @@ pub struct App {
     is_about_visible: bool,
     about_tab: AboutTab,
     is_window_list_visible: bool,
+    window_list_query: String,
     settings_dialog: SettingsDialogState,
     search_dialog: SearchDialogState,
     go_to_line_prompt: Option<go_to_line::GoToLinePrompt>,

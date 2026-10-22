@@ -131,7 +131,7 @@ fn main() -> ExitCode {
                     WindowListEntry {
                         target: WindowTarget::Main,
                         title: "Release notes — September.md, main.rs and 59 more…".into(),
-                        description: "Editor · 61 tabs · D:/Projects/FragileNotepad".into(),
+                        description: "Editor · 61 tabs".into(),
                         search_titles: vec!["Cargo.toml".into()],
                         is_focused: true,
                     },

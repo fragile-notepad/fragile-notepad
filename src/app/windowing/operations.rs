@@ -287,16 +287,10 @@ impl App {
                         title = "Empty editor".into();
                     }
                     let count = titles.len();
-                    let mut description = format!(
+                    let description = format!(
                         "Editor · {count} {}",
                         if count == 1 { "tab" } else { "tabs" }
                     );
-                    if let Some(parent) = active
-                        .and_then(|document| document.path.as_deref())
-                        .and_then(|path| path.parent())
-                    {
-                        description.push_str(&format!(" · {}", parent.display()));
-                    }
                     (title, description, titles)
                 } else {
                     let title = self

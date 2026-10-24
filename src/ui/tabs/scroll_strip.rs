@@ -227,9 +227,24 @@ impl Operation for ScrollOperation {
 }
 
 #[derive(Default)]
-struct TabGeometryOperation {
+pub(super) struct TabGeometryOperation {
     translation: Vector,
+    bounds: Option<Rectangle>,
     tabs: Vec<(crate::core::DocumentId, Rectangle)>,
+}
+
+struct StripMarker;
+
+impl TabGeometryOperation {
+    pub(super) fn into_geometry(self, viewport: &Rectangle) -> super::StripGeometry {
+        super::StripGeometry {
+            bounds: self
+                .bounds
+                .and_then(|bounds| bounds.intersection(viewport))
+                .unwrap_or_default(),
+            tabs: self.tabs,
+        }
+    }
 }
 
 impl Operation for TabGeometryOperation {
@@ -254,6 +269,9 @@ impl Operation for TabGeometryOperation {
         mut bounds: Rectangle,
         state: &mut dyn std::any::Any,
     ) {
+        if state.is::<StripMarker>() {
+            self.bounds = Some(bounds);
+        }
         if let Some(tab) = state.downcast_ref::<super::TabMarker>() {
             bounds.x -= self.translation.x;
             bounds.y -= self.translation.y;
@@ -429,6 +447,7 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        operation.custom(None, layout.bounds(), &mut StripMarker);
         self.content.as_widget_mut().operate(
             &mut tree.children[0],
             layout.child(0),

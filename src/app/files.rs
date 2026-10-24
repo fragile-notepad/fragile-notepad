@@ -84,6 +84,7 @@ impl FileOperations {
 mod closing;
 mod loading;
 mod saving;
+mod tabs;
 
 impl App {
     pub(super) fn update_file(&mut self, message: FileMessage) -> Task<Message> {
@@ -104,6 +105,7 @@ impl App {
             return Task::none();
         }
         match message {
+            FileMessage::TabContextAction(id, action) => self.update_tab_context_action(id, action),
             FileMessage::ResumeDocumentClose(id) => self.close_request(id),
             FileMessage::SaveScoped(scope) => {
                 if self.files.pending_save.is_some() {

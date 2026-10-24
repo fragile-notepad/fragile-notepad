@@ -2,6 +2,7 @@
 
 pub mod about_dialog;
 pub mod advanced_search_panel;
+mod context_menu;
 pub mod controls;
 pub mod dirty_close_dialog;
 pub mod dropdown;

@@ -164,6 +164,7 @@ impl App {
             | Message::TabClosed(id)
             | Message::ResumeDocumentClose(id)
             | Message::TabPinToggled(id)
+            | Message::TabContextAction(id, _)
             | Message::DirtyCloseResolved(id, _)
             | Message::DirtyCloseFadeFinished(id)
             | Message::AdvancedSearchResultSelected(id, _) => Some(*id),

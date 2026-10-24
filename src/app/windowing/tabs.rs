@@ -380,6 +380,70 @@ impl App {
         }
     }
 
+    pub(in crate::app) fn move_tab_to_new_window(&mut self, document: DocumentId) -> Task<Message> {
+        let Some(source) = self.workspace.owner_of(document) else {
+            return Task::none();
+        };
+        // Keep a registered source editor available if native creation fails.
+        if self.workspace.window_tab_ids(source).len() <= 1 {
+            return Task::none();
+        }
+        let (target, open) = self.create_editor(true, None);
+        let moved = self.move_tab_between_windows(document, source, target);
+        open.chain(moved)
+    }
+
+    pub(in crate::app) fn move_tab_to_window(
+        &mut self,
+        document: DocumentId,
+        native: window::Id,
+    ) -> Task<Message> {
+        let (Some(source), Some(target)) =
+            (self.workspace.owner_of(document), self.editor_id(native))
+        else {
+            return Task::none();
+        };
+        self.move_tab_between_windows(document, source, target)
+    }
+
+    fn move_tab_between_windows(
+        &mut self,
+        document: DocumentId,
+        source: EditorWindowId,
+        target: EditorWindowId,
+    ) -> Task<Message> {
+        if source == target {
+            return Task::none();
+        }
+        let slot = self.workspace.window_tab_ids(target).len();
+        if !self
+            .workspace
+            .transfer_tabs(source, &[document], target, slot)
+        {
+            return Task::none();
+        }
+        // A restored tab may become visible for the first time when its neighbor moves.
+        let source_load = self
+            .workspace
+            .active_document_in(source)
+            .map(|document| document.id)
+            .map(|id| self.activate_document(id))
+            .unwrap_or_else(Task::none);
+        let close = if self.workspace.window_tab_ids(source).is_empty() {
+            self.close_empty_editor(source)
+        } else {
+            Task::none()
+        };
+        self.switch_editor(target);
+        self.last_active_editor = Some(target);
+        let activate = self.activate_document(document);
+        let focus = self
+            .main_window_id
+            .map(window::gain_focus)
+            .unwrap_or_else(Task::none);
+        Task::batch([source_load, close, activate, focus])
+    }
+
     pub(in crate::app) fn move_selected_to_new_window(&mut self) -> Task<Message> {
         let cancel = self.cancel_tab_drag();
         let source = self.workspace.current_window_id();

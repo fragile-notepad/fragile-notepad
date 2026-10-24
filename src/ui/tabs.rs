@@ -66,6 +66,15 @@ impl StripGeometry {
             body.contains(point).then_some(*id)
         })
     }
+
+    pub(crate) fn tab_at(&self, point: Point) -> Option<DocumentId> {
+        if !self.bounds.contains(point) {
+            return None;
+        }
+        self.tabs
+            .iter()
+            .find_map(|(id, bounds)| bounds.contains(point).then_some(*id))
+    }
 }
 
 struct TabMarker(DocumentId);
@@ -126,6 +135,21 @@ pub fn view_for_window(
         .width(Fill)
         .style(styles::tab_strip)
         .into()
+}
+
+/// Measure tab geometry without exposing the scrolling widget's state.
+pub(crate) fn geometry(
+    content: &mut Element<'_, Message>,
+    tree: &mut Tree,
+    layout: Layout<'_>,
+    renderer: &iced::Renderer,
+    viewport: &Rectangle,
+) -> StripGeometry {
+    let mut operation = scroll_strip::TabGeometryOperation::default();
+    content
+        .as_widget_mut()
+        .operate(tree, layout, renderer, &mut operation);
+    operation.into_geometry(viewport)
 }
 
 fn new_file_button() -> Element<'static, Message> {

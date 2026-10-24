@@ -100,3 +100,6 @@ mod events;
 
 #[path = "app_tests/focus.rs"]
 mod focus;
+
+#[path = "app_tests/tab_context_menu.rs"]
+mod tab_context_menu;

@@ -106,6 +106,21 @@ pub enum BulkScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabContextAction {
+    Close,
+    CloseOthers,
+    CloseAll,
+    CloseUnmodified,
+    CloseToLeft,
+    CloseToRight,
+    CloseUnpinned,
+    TogglePin,
+    CopyPath,
+    MoveToNewWindow,
+    MoveToWindow(window::Id),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchScope {
     CurrentDocument,
     SelectedTabs,
@@ -228,6 +243,7 @@ message_catalog! {
         ToggleFoldingControls => Reject,
     }
     Files(FileMessage) {
+        TabContextAction(arg0: DocumentId, arg1: TabContextAction) => Reject,
         TabSelected(arg0: DocumentId) => Reject,
         TabClosed(arg0: DocumentId) => Reject,
         ResumeDocumentClose(arg0: DocumentId) => Defer,

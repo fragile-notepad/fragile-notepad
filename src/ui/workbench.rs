@@ -1,6 +1,7 @@
 //! Composition of the main workbench surface and its transient overlays.
 
 mod background;
+mod tab_context_menu;
 
 use iced::widget::{Column, container, row, space, stack};
 use iced::{Element, Fill, Length};
@@ -150,6 +151,17 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     // A quiet shell needs one composite. When any child has a pending redraw
     // (caret, scrolling, or fade), draw it live and let the smaller caches help.
     let shell = raster_cache::cached_animated(shell, retain);
+    // The popup owns input after every workbench child has updated, so the
+    // editor cannot re-enable IME while it is open. Keep redraws uncaptured:
+    // Iced removes rendered overlays when the base captures an event.
+    let shell = tab_context_menu::wrap(
+        shell,
+        workspace,
+        editor_window,
+        settings,
+        window_menu_state.editor_windows.clone(),
+        dragged_tab.is_some(),
+    );
 
     let with_menu: Element<'a, Message> = if !cfg!(target_os = "macos") && active_menu.is_some() {
         stack![

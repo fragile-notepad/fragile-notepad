@@ -163,6 +163,7 @@ impl App {
                     | Message::TabListSelected(_)
                     | Message::TabClosed(_)
                     | Message::TabPinToggled(_)
+                    | Message::TabContextAction(_, _)
                     | Message::CloseFile
                     | Message::CloseAllFiles
                     | Message::CloseAllButActiveFile

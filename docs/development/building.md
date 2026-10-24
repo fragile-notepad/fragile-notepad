@@ -7,7 +7,7 @@ repository root unless a step says otherwise.
 
 ## Prerequisites
 
-Install Git, stable [Rust](https://rustup.rs), Python 3.10 or later with pip, and
+Install Git, stable [Rust](https://rustup.rs), Python 3.11 or later with pip, and
 the native tools for your platform.
 
 | Platform | Native tools and libraries |

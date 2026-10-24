@@ -8,7 +8,7 @@ from the repository root.
 
 ## Requirements
 
-- Python 3.10 or later. Use `python` on Windows and `python3` on Linux or macOS.
+- Python 3.11 or later. Use `python` on Windows and `python3` on Linux or macOS.
 - Pillow and resvg-py, installed using the versions in
   [requirements-assets.txt](../../scripts/requirements-assets.txt).
 - For the Rust preview example, the [application build prerequisites](building.md).

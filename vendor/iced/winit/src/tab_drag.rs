@@ -21,13 +21,32 @@ struct Session {
     source: Arc<winit::window::Window>,
     capture: (Id, Arc<winit::window::Window>),
     capability: Capability,
-    following: Option<(Id, Arc<winit::window::Window>, Vector)>,
+    following: Option<FollowingWindow>,
     last_motion: Option<Event>,
     start_position: Point,
     surface_started: bool,
 }
 
 pub type WindowInfo = (Id, Arc<winit::window::Window>, f32);
+
+struct FollowingWindow {
+    id: Id,
+    raw: Arc<winit::window::Window>,
+    offset: Vector,
+}
+
+impl FollowingWindow {
+    fn new(id: Id, raw: Arc<winit::window::Window>, offset: Vector) -> Self {
+        winit::tab_drag::set_window_dragging(&raw, true);
+        Self { id, raw, offset }
+    }
+}
+
+impl Drop for FollowingWindow {
+    fn drop(&mut self) {
+        winit::tab_drag::set_window_dragging(&self.raw, false);
+    }
+}
 
 impl Tracker {
     pub fn is_active(&self) -> bool {
@@ -139,7 +158,10 @@ impl Tracker {
                             );
                         }
                         if session.capability != Capability::SurfaceOnly {
-                            session.following = Some((target, window.clone(), offset));
+                            // Drop the old guard before suppressing transitions again.
+                            session.following = None;
+                            session.following =
+                                Some(FollowingWindow::new(target, window.clone(), offset));
                             session.last_motion = None;
                         }
                     }
@@ -163,6 +185,10 @@ impl Tracker {
                         } else {
                             handoff_failed = true;
                         }
+                    }
+                    if !handoff_failed && let Some(following) = session.following.as_ref() {
+                        // Hide after capture handoff, before restoring transitions.
+                        following.raw.set_visible(false);
                     }
                     session.following = None;
                     session.last_motion = None;
@@ -317,7 +343,7 @@ impl Tracker {
                 || session
                     .following
                     .as_ref()
-                    .is_some_and(|(target, _, _)| *target == id)
+                    .is_some_and(|following| following.id == id)
         }) {
             self.stop(CancelReason::WindowClosed, events);
         }
@@ -348,7 +374,7 @@ impl Tracker {
         let ignore = session
             .following
             .as_ref()
-            .map(|(_, window, _)| window.as_ref());
+            .map(|following| following.raw.as_ref());
         let hovered = windows.iter().find_map(|(id, raw, scale)| {
             if !winit::tab_drag::is_pointer_target(raw, ignore) {
                 return None;
@@ -364,14 +390,14 @@ impl Tracker {
         });
         let scale = windows
             .iter()
-            .find(|(id, _, _)| *id == session.origin)
+            .find(|(id, _, _)| *id == session.capture.0)
             .map(|(_, _, scale)| *scale)
             .unwrap_or(1.0);
-        let local = winit::tab_drag::client_position(&session.source, pointer.position)
+        let local = winit::tab_drag::client_position(&session.capture.1, pointer.position)
             .unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let motion = Event::Motion {
             session: session.id,
-            window: session.origin,
+            window: session.capture.0,
             position: Point::new(local.x as f32 / scale, local.y as f32 / scale),
             desktop: Some(Point::new(
                 pointer.position.x as f32,
@@ -379,19 +405,26 @@ impl Tracker {
             )),
             hovered,
         };
-        if session.last_motion.as_ref() != Some(&motion) {
-            emit(session.origin, motion.clone(), events);
-            session.last_motion = Some(motion);
-        }
-        if let Some((target, following, offset)) = &session.following
-            && let Some((_, _, scale)) = windows.iter().find(|(id, _, _)| id == target)
+        if let Some(following) = &session.following
+            && let Some((_, _, scale)) = windows.iter().find(|(id, _, _)| *id == following.id)
         {
             winit::tab_drag::move_window(
-                following,
+                &following.raw,
                 pointer.position,
-                native_offset(*offset, f64::from(*scale) / following.scale_factor()),
+                native_offset(
+                    following.offset,
+                    f64::from(*scale) / following.raw.scale_factor(),
+                ),
             );
         }
+        if needs_motion_event(
+            session.last_motion.as_ref(),
+            &motion,
+            session.following.is_some(),
+        ) {
+            emit(session.origin, motion.clone(), events);
+        }
+        session.last_motion = Some(motion);
     }
 
     fn release(&mut self, events: &mut Vec<(Id, core::Event)>) {
@@ -421,6 +454,21 @@ impl Tracker {
             );
         }
     }
+}
+
+fn needs_motion_event(previous: Option<&Event>, current: &Event, following: bool) -> bool {
+    if previous == Some(current) {
+        return false;
+    }
+    // Coalesce empty-desktop motion while native window following continues.
+    !following
+        || !matches!(
+            (previous, current),
+            (
+                Some(Event::Motion { hovered: None, .. }),
+                Event::Motion { hovered: None, .. }
+            )
+        )
 }
 
 impl Drop for Tracker {
@@ -469,6 +517,39 @@ fn pointer_terminal(pointer: winit::tab_drag::Pointer) -> Option<Terminal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn motion(window: Id, x: f32, hovered: Option<(Id, Point)>) -> Event {
+        Event::Motion {
+            session: SessionId(7),
+            window,
+            position: Point::new(x, 100.0),
+            desktop: Some(Point::new(x + 500.0, 400.0)),
+            hovered,
+        }
+    }
+
+    #[test]
+    fn detached_desktop_motion_moves_natively_without_republishing_empty_targets() {
+        let window = Id::unique();
+        let previous = motion(window, 10.0, None);
+        let current = motion(window, 20.0, None);
+        assert!(needs_motion_event(None, &previous, true));
+        assert!(!needs_motion_event(Some(&previous), &current, true));
+        assert!(needs_motion_event(Some(&previous), &current, false));
+        assert!(!needs_motion_event(Some(&current), &current, false));
+    }
+
+    #[test]
+    fn detached_motion_publishes_target_entry_movement_and_exit_immediately() {
+        let source = Id::unique();
+        let target = Id::unique();
+        let empty = motion(source, 10.0, None);
+        let entered = motion(source, 20.0, Some((target, Point::new(5.0, 60.0))));
+        let moved = motion(source, 30.0, Some((target, Point::new(15.0, 60.0))));
+        assert!(needs_motion_event(Some(&empty), &entered, true));
+        assert!(needs_motion_event(Some(&entered), &moved, true));
+        assert!(needs_motion_event(Some(&moved), &empty, true));
+    }
 
     #[test]
     fn detached_tab_grab_point_stays_under_pointer_with_display_and_ui_scaling() {

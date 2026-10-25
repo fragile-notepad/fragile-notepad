@@ -115,6 +115,245 @@ fn actual_tab_row_keeps_its_height_and_measures_overflow() {
 }
 
 #[test]
+fn retained_native_drag_autoscrolls_with_an_unavailable_widget_cursor_and_moves_thumb() {
+    let renderer = renderer();
+    let make = |drag_position: Option<super::super::DragPosition>| {
+        view_tracked(
+            Space::new()
+                .width(CONTENT_WIDTH)
+                .height(super::super::TAB_HEIGHT),
+            drag_position.is_some(),
+            drag_position,
+        )
+    };
+    let mut element = make(Some(super::super::DragPosition {
+        pointer_x: 900.0,
+        grab_offset: 20.0,
+        group_width: 120.0,
+    }));
+    let (mut tree, node) = mount(&mut element, &renderer);
+    let start = Instant::now();
+    let mut redraw = window::RedrawRequest::Wait;
+    for frame in 0..100 {
+        let (_, requested, _) = dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                start + Duration::from_millis(frame * 16),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        redraw = requested;
+        if frame == 0 {
+            assert!(tree.state.downcast_ref::<State>().metrics.offset > 0.0);
+            assert_eq!(redraw, window::RedrawRequest::NextFrame);
+        }
+    }
+    let state = tree.state.downcast_ref::<State>();
+    close(state.metrics.offset, CONTENT_WIDTH - WIDTH);
+    close(state.reveal.target, 1.0);
+    assert_eq!(redraw, window::RedrawRequest::Wait);
+    let right_thumb = state
+        .metrics
+        .geometry(Layout::new(&node).bounds())
+        .unwrap()
+        .thumb_x;
+    element = make(Some(super::super::DragPosition {
+        pointer_x: -100.0,
+        grab_offset: 20.0,
+        group_width: 120.0,
+    }));
+    tree.diff(element.as_widget_mut());
+    let node = relayout(&mut element, &mut tree, &renderer, WIDTH);
+    for frame in 100..200 {
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                start + Duration::from_millis(frame * 16),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+    }
+    let state = tree.state.downcast_ref::<State>();
+    close(state.metrics.offset, 0.0);
+    assert!(
+        state
+            .metrics
+            .geometry(Layout::new(&node).bounds())
+            .unwrap()
+            .thumb_x
+            < right_thumb
+    );
+    element = make(None);
+    tree.diff(element.as_widget_mut());
+    let node = relayout(&mut element, &mut tree, &renderer, WIDTH);
+    dispatch(
+        &mut element,
+        &mut tree,
+        &node,
+        &renderer,
+        Event::Window(window::Event::RedrawRequested(
+            start + Duration::from_millis(3300),
+        )),
+        mouse::Cursor::Unavailable,
+    );
+    let state = tree.state.downcast_ref::<State>();
+    assert!(state.drag_scroll.last_scroll.is_none());
+    close(state.metrics.offset, 0.0);
+    close(state.reveal.target, 0.0);
+}
+
+#[test]
+fn edge_motion_preserves_pointer_displacement_and_speed_across_redraw_rates() {
+    let renderer = renderer();
+    let make = |pointer_x| {
+        view_tracked(
+            Space::new()
+                .width(CONTENT_WIDTH)
+                .height(super::super::TAB_HEIGHT),
+            true,
+            Some(super::super::DragPosition {
+                pointer_x,
+                grab_offset: 20.0,
+                group_width: 120.0,
+            }),
+        )
+    };
+    for frame_ms in [8, 16, 32] {
+        let mut element = make(120.0);
+        let (mut tree, _) = mount(&mut element, &renderer);
+        let start = Instant::now();
+        for (frame, pointer_x) in [120.0, 200.0, 280.0, 440.0].into_iter().enumerate() {
+            element = make(pointer_x);
+            tree.diff(element.as_widget_mut());
+            let node = relayout(&mut element, &mut tree, &renderer, WIDTH);
+            dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    start + Duration::from_millis(frame as u64 * frame_ms),
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            let drag = super::super::DragPosition {
+                pointer_x,
+                grab_offset: 20.0,
+                group_width: 120.0,
+            };
+            let painted = drag.leading_x(drag.group_width, WIDTH);
+            close(
+                tree.state.downcast_ref::<State>().metrics.offset + painted,
+                pointer_x - 20.0,
+            );
+        }
+        let node = relayout(&mut element, &mut tree, &renderer, WIDTH);
+        for _ in 0..8 {
+            dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(440.0, 15.0),
+                }),
+                mouse::Cursor::Unavailable,
+            );
+            close(tree.state.downcast_ref::<State>().metrics.offset, 220.0);
+        }
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                start + Duration::from_millis(4 * frame_ms),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        // The preceding pointer movement was 160 pixels per frame. Holding at
+        // the edge continues by that distance instead of a 480 px/s ceiling.
+        close(tree.state.downcast_ref::<State>().metrics.offset, 380.0);
+        element = make(420.0);
+        tree.diff(element.as_widget_mut());
+        let node = relayout(&mut element, &mut tree, &renderer, WIDTH);
+        for frame in [5, 6] {
+            dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    start + Duration::from_millis(frame * frame_ms),
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            // Reversing 20 pixels consumes those 20 pixels immediately, then
+            // stops continuation in the previous direction.
+            close(tree.state.downcast_ref::<State>().metrics.offset, 360.0);
+        }
+    }
+}
+
+#[test]
+fn release_or_native_cancellation_stops_edge_scroll_before_the_view_rebuilds() {
+    use iced::window::tab_drag::{CancelReason, Event as DragEvent, SessionId};
+    for terminal in [
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        Event::Window(window::Event::TabDrag(DragEvent::Released {
+            session: SessionId(1),
+        })),
+        Event::Window(window::Event::TabDrag(DragEvent::Cancelled {
+            session: SessionId(1),
+            reason: CancelReason::Requested,
+        })),
+    ] {
+        let renderer = renderer();
+        let mut element = view_tracked(
+            Space::new()
+                .width(CONTENT_WIDTH)
+                .height(super::super::TAB_HEIGHT),
+            true,
+            Some(super::super::DragPosition {
+                pointer_x: 900.0,
+                grab_offset: 20.0,
+                group_width: 120.0,
+            }),
+        );
+        let (mut tree, node) = mount(&mut element, &renderer);
+        let start = Instant::now();
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(start)),
+            mouse::Cursor::Unavailable,
+        );
+        let before = tree.state.downcast_ref::<State>().metrics.offset;
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            terminal,
+            mouse::Cursor::Unavailable,
+        );
+        let state = tree.state.downcast_ref::<State>();
+        close(state.metrics.offset, before);
+        assert!(state.drag_scroll.last_scroll.is_none());
+        assert!(state.drag_scroll.last_pointer.is_none());
+        assert!(state.drag_scroll.velocity.is_none());
+    }
+}
+
+#[test]
 fn hovering_a_tab_fades_in_and_reverses_without_jumping() {
     let renderer = renderer();
     let mut element = strip();

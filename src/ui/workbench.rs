@@ -33,6 +33,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         active_menu_path,
         window_menu_state,
         dragged_tab,
+        tab_drag_position,
         hovered_drop_tab,
         dirty_close_document,
         about_tab,
@@ -89,7 +90,13 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
             raster_cache::cached(toolbar::menu_bar(active_menu), retain)
         },
         raster_cache::cached(toolbar::tool_bar(active_document), retain),
-        tabs::view_for_window(workspace, editor_window, dragged_tab, hovered_drop_tab),
+        tabs::view_with_drag(
+            workspace,
+            editor_window,
+            dragged_tab,
+            hovered_drop_tab,
+            tab_drag_position,
+        ),
         find_panel_slot(
             find,
             is_find_visible,

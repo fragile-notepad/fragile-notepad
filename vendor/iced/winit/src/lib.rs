@@ -434,6 +434,7 @@ where
                                         window: Arc::new(window),
                                         exit_on_close_request,
                                         make_visible: visible,
+                                        tab_drag,
                                         on_open,
                                     },
                                 );
@@ -501,6 +502,7 @@ enum Event<Message: 'static> {
         window: Arc<winit::window::Window>,
         exit_on_close_request: bool,
         make_visible: bool,
+        tab_drag: Option<(core::window::tab_drag::SessionId, core::Vector)>,
         on_open: oneshot::Sender<window::Id>,
     },
     WindowCreationFailed {
@@ -1049,6 +1051,7 @@ async fn run_instance<P>(
                 window,
                 exit_on_close_request,
                 make_visible,
+                tab_drag,
                 on_open,
             } => {
                 if compositor.is_none() {
@@ -1131,7 +1134,7 @@ async fn run_instance<P>(
                 }
 
                 let is_first = window_manager.is_empty();
-                let window = window_manager.insert(
+                let _ = window_manager.insert(
                     id,
                     window,
                     &program,
@@ -1141,6 +1144,17 @@ async fn run_instance<P>(
                     exit_on_close_request,
                     system_theme,
                 );
+
+                // Start following before first-frame preparation and presentation.
+                if let Some((session, offset)) = tab_drag {
+                    let windows = window_manager.drag_windows();
+                    window_manager.tab_drag.action(
+                        runtime::window::tab_drag::Action::Follow(session, id, offset),
+                        &windows,
+                        &mut events,
+                    );
+                }
+                let window = window_manager.get_mut(id).expect("Get created window");
 
                 window
                     .raw
@@ -1209,6 +1223,12 @@ async fn run_instance<P>(
                     );
                 }
 
+                // Refresh the pointer after preparing the hidden first frame.
+                if tab_drag.is_some() {
+                    let windows = window_manager.drag_windows();
+                    window_manager.tab_drag.poll(&windows, &mut events);
+                }
+                let window = window_manager.get(id).expect("Get prepared window");
                 if make_visible {
                     window.raw.set_visible(true);
                 }

@@ -437,7 +437,7 @@ pub fn tab_container_style(
         TabDragVisual::Idle => palette.chrome,
     };
     let border_color = match drag_visual {
-        TabDragVisual::Dragged => palette.accent,
+        TabDragVisual::Dragged => palette.border,
         TabDragVisual::ValidTarget => palette.success,
         TabDragVisual::InvalidTarget => palette.danger,
         TabDragVisual::Idle if is_active => palette.border,
@@ -448,7 +448,7 @@ pub fn tab_container_style(
         background: Some(Background::Color(background)),
         text_color: Some(palette.text),
         border: Border {
-            width: if matches!(drag_visual, TabDragVisual::Idle) {
+            width: if matches!(drag_visual, TabDragVisual::Idle | TabDragVisual::Dragged) {
                 1.0
             } else {
                 2.0
@@ -482,19 +482,10 @@ pub fn tab_top_bar(is_active: bool, is_dragged: bool) -> impl Fn(&Theme) -> cont
     move |theme| tab_top_bar_style(theme, is_active, is_dragged)
 }
 
-pub fn tab_title_area(is_active: bool, is_dragged: bool) -> impl Fn(&Theme) -> container::Style {
+pub fn tab_title_area(is_active: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let palette = VisualPalette::from_theme(theme);
-        let background = if is_dragged {
-            palette.accent_soft
-        } else if is_active {
-            palette.surface
-        } else {
-            palette.chrome
-        };
-
         container::Style {
-            background: Some(Background::Color(background)),
             text_color: Some(if is_active {
                 palette.text
             } else {
@@ -1550,15 +1541,14 @@ pub fn tab_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> button:
 pub fn tab_close_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);
-        let background = match (is_active, status) {
-            (_, button::Status::Hovered) => palette.danger_soft,
-            (_, button::Status::Pressed) => palette.danger,
-            (true, _) => palette.surface,
-            (false, _) => palette.chrome,
+        let background = match status {
+            button::Status::Hovered => Some(Background::Color(palette.danger_soft)),
+            button::Status::Pressed => Some(Background::Color(palette.danger)),
+            _ => None,
         };
 
         button::Style {
-            background: Some(Background::Color(background)),
+            background,
             text_color: if matches!(status, button::Status::Pressed) {
                 Color::WHITE
             } else if is_active || matches!(status, button::Status::Hovered) {
@@ -1578,11 +1568,10 @@ pub fn tab_pin_button(
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);
-        let background = match (is_active, status) {
-            (_, button::Status::Hovered) => palette.surface_high,
-            (_, button::Status::Pressed) => palette.selected,
-            (true, _) => palette.surface,
-            (false, _) => palette.chrome,
+        let background = match status {
+            button::Status::Hovered => Some(Background::Color(palette.surface_high)),
+            button::Status::Pressed => Some(Background::Color(palette.selected)),
+            _ => None,
         };
 
         let text_alpha = match (is_pinned, is_active, status) {
@@ -1593,7 +1582,7 @@ pub fn tab_pin_button(
         };
 
         button::Style {
-            background: Some(Background::Color(background)),
+            background,
             text_color: palette.text.scale_alpha(text_alpha),
             border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
             ..button::Style::default()

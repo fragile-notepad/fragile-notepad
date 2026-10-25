@@ -16,8 +16,9 @@ pub(in crate::app) struct TabDragSession {
     layout: Vec<(EditorWindowId, crate::core::workspace::EditorWindow)>,
     placements: Vec<(EditorWindowId, Option<[f32; 4]>, bool, bool)>,
     start: Point,
-    latest: Point,
+    latest: (window::Id, Point),
     offset: Vector,
+    grab_offset: f32,
     active: bool,
     collapse: bool,
     capability: Capability,
@@ -118,6 +119,8 @@ impl App {
             .collect();
         let id = SessionId(self.next_drag_session);
         self.next_drag_session = self.next_drag_session.wrapping_add(1);
+        let grab_offset = point.x - tab_x + preceding_width;
+        let strip_x = self.tab_geometry.get(&native).map_or(0.0, |g| g.bounds.x);
         self.tab_drag = Some(TabDragSession {
             pressed: document,
             id,
@@ -127,8 +130,9 @@ impl App {
             layout,
             placements,
             start: point,
-            latest: point,
-            offset: Vector::new(point.x - tab_x + preceding_width + 4.0, point.y),
+            latest: (native, point),
+            offset: Vector::new(grab_offset + strip_x, point.y),
+            grab_offset,
             active: false,
             collapse: was_selected && !toggle && !modifiers.shift(),
             capability: Capability::SurfaceOnly,
@@ -152,7 +156,23 @@ impl App {
         if drag.capability != Capability::SurfaceOnly {
             return Task::none();
         }
-        self.drag_motion(self.main_window_id.map(|id| (id, point)), point)
+        let Some(native) = self.main_window_id else {
+            return Task::none();
+        };
+        self.drag_motion(Some((native, point)), native, point)
+    }
+
+    pub(in crate::app) fn tab_drag_position(
+        &self,
+        native: window::Id,
+    ) -> Option<crate::ui::tabs::DragPosition> {
+        let drag = self.tab_drag.as_ref()?;
+        let (hovered, point) = drag.hovered?;
+        if !drag.active || drag.following.is_some() || hovered != native {
+            return None;
+        }
+        let geometry = self.tab_geometry.get(&native)?;
+        Some(geometry.drag_position(point, &drag.selected, drag.grab_offset))
     }
 
     pub(in crate::app) fn native_tab_drag(&mut self, event: Event) -> Task<Message> {
@@ -169,6 +189,7 @@ impl App {
             }
             Event::Motion {
                 session,
+                window,
                 position,
                 hovered,
                 ..
@@ -176,7 +197,7 @@ impl App {
                 if self.tab_drag.as_ref().is_none_or(|d| d.id != session) {
                     return Task::none();
                 }
-                self.drag_motion(hovered, position)
+                self.drag_motion(hovered, window, position)
             }
             Event::Released { session } => {
                 if self.tab_drag.as_ref().is_none_or(|d| d.id != session) {
@@ -193,38 +214,80 @@ impl App {
         }
     }
 
-    fn drag_motion(&mut self, hovered: Option<(window::Id, Point)>, point: Point) -> Task<Message> {
+    fn drag_motion(
+        &mut self,
+        hovered: Option<(window::Id, Point)>,
+        position_window: window::Id,
+        point: Point,
+    ) -> Task<Message> {
         let Some(mut drag) = self.tab_drag.take() else {
             return Task::none();
         };
-        drag.latest = point;
+        drag.latest = (position_window, point);
         drag.hovered = hovered;
         if !drag.active && point.distance(drag.start) < 10.0 {
             self.tab_drag = Some(drag);
             return Task::none();
         }
         drag.active = true;
-        let target = hovered.and_then(|(native, position)| {
-            let id = self.editor_id(native)?;
-            let ui = self.window_ui(id)?;
-            if ui.close_prompt.document().is_some()
-                || ui.go_to_line_prompt.is_some()
-                || ui.chrome_animation.about.target_visible()
-                || *ui.is_window_list_visible
-                || *ui.is_tab_list_visible
-            {
-                return None;
-            }
-            let geometry = self.tab_geometry.get(&native)?;
-            geometry
-                .contains(position)
-                .then(|| (id, native, geometry.insertion(position)))
-        });
+        let attached_native = self.editor_windows[&drag.attached].native;
+        // Capture-owner coordinates remain valid outside the client area.
+        let retained = (drag.following.is_none() && drag.capability == Capability::Desktop)
+            .then(|| {
+                let position = hovered
+                    .filter(|(native, _)| *native == attached_native)
+                    .map(|(_, position)| position)
+                    .or_else(|| (position_window == attached_native).then_some(point))?;
+                let geometry = self.tab_geometry.get(&attached_native)?;
+                geometry.retains_drag(position).then_some((
+                    drag.attached,
+                    attached_native,
+                    position,
+                ))
+            })
+            .flatten();
+        let target = hovered
+            .and_then(|(native, position)| {
+                let id = self.editor_id(native)?;
+                let ui = self.window_ui(id)?;
+                if ui.close_prompt.document().is_some()
+                    || ui.go_to_line_prompt.is_some()
+                    || ui.chrome_animation.about.target_visible()
+                    || *ui.is_window_list_visible
+                    || *ui.is_tab_list_visible
+                {
+                    return None;
+                }
+                let geometry = self.tab_geometry.get(&native)?;
+                geometry.contains(position).then(|| {
+                    (
+                        id,
+                        native,
+                        geometry.drag_insertion(position, &drag.selected, drag.grab_offset),
+                    )
+                })
+            })
+            .or_else(|| {
+                retained.map(|(id, native, position)| {
+                    drag.hovered = Some((native, position));
+                    let geometry = &self.tab_geometry[&native];
+                    (
+                        id,
+                        native,
+                        geometry.drag_insertion(position, &drag.selected, drag.grab_offset),
+                    )
+                })
+            });
         if let Some((target, native, slot)) = target {
             if drag.following != Some(target) {
+                let attaching = drag.attached != target || drag.following.is_some();
                 self.workspace
                     .transfer_tabs(drag.attached, &drag.selected, target, slot);
                 drag.attached = target;
+                if !attaching {
+                    self.tab_drag = Some(drag);
+                    return Task::none();
+                }
                 let hidden = drag
                     .following
                     .take()
@@ -238,7 +301,11 @@ impl App {
                     .chain(hide)
                     .chain(window::gain_focus(native));
             }
-        } else if drag.following.is_none() && drag.capability != Capability::SurfaceOnly {
+        } else if drag.following.is_none()
+            && drag.capability != Capability::SurfaceOnly
+            // Ignore queued samples until capture reaches the attached window.
+            && (drag.capability != Capability::Desktop || position_window == attached_native)
+        {
             let all_source = drag.attached == drag.source
                 && self.workspace.window_tab_ids(drag.source).len() == drag.selected.len();
             let (destination, open) = if all_source {
@@ -266,7 +333,12 @@ impl App {
             let native = self.editor_windows[&destination].native;
             let session = drag.id;
             self.tab_drag = Some(drag);
-            return open.chain(Task::done(Message::TabDetachedReady(session, native)));
+            return if all_source {
+                open.chain(Task::done(Message::TabDetachedReady(session, native)))
+            } else {
+                // New windows follow before show; only a reused source needs restoring.
+                open
+            };
         }
         self.tab_drag = Some(drag);
         Task::none()
@@ -279,6 +351,7 @@ impl App {
     ) -> Task<Message> {
         let Some(drag) = self.tab_drag.as_ref().filter(|d| {
             d.id == id
+                && d.following == Some(d.source)
                 && d.following
                     .and_then(|id| self.editor_windows.get(&id))
                     .is_some_and(|w| w.native == native)
@@ -305,8 +378,8 @@ impl App {
         else {
             return Task::none();
         };
-        let (hovered, latest) = (drag.hovered, drag.latest);
-        self.drag_motion(hovered, latest)
+        let (hovered, (position_window, latest)) = (drag.hovered, drag.latest);
+        self.drag_motion(hovered, position_window, latest)
     }
 
     pub(in crate::app) fn cancel_tab_drag(&mut self) -> Task<Message> {

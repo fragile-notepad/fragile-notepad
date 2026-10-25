@@ -8,6 +8,8 @@ use iced::window::tab_drag::{CancelReason, Capability, Event as DragEvent, Sessi
 use iced::{Point, Rectangle, keyboard, window};
 use std::time::{Duration, Instant};
 
+mod tab_drag;
+
 fn native(app: &App, editor: EditorWindowId) -> window::Id {
     app.editor_windows[&editor].native
 }
@@ -627,7 +629,7 @@ fn detach_attach_detach_remains_one_cancellable_gesture() {
     for pass in 0..2 {
         let _ = app.update(Message::TabDragEvent(DragEvent::Motion {
             session,
-            window: native(&app, source),
+            window: native(&app, app.workspace.owner_of(moving).unwrap()),
             position: Point::new(300.0, 180.0),
             desktop: Some(Point::new(900.0 + pass as f32 * 50.0, 500.0)),
             hovered: None,
@@ -868,12 +870,12 @@ fn geometry_changes_recalculate_insertion_without_pointer_motion() {
     assert!(app.tab_drag.is_some());
     assert_eq!(
         app.workspace.window_tab_ids(source),
-        &[second, third, moving, fourth]
+        &[second, third, fourth, moving]
     );
     let _ = app.update(Message::TabDragEvent(DragEvent::Released { session }));
     assert_eq!(
         app.workspace.window_tab_ids(source),
-        &[second, third, moving, fourth]
+        &[second, third, fourth, moving]
     );
 }
 

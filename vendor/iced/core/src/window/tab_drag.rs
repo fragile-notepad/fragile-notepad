@@ -47,7 +47,9 @@ pub enum Event {
     /// Position of the pointer. `position` is logical client coordinates of
     /// `window`; `hovered` identifies the native topmost app window and its local
     /// logical coordinates. `desktop` is physical desktop pixels on Windows/X11
-    /// and desktop points on macOS. It is unavailable on Wayland.
+    /// and desktop points on macOS. It is unavailable on Wayland. Desktop
+    /// samples use the current capture owner after attachment, even when the
+    /// pointer is outside every application window.
     Motion {
         /// Gesture identity.
         session: SessionId,

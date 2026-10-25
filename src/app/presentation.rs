@@ -38,6 +38,7 @@ impl App {
                 active_menu_path: ui.menu.path(),
                 window_menu_state: self.window_menu_state_for(window_id),
                 dragged_tab: self.tab_drag.as_ref().map(|drag| drag.pressed),
+                tab_drag_position: self.tab_drag_position(window_id),
                 hovered_drop_tab: *ui.hovered_drop_tab,
                 dirty_close_document: ui
                     .close_prompt

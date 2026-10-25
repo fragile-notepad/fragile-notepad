@@ -36,6 +36,7 @@ pub(crate) struct WorkbenchView<'a> {
     pub active_menu_path: &'a [String],
     pub window_menu_state: WindowMenuState,
     pub dragged_tab: Option<DocumentId>,
+    pub tab_drag_position: Option<super::tabs::DragPosition>,
     pub hovered_drop_tab: Option<DocumentId>,
     pub dirty_close_document: Option<&'a Document>,
     pub about_tab: Option<AboutTab>,

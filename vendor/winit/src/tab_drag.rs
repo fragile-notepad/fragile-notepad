@@ -230,6 +230,26 @@ pub fn client_position(
     Some(PhysicalPosition::new(position.x - f64::from(origin.x), position.y - f64::from(origin.y)))
 }
 
+/// Suppresses visibility transitions while following; restore when following ends.
+pub fn set_window_dragging(window: &Window, dragging: bool) {
+    #[cfg(windows_platform)]
+    {
+        use windows_sys::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED,
+        };
+        let disabled = i32::from(dragging);
+        unsafe {
+            DwmSetWindowAttribute(
+                window.window.hwnd(),
+                DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+                (&disabled as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
+    let _ = (window, dragging);
+}
+
 /// Moves a window using native desktop coordinates and a logical grab offset.
 pub fn move_window(
     window: &Window,

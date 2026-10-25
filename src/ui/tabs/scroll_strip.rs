@@ -13,6 +13,10 @@ use iced::{
 use crate::message::Message;
 use crate::ui::styles;
 
+mod drag_scroll;
+
+use drag_scroll::DragScroll;
+
 const EDGE_INSET: f32 = 2.0;
 const TOP_INSET: f32 = 1.0;
 const HIT_HEIGHT: f32 = 7.0;
@@ -26,20 +30,22 @@ const FRAME: Duration = Duration::from_millis(16);
 
 #[cfg(test)]
 pub(super) fn view<'a>(tabs: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    strip(tabs, false, false)
+    strip(tabs, false, false, None)
 }
 
 pub(super) fn view_tracked<'a>(
     tabs: impl Into<Element<'a, Message>>,
     dragging_tabs: bool,
+    drag_position: Option<super::DragPosition>,
 ) -> Element<'a, Message> {
-    strip(tabs, true, dragging_tabs)
+    strip(tabs, true, dragging_tabs, drag_position)
 }
 
 fn strip<'a>(
     tabs: impl Into<Element<'a, Message>>,
     track_tabs: bool,
     dragging_tabs: bool,
+    drag_position: Option<super::DragPosition>,
 ) -> Element<'a, Message> {
     Element::new(ScrollStrip {
         content: scrollable(tabs)
@@ -53,6 +59,7 @@ fn strip<'a>(
             .into(),
         track_tabs,
         dragging_tabs,
+        drag_position,
     })
 }
 
@@ -60,6 +67,7 @@ struct ScrollStrip<'a> {
     content: Element<'a, Message>,
     track_tabs: bool,
     dragging_tabs: bool,
+    drag_position: Option<super::DragPosition>,
 }
 
 struct State {
@@ -72,7 +80,7 @@ struct State {
     tab_geometry: Option<super::StripGeometry>,
     pressed_tab: Option<crate::core::DocumentId>,
     modifiers: keyboard::Modifiers,
-    last_drag_scroll: Option<Instant>,
+    drag_scroll: DragScroll,
 }
 
 impl Default for State {
@@ -87,7 +95,7 @@ impl Default for State {
             tab_geometry: None,
             pressed_tab: None,
             modifiers: keyboard::Modifiers::empty(),
-            last_drag_scroll: None,
+            drag_scroll: DragScroll::default(),
         }
     }
 }
@@ -333,13 +341,15 @@ impl ScrollStrip<'_> {
                     && let Some(document) = geometry.body_at(point)
                 {
                     state.pressed_tab = Some(document);
+                    state.drag_scroll.press(point.x - bounds.x, now);
                     shell.publish(Message::TabPressed(document, point, state.modifiers));
                     shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position })
-                if state.pressed_tab.is_some() || self.dragging_tabs =>
+                if state.pressed_tab.is_some() && !self.dragging_tabs =>
             {
+                // The runtime emits motion after Begin; avoid duplicate app updates.
                 shell.publish(Message::TabPointerMoved(*position));
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -349,35 +359,32 @@ impl ScrollStrip<'_> {
             }
             _ => {}
         }
-        // Keep scrolling while a held drag remains at an edge, even if the
-        // physical pointer is still. Use the native Scrollable's own state.
-        let auto_scroll = self.dragging_tabs
-            && cursor
-                .position()
-                .is_some_and(|point| geometry.contains(point))
-            && state.metrics.maximum() > 0.0;
-        let edge_direction = if auto_scroll && let Some(point) = cursor.position() {
-            let lane = 32.0_f32.min(bounds.width / 2.0);
-            if point.x < bounds.x + lane {
-                -((bounds.x + lane - point.x) / lane).clamp(0.0, 1.0)
-            } else if point.x > bounds.x + bounds.width - lane {
-                ((point.x - (bounds.x + bounds.width - lane)) / lane).clamp(0.0, 1.0)
-            } else {
-                0.0
-            }
-        } else {
-            0.0
+        let ending = matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                | Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
+                | Event::Window(window::Event::TabDrag(
+                    iced::window::tab_drag::Event::Released { .. }
+                        | iced::window::tab_drag::Event::Cancelled { .. }
+                ))
+        );
+        if ending {
+            state.pressed_tab = None;
+        }
+        let Some(drag) = self.drag_position.filter(|_| self.dragging_tabs && !ending) else {
+            state.drag_scroll.reset(state.pressed_tab.is_some());
+            return;
         };
-        let frame_elapsed = state.last_drag_scroll.map_or(0.016, |last| {
-            now.saturating_duration_since(last).as_secs_f32().min(0.05)
-        });
-        state.last_drag_scroll = (edge_direction != 0.0).then_some(now);
-        if edge_direction != 0.0 {
-            let offset = (state.metrics.offset + edge_direction * 480.0 * frame_elapsed)
-                .clamp(0.0, state.metrics.maximum());
+        let redraw = matches!(event, Event::Window(window::Event::RedrawRequested(_)));
+        let delta = state.drag_scroll.delta(drag, bounds.width, now, redraw);
+        if delta != 0.0 && state.metrics.maximum() > 0.0 {
+            let offset = (state.metrics.offset + delta).clamp(0.0, state.metrics.maximum());
             if offset != state.metrics.offset {
                 self.sync_scroll(tree, layout.child(0), renderer, Some(offset));
-                shell.request_redraw_at(now + FRAME);
+                shell.request_redraw();
             }
         }
     }
@@ -523,7 +530,7 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
             }
         }
         let dragging = state.grabbed_at.is_some();
-        let reveal = geometry.is_some() && (over_strip || dragging);
+        let reveal = geometry.is_some() && (over_strip || dragging || self.drag_position.is_some());
         let emphasis = dragging
             || (over_track && geometry.is_some_and(|g| cursor.is_over(g.thumb_hit_bounds())));
         let previous_values = (state.reveal.value, state.emphasis.value);
@@ -650,39 +657,6 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
             child_cursor,
             viewport,
         );
-        if self.dragging_tabs
-            && let Some(geometry) = state.tab_geometry.as_ref()
-            && let Some(point) = cursor.position()
-            && geometry.contains(point)
-            && let Some(clip) = geometry.bounds.intersection(viewport)
-        {
-            let index = geometry.insertion(point);
-            let x = geometry
-                .tabs
-                .get(index)
-                .map(|(_, bounds)| bounds.x)
-                .or_else(|| {
-                    geometry
-                        .tabs
-                        .last()
-                        .map(|(_, bounds)| bounds.x + bounds.width)
-                })
-                .unwrap_or(geometry.bounds.x);
-            renderer.with_layer(clip, |renderer| {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: x - 1.0,
-                            y: geometry.bounds.y + 2.0,
-                            width: 2.0,
-                            height: (geometry.bounds.height - 4.0).max(0.0),
-                        },
-                        ..Default::default()
-                    },
-                    styles::accent_color(theme),
-                );
-            });
-        }
         if state.reveal.value <= 0.0 {
             return;
         }

@@ -28,7 +28,11 @@ const TAB_LABEL_CHAR_WIDTH: f32 = if cfg!(target_os = "macos") { 8.0 } else { 7.
 const TAB_TEXT_SIZE: u32 = 13;
 const TOOLTIP_TEXT_SIZE: u32 = 13;
 
+mod animated_row;
+mod drag;
 mod scroll_strip;
+
+pub(crate) use drag::DragPosition;
 
 /// Tab rectangles in client coordinates, including tabs clipped by scrolling.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,29 +116,60 @@ pub fn view_for_window(
     dragged_tab: Option<DocumentId>,
     hovered_drop_tab: Option<DocumentId>,
 ) -> Element<'_, Message> {
+    view_with_drag(
+        workspace,
+        editor_window,
+        dragged_tab,
+        hovered_drop_tab,
+        None,
+    )
+}
+
+pub(crate) fn view_with_drag(
+    workspace: &Workspace,
+    editor_window: EditorWindowId,
+    dragged_tab: Option<DocumentId>,
+    hovered_drop_tab: Option<DocumentId>,
+    drag_position: Option<DragPosition>,
+) -> Element<'_, Message> {
     let window = workspace.window(editor_window);
+    let dragging_here = dragged_tab.is_some_and(|id| workspace.owner_of(id) == Some(editor_window));
     let tabs = workspace
         .window_documents(editor_window)
-        .fold(row![].spacing(0).align_y(Center), |tabs, document| {
+        .map(|document| {
             let selected = window.is_some_and(|window| window.selected_tabs.contains(&document.id));
-            tabs.push(tab(
-                document,
-                window.and_then(|window| window.active_document_id) == Some(document.id),
-                selected,
-                if selected && dragged_tab.is_some() {
-                    DragVisual::Dragged
-                } else {
-                    drag_visual(workspace, document, dragged_tab, hovered_drop_tab)
-                },
-            ))
+            (
+                document.id,
+                tab(
+                    document,
+                    window.and_then(|window| window.active_document_id) == Some(document.id),
+                    selected,
+                    if selected && dragging_here {
+                        DragVisual::Dragged
+                    } else {
+                        drag_visual(workspace, document, dragged_tab, hovered_drop_tab)
+                    },
+                ),
+            )
         })
-        .push(new_file_button());
+        .collect();
+    let tabs = animated_row::view(
+        tabs,
+        new_file_button(),
+        window.map(|w| w.selected_tabs.clone()).unwrap_or_default(),
+        dragged_tab.is_some(),
+        drag_position,
+    );
 
-    container(scroll_strip::view_tracked(tabs, dragged_tab.is_some()))
-        .height(TAB_HEIGHT + 1.0)
-        .width(Fill)
-        .style(styles::tab_strip)
-        .into()
+    container(scroll_strip::view_tracked(
+        tabs,
+        dragged_tab.is_some(),
+        drag_position,
+    ))
+    .height(TAB_HEIGHT + 1.0)
+    .width(Fill)
+    .style(styles::tab_strip)
+    .into()
 }
 
 /// Measure tab geometry without exposing the scrolling widget's state.
@@ -199,7 +234,7 @@ fn tab(
     )
     .padding([3, 7])
     .height(23)
-    .style(styles::tab_title_area(is_active, drag_visual.is_dragged()));
+    .style(styles::tab_title_area(is_active));
 
     let pin_button = button(centered_button_content(shortcut::icon_with_color(
         if document.is_pinned {

@@ -1,4 +1,4 @@
-//! Shared policy for application integration tests that need a GPU adapter.
+//! Shared policy for application tests that need a GPU adapter.
 
 const REQUIRE_GPU: &str = "FRAGILE_REQUIRE_GPU_TESTS";
 

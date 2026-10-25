@@ -331,10 +331,34 @@ fn neighboring_labels_and_icons_cannot_paint_above_the_held_tab_on_software() {
 #[test]
 fn neighboring_labels_and_icons_cannot_paint_above_the_held_tab_on_vulkan() {
     let _guard = crate::font_system_test_guard();
-    let mut renderer = futures::executor::block_on(<iced::Renderer as Headless>::new(
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    let adapter = match futures::executor::block_on(instance.request_adapter(&Default::default())) {
+        Ok(adapter) => adapter,
+        Err(error) => {
+            crate::gpu_validation::unavailable(&format!("tab occlusion: {error}"));
+            return;
+        }
+    };
+    let (device, queue) = futures::executor::block_on(adapter.request_device(&Default::default()))
+        .expect("create Vulkan tab occlusion test device");
+    let engine = iced_wgpu::Engine::new(
+        &adapter,
+        device,
+        queue,
+        if iced_wgpu::graphics::color::GAMMA_CORRECTION {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        },
+        Some(iced_wgpu::graphics::Antialiasing::MSAAx4),
+        iced_wgpu::graphics::Shell::headless(),
+    );
+    let mut renderer = iced::Renderer::Primary(iced_wgpu::Renderer::new(
+        engine,
         renderer::Settings::default(),
-        Some("wgpu"),
-    ))
-    .expect("Vulkan renderer for tab occlusion regression");
+    ));
     check_held_tab_occlusion(&mut renderer);
 }

@@ -12,6 +12,10 @@ pub mod settings_dialog;
 pub mod startup;
 pub mod ui;
 
+#[cfg(all(test, feature = "hybrid-rendering"))]
+#[path = "../tests/support/gpu_validation.rs"]
+pub(crate) mod gpu_validation;
+
 /// Share this guard between tests that load fonts or assert exact cache reuse.
 #[cfg(test)]
 pub(crate) fn font_system_test_guard() -> std::sync::MutexGuard<'static, ()> {

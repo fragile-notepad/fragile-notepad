@@ -1,11 +1,70 @@
 //! Disk I/O and encoding helpers.
 
 use super::types::{FileError, FileOpenResult, FileSaveResult, OpenedFile};
-use crate::core::{FileRevision, TextEncoding, decode_bytes, encode_text};
+use crate::core::{DiskState, DocumentId, FileRevision, TextEncoding, decode_bytes, encode_text};
 use tokio::io::AsyncReadExt;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    length: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileCheck {
+    pub check_id: u64,
+    pub document_id: DocumentId,
+    pub path: PathBuf,
+    pub expected: FileRevision,
+    pub stamp: Option<FileStamp>,
+    /// None means the file's size and modification time have not changed.
+    pub state: Option<DiskState>,
+}
+
+/// Check metadata first during polling; callers omit the stamp to compare bytes.
+pub async fn check_file(mut check: FileCheck) -> FileCheck {
+    let previous = check.stamp.take();
+    check.state = Some(match tokio::fs::metadata(&check.path).await {
+        Ok(metadata) if metadata.is_file() => {
+            let stamp = FileStamp {
+                length: metadata.len(),
+                modified: metadata.modified().ok(),
+            };
+            check.stamp = Some(stamp);
+            if stamp.modified.is_some() && previous == Some(stamp) {
+                check.state = None;
+                return check;
+            }
+            match disk_revision(&check.path).await {
+                Ok(current) if current == check.expected => DiskState::Current,
+                Ok(_) => DiskState::Changed,
+                Err(error) => disk_error_state(error.kind()),
+            }
+        }
+        Ok(_) => DiskState::Unreadable(std::io::ErrorKind::IsADirectory),
+        Err(error) => disk_error_state(error.kind()),
+    });
+    // Retry unreadable files even if their metadata stays the same.
+    if matches!(
+        check.state,
+        Some(DiskState::Unreadable(_) | DiskState::Missing)
+    ) {
+        check.stamp = None;
+    }
+    check
+}
+
+fn disk_error_state(kind: std::io::ErrorKind) -> DiskState {
+    if kind == std::io::ErrorKind::NotFound {
+        DiskState::Missing
+    } else {
+        DiskState::Unreadable(kind)
+    }
+}
 
 pub async fn load_file(path: PathBuf) -> FileOpenResult {
     let bytes = tokio::fs::read(&path)
@@ -126,6 +185,66 @@ mod tests {
             .unwrap();
             assert_eq!(fs::read(&file.0).unwrap(), b"updated again");
             file.only_original_remains();
+        });
+    }
+
+    #[test]
+    fn forced_checks_compare_bytes_even_when_size_and_time_are_unchanged() {
+        let file = TestFile::new();
+        run(async {
+            let original = FileCheck {
+                check_id: 1,
+                document_id: DocumentId::new(1),
+                path: file.0.clone(),
+                expected: FileRevision::from_bytes(b"original"),
+                stamp: None,
+                state: None,
+            };
+            let checked = check_file(original).await;
+            assert_eq!(checked.state, Some(DiskState::Current));
+            let modified = fs::metadata(&file.0).unwrap().modified().unwrap();
+            fs::write(&file.0, b"external").unwrap();
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&file.0)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+            let cached = check_file(checked).await;
+            assert_eq!(cached.state, None);
+            let forced = check_file(FileCheck {
+                stamp: None,
+                ..cached
+            })
+            .await;
+            assert_eq!(forced.state, Some(DiskState::Changed));
+            assert_eq!(fs::read(&file.0).unwrap(), b"external");
+        });
+    }
+
+    #[test]
+    fn a_directory_replacing_a_file_is_reported_and_checked_again_afterwards() {
+        let file = TestFile::new();
+        fs::remove_file(&file.0).unwrap();
+        fs::create_dir(&file.0).unwrap();
+        run(async {
+            let check = FileCheck {
+                check_id: 1,
+                document_id: DocumentId::new(1),
+                path: file.0.clone(),
+                expected: FileRevision::from_bytes(b"original"),
+                stamp: None,
+                state: None,
+            };
+            let unreadable = check_file(check).await;
+            assert_eq!(
+                unreadable.state,
+                Some(DiskState::Unreadable(std::io::ErrorKind::IsADirectory))
+            );
+            assert!(unreadable.stamp.is_none());
+            fs::remove_dir(&file.0).unwrap();
+            fs::write(&file.0, b"original").unwrap();
+            assert_eq!(check_file(unreadable).await.state, Some(DiskState::Current));
         });
     }
 

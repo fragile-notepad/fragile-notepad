@@ -9,6 +9,7 @@ pub enum HeroIcon {
     ArrowTurnDownRight,
     ChevronDown,
     ChevronRight,
+    ExclamationTriangle,
     Minus,
     Plus,
     QuestionMarkCircle,
@@ -19,6 +20,7 @@ pub enum HeroIcon {
 pub enum IconTone {
     Text,
     Muted,
+    Warning,
 }
 
 pub fn icon<Message: 'static>(
@@ -40,6 +42,7 @@ pub fn icon_with_opacity<Message: 'static>(
         IconTone::Muted => {
             |theme: &iced::Theme| crate::ui::styles::shortcut_text_color(theme).scale_alpha(0.72)
         }
+        IconTone::Warning => |theme: &iced::Theme| theme.palette().warning.base.color,
     };
     vector::icon(asset(icon), size, color, opacity.clamp(0.0, 1.0))
 }
@@ -61,6 +64,7 @@ fn asset(icon: HeroIcon) -> &'static VectorIcon {
         HeroIcon::ArrowTurnDownRight => &compiled::HEROICONS_ARROW_TURN_DOWN_RIGHT,
         HeroIcon::ChevronDown => &compiled::HEROICONS_CHEVRON_DOWN,
         HeroIcon::ChevronRight => &compiled::HEROICONS_CHEVRON_RIGHT,
+        HeroIcon::ExclamationTriangle => &compiled::HEROICONS_EXCLAMATION_TRIANGLE,
         HeroIcon::Minus => &compiled::HEROICONS_MINUS,
         HeroIcon::Plus => &compiled::HEROICONS_PLUS,
         HeroIcon::QuestionMarkCircle => &compiled::HEROICONS_QUESTION_MARK_CIRCLE,

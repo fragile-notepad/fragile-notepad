@@ -530,7 +530,10 @@ fn failed_load_sets_status_without_leaving_document_indexing() {
 
     let document = app.workspace.document(document_id).expect("document");
     assert!(!document.is_loading_or_indexing());
-    assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Open failed: file or folder not found")
+    );
     assert!(!app.files.is_loading());
 }
 
@@ -1098,7 +1101,10 @@ fn file_open_error_sets_visible_status() {
         crate::services::types::FileError::Io(std::io::ErrorKind::PermissionDenied),
     )));
 
-    assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Open failed: permission denied")
+    );
     assert!(!app.files.is_loading());
 }
 

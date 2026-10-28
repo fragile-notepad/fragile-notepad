@@ -12,7 +12,7 @@ pub mod workspace;
 
 pub use close::DirtyCloseDecision;
 pub use document::{
-    Document, DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState,
+    DiskState, Document, DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState,
     MAX_FULL_DOCUMENT_ANALYSIS_BYTES,
 };
 pub use encoding::{DecodedText, EncodingError, TextEncoding, decode_bytes, encode_text};

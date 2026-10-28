@@ -113,7 +113,9 @@ impl App {
                 self.file_status = Some("Save or close unsaved tabs before exiting; the unreadable previous session will be preserved.".into());
                 return Task::none();
             }
-            return self.exit_after_settings();
+            // Recovery cannot be written, so saved tabs still need a disk
+            // check before their only in-memory copy can be discarded.
+            return self.close_documents_for_exit();
         }
         self.lifecycle.begin_shutdown();
         let settings = (!self.settings_persistence.read_failed())

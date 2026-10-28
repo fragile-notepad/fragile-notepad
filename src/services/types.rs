@@ -105,6 +105,15 @@ impl FileError {
     pub fn summary(&self) -> &'static str {
         match self {
             Self::DialogClosed => "dialog closed",
+            Self::Io(io::ErrorKind::NotFound) => "file or folder not found",
+            Self::Io(io::ErrorKind::PermissionDenied) => "permission denied",
+            Self::Io(io::ErrorKind::StorageFull) => "disk full",
+            Self::Io(io::ErrorKind::ReadOnlyFilesystem) => "file system is read-only",
+            Self::Io(io::ErrorKind::IsADirectory) => "the file path points to a folder",
+            Self::Io(io::ErrorKind::NotADirectory) => {
+                "a folder in the file path is not a directory"
+            }
+            Self::Io(io::ErrorKind::FileTooLarge) => "file is too large for the file system",
             Self::Io(_) => "I/O error",
             Self::Encoding(_) => "encoding error",
             Self::FileChanged => {

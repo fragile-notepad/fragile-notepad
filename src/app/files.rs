@@ -31,15 +31,31 @@ pub(super) struct FileOperations {
     pending_close_documents: VecDeque<DocumentId>,
     close_goal: CloseGoal,
     load_handles: HashMap<DocumentId, iced::task::Handle>,
+    disk_check_running: bool,
+    disk_check_again: bool,
+    next_disk_check: u64,
+    disk_check_ids: HashMap<DocumentId, u64>,
+    disk_stamps: HashMap<DocumentId, services::file_system::FileCheck>,
+    pending_disk_close: Option<DocumentId>,
 }
 
 impl FileOperations {
+    pub(super) fn is_reloading(&self, id: DocumentId) -> bool {
+        self.pending_reloads.contains_key(&id)
+    }
+
     fn forget_document(&mut self, id: DocumentId) {
         if let Some(handle) = self.load_handles.remove(&id) {
             handle.abort();
         }
         self.pending_reloads.remove(&id);
         self.pending_auto_saves.retain(|pending| *pending != id);
+        self.forget_disk_check(id);
+    }
+
+    fn forget_disk_check(&mut self, id: DocumentId) {
+        self.disk_stamps.remove(&id);
+        self.disk_check_ids.remove(&id);
     }
 }
 
@@ -82,6 +98,7 @@ impl FileOperations {
 }
 
 mod closing;
+mod disk;
 mod loading;
 mod saving;
 mod tabs;
@@ -225,6 +242,9 @@ impl App {
             FileMessage::FileLoadProgress(progress) => self.load_progress(progress),
             FileMessage::FileLoadChunk(chunk) => self.load_chunk(chunk),
             FileMessage::FileLoadFinished(result) => self.load_finished(result),
+            FileMessage::CheckDiskFiles => self.poll_disk_files(),
+            FileMessage::DiskFilesChecked(checks) => self.disk_files_checked(checks),
+            FileMessage::FileCheckedForClose(check) => self.file_checked_for_close(check),
             FileMessage::SaveFile => {
                 self.menu.close();
                 self.file_status = None;

@@ -79,7 +79,10 @@ fn lfcr_file_sessions_validate_and_restore_unsaved_edits() {
         clean.documents[clean.active_index].line_ending.as_deref(),
         Some("\n\r")
     );
-    assert!(clean.documents[clean.active_index].text.is_none());
+    assert_eq!(
+        clean.documents[clean.active_index].text.as_deref(),
+        Some("one\n\rtwo")
+    );
 
     let id = app.workspace.active_document_id();
     let _ = app.update(Message::EditorAction(

@@ -17,6 +17,7 @@ impl App {
                 .filter_map(|window| window.ui.as_ref())
                 .any(|ui| ui.close_prompt.document().is_some())
             || self.files.pending_close_after_save.is_some()
+            || self.files.pending_disk_close.is_some()
             || !self.files.pending_close_documents.is_empty()
     }
 
@@ -42,7 +43,15 @@ impl App {
             }
             self.files.pending_close_documents.pop_front();
         }
-        self.close_request_in_operation(document_id)
+        let close = self.close_request_in_operation(document_id);
+        if resuming_load
+            && self.close_prompt.document().is_none()
+            && self.files.pending_disk_close.is_none()
+        {
+            Task::batch([close, self.continue_close()])
+        } else {
+            close
+        }
     }
 
     fn close_request_in_operation(&mut self, document_id: DocumentId) -> Task<Message> {
@@ -52,9 +61,12 @@ impl App {
         if self.close_prompt.is_closing() {
             return Task::none();
         }
-        if self.workspace.document(document_id).is_some_and(|doc| {
-            matches!(doc.load_state, DocumentLoadState::Deferred { .. }) && doc.is_dirty
-        }) {
+        self.cancel_reload_for_close(document_id);
+        if self
+            .workspace
+            .document(document_id)
+            .is_some_and(|doc| matches!(doc.load_state, DocumentLoadState::Deferred { .. }))
+        {
             let load = self.activate_document(document_id);
             if self
                 .workspace
@@ -67,12 +79,33 @@ impl App {
             self.files.pending_close_documents.push_front(document_id);
             return load.chain(Task::done(Message::ResumeDocumentClose(document_id)));
         }
+        if let Some(document) = self.workspace.document(document_id)
+            && !document.is_dirty
+            && document.has_complete_text_index()
+            && let Some(check) = super::disk::file_check(document)
+        {
+            return self.check_disk_before_close(check);
+        }
+        self.close_checked_document(document_id)
+    }
+
+    pub(super) fn close_checked_document(&mut self, document_id: DocumentId) -> Task<Message> {
         let Some(document) = self.workspace.document(document_id) else {
             return Task::none();
         };
 
         if !document.is_dirty {
+            if self.files.close_goal == CloseGoal::ExitApp {
+                // Keep clean tabs if a later unsaved tab cancels application exit.
+                return Task::none();
+            }
             return self.close_now(document_id);
+        }
+
+        if self.files.close_goal == CloseGoal::ExitApp && self.session.read_failed() {
+            self.clear_close();
+            self.files.close_goal = CloseGoal::KeepOpen;
+            return self.persist_before_exit();
         }
 
         self.go_to_line_prompt = None;
@@ -164,16 +197,16 @@ impl App {
         let mut tasks = Vec::new();
 
         while let Some(document_id) = self.files.pending_close_documents.pop_front() {
-            let Some(document) = self.workspace.document(document_id) else {
+            if self.workspace.document(document_id).is_none() {
                 continue;
-            };
-
-            if document.is_dirty {
-                tasks.push(self.close_request_in_operation(document_id));
+            }
+            tasks.push(self.close_request_in_operation(document_id));
+            if self.close_prompt.document().is_some()
+                || self.files.pending_disk_close.is_some()
+                || self.files.pending_close_documents.front() == Some(&document_id)
+            {
                 return Task::batch(tasks);
             }
-
-            tasks.push(self.close_now(document_id));
         }
 
         self.clear_close();
@@ -197,24 +230,28 @@ impl App {
             return Task::batch([cancel, self.persist_before_exit()]);
         }
 
-        let dirty_documents = self
+        self.close_documents_for_exit()
+    }
+
+    pub(in crate::app) fn close_documents_for_exit(&mut self) -> Task<Message> {
+        let documents = self
             .workspace
             .documents()
             .iter()
-            .filter(|document| document.is_dirty)
             .map(|document| document.id)
             .collect::<Vec<_>>();
 
-        if dirty_documents.is_empty() {
+        if documents.is_empty() {
             return self.exit_after_settings();
         }
 
         self.files.close_goal = CloseGoal::ExitApp;
-        self.close_documents(dirty_documents)
+        self.close_documents(documents)
     }
 
     pub(super) fn clear_close(&mut self) {
         self.files.pending_close_documents.clear();
+        self.files.pending_disk_close = None;
     }
 
     pub(in crate::app) fn should_exit(&self) -> bool {

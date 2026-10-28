@@ -20,12 +20,14 @@ impl App {
                 self.file_status = None;
                 let opened_path = opened.path.clone();
                 if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
+                    self.files.forget_disk_check(document_id);
                     let auto_save = self.auto_save_before_switch(Some(document_id));
                     if let Some(document) = self.workspace.document_mut(document_id)
                         && let Some(generation) = document.load_generation()
                     {
                         document.complete_loading(generation, opened.contents.as_ref().clone());
                         document.disk_revision = Some(opened.disk_revision);
+                        document.disk_state = crate::core::DiskState::Current;
                     }
                     if let Some(owner) = self.workspace.owner_of(document_id) {
                         self.switch_editor(owner);
@@ -176,6 +178,7 @@ impl App {
         }
 
         let generation = DocumentLoadGeneration::next();
+        self.files.forget_disk_check(document_id);
         if let Some(document) = self.workspace.document_mut(document_id) {
             document.load_state = DocumentLoadState::Loading {
                 generation,
@@ -292,6 +295,8 @@ impl App {
                     return Task::none();
                 }
                 document.disk_revision = Some(finished.disk_revision);
+                document.disk_state = crate::core::DiskState::Current;
+                self.files.forget_disk_check(finished.document_id);
                 document.set_had_decoding_errors(finished.had_errors);
 
                 self.file_status = finished.had_errors.then(|| {
@@ -320,6 +325,15 @@ impl App {
             {
                 document.load_state = DocumentLoadState::Complete;
                 document.index_state = DocumentIndexState::Complete;
+                document.disk_state = match failure.error {
+                    crate::services::types::FileError::Io(std::io::ErrorKind::NotFound) => {
+                        crate::core::DiskState::Missing
+                    }
+                    crate::services::types::FileError::Io(kind) => {
+                        crate::core::DiskState::Unreadable(kind)
+                    }
+                    _ => crate::core::DiskState::Changed,
+                };
             }
             self.file_status = Some(format!("Open failed: {}", failure.error.summary()));
         }
@@ -329,6 +343,21 @@ impl App {
 
     pub(super) fn refresh_file_loading_state(&mut self) {
         self.files.refresh_loading_state(&self.workspace);
+    }
+
+    pub(super) fn cancel_reload_for_close(&mut self, id: DocumentId) {
+        if self.files.pending_reloads.remove(&id).is_none() {
+            return;
+        }
+        if let Some(handle) = self.files.load_handles.remove(&id) {
+            handle.abort();
+        }
+        // Reload chunks were staged separately; the live buffer is still complete.
+        if let Some(document) = self.workspace.document_mut(id) {
+            document.load_state = DocumentLoadState::Complete;
+            document.index_state = DocumentIndexState::Complete;
+        }
+        self.refresh_file_loading_state();
     }
 
     pub(super) fn loading_document_id_for_path(

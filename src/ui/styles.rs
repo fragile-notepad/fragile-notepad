@@ -598,6 +598,21 @@ pub fn utility_notice(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn file_notice(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(
+            palette
+                .chrome_high
+                .mix(theme.palette().warning.base.color, 0.04)
+                .into(),
+        ),
+        text_color: Some(palette.text),
+        border: hairline(palette.border_soft),
+        ..Default::default()
+    }
+}
+
 pub fn utility_rule(theme: &Theme) -> iced::widget::rule::Style {
     iced::widget::rule::Style {
         color: VisualPalette::from_theme(theme).border_soft,

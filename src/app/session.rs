@@ -35,7 +35,9 @@ impl SessionState {
                 .line_ending
                 .as_deref()
                 .and_then(crate::core::document::detect_line_ending);
-            if entry.is_dirty {
+            // Older recovery text may have no original disk revision. Until
+            // the user saves it elsewhere, closing must require a choice.
+            if entry.is_dirty || (entry.path.is_some() && entry.disk_revision.is_none()) {
                 document.mark_dirty();
             }
         }
@@ -296,7 +298,7 @@ impl App {
             return Task::none();
         };
         let DocumentLoadState::Deferred { generation } = document.load_state else {
-            return Task::none();
+            return self.check_disk_files();
         };
         document.load_state = DocumentLoadState::Loading {
             generation,
@@ -313,7 +315,7 @@ impl App {
             // and save metadata before callers such as Save All use the tab.
             // View metadata still waits for settings and layout reactions.
             SessionState::apply_save_metadata(document, entry);
-            return Task::none();
+            return self.check_disk_files();
         }
         let Some(path) = document.path.clone() else {
             document.complete_streaming_load(generation, crate::core::TextEncoding::Utf8);
@@ -404,9 +406,12 @@ impl App {
                     return CapturedDocument::Deferred(pending.clone(), document.is_pinned);
                 }
                 let selection = document.main_selection();
-                let recovery = ((document.has_complete_text_index()
-                    || matches!(document.load_state, DocumentLoadState::Failed { .. }))
-                    && (document.path.is_none() || document.is_dirty))
+                // Saved files also need recovery text: their disk copy may be
+                // deleted or replaced before the next session starts.
+                let recovery = (document.has_complete_text_index()
+                    || self.files.is_reloading(document.id)
+                    || (matches!(document.load_state, DocumentLoadState::Failed { .. })
+                        && (document.path.is_none() || document.is_dirty)))
                     .then(|| document.buffer.snapshot_rope());
                 CapturedDocument::Live(
                     Box::new(SessionDocument {

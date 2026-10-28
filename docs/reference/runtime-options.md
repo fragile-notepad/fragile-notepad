@@ -33,6 +33,12 @@ Change preferences through **Settings > Preferences...**. Settings use
 `settings.xml`; session recovery uses `session.json` in the same configuration
 directory.
 
+Sessions keep the text of loaded tabs, including saved files. If a file is
+deleted, replaced, or becomes unreadable, the editor keeps its copy, marks the
+tab as unsaved, and shows a notice. Use **Save As** to keep that text in another
+file. Older sessions that stored only a file path cannot recover a deleted
+file's text.
+
 Recovery text is stored in `session.chunks/` in chunks of up to 8 MiB.
 The `session.json` manifest allows 16 MiB and 100,000 chunk references;
 legacy inline sessions allow 256 MiB.

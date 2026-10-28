@@ -53,7 +53,7 @@ where
         &self,
         _tree: &Tree,
         renderer: &mut Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
@@ -68,6 +68,7 @@ where
         let color = match self.tone {
             IconTone::Text => style.text_color,
             IconTone::Muted => style.text_color.scale_alpha(0.68),
+            IconTone::Warning => theme.palette().warning.base.color,
         };
         let stroke = 1.8 * scale;
         let point = |x: f32, y: f32| Point::new(origin.x + x * scale, origin.y + y * scale);

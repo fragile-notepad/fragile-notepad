@@ -2,12 +2,15 @@
 
 mod background;
 mod tab_context_menu;
+#[cfg(test)]
+mod tests;
 
-use iced::widget::{Column, container, row, space, stack};
+use iced::widget::{Column, button, container, row, space, stack, text, tooltip};
 use iced::{Element, Fill, Length};
 
-use crate::core::FindState;
+use crate::core::{DiskState, Document, FindState};
 use crate::message::Message;
+use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 
 use super::view_model::{ChromeAnimationInfo, WorkbenchView};
 use super::{
@@ -97,6 +100,7 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
             hovered_drop_tab,
             tab_drag_position,
         ),
+        disk_notice_slot(active_document),
         find_panel_slot(
             find,
             is_find_visible,
@@ -243,6 +247,57 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
     } else {
         with_window_list
     }
+}
+
+fn disk_notice_slot(document: Option<&Document>) -> Element<'_, Message> {
+    let notice = document.and_then(|document| {
+        let label = match document.disk_state {
+            DiskState::Current => return None,
+            DiskState::Missing => "File no longer on disk. You can keep editing.",
+            DiskState::Changed => "File changed on disk. You can keep editing this copy.",
+            DiskState::Unreadable(std::io::ErrorKind::PermissionDenied) => {
+                "File access denied. You can keep editing."
+            }
+            DiskState::Unreadable(_) => "File unavailable on disk. You can keep editing.",
+        };
+        Some((document, label))
+    });
+    let Some((document, label)) = notice else {
+        // Keep the editor's widget position stable when the notice appears.
+        return space::vertical().height(0.0).width(Fill).into();
+    };
+    let path = document
+        .path
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| document.title());
+    let details = format!("{path}\nSave As keeps this copy in another file.");
+
+    container(
+        row![
+            hero::icon(HeroIcon::ExclamationTriangle, 16, IconTone::Warning),
+            tooltip(
+                text(label).size(13).width(Fill),
+                container(text(details).size(12))
+                    .padding([8, 10])
+                    .max_width(480)
+                    .style(styles::utility_card),
+                tooltip::Position::Bottom,
+            )
+            .delay(std::time::Duration::from_millis(450)),
+            button(super::controls::centered_button_label("Save As", 12))
+                .padding([3, 9])
+                .style(styles::icon_button)
+                .on_press(Message::SaveFileAs),
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .width(Fill),
+    )
+    .padding([4, 10])
+    .width(Fill)
+    .style(styles::file_notice)
+    .into()
 }
 
 fn find_panel_slot(

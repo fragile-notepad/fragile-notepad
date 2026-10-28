@@ -15,6 +15,15 @@ impl App {
         } else {
             Subscription::none()
         };
+        let disk_checks = if self.workspace.documents().iter().any(|document| {
+            document.path.is_some()
+                && document.disk_revision.is_some()
+                && document.has_complete_text_index()
+        }) {
+            iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::CheckDiskFiles)
+        } else {
+            Subscription::none()
+        };
 
         Subscription::batch([
             single_instance_subscription(),
@@ -39,6 +48,7 @@ impl App {
             window::close_requests().map(Message::WindowCloseRequested),
             window::close_events().map(Message::WindowClosed),
             window::tab_drag::events().map(Message::TabDragEvent),
+            disk_checks,
             chrome_animation,
         ])
     }

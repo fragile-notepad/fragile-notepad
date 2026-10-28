@@ -180,6 +180,7 @@ impl App {
             }
             Message::DocumentAnalyzed(value) => Some(value.document_id),
             Message::OutlineParseCompleted(value) => Some(value.document_id),
+            Message::FileCheckedForClose(value) => Some(value.document_id),
             _ => None,
         };
         document

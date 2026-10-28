@@ -86,12 +86,23 @@ pub enum DocumentIndexState {
     Pending { generation: DocumentLoadGeneration },
 }
 
+/// Last observed state of the file relative to its last loaded or saved bytes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum DiskState {
+    #[default]
+    Current,
+    Missing,
+    Changed,
+    Unreadable(std::io::ErrorKind),
+}
+
 #[derive(Debug, Clone)]
 pub struct Document {
     pub id: DocumentId,
     pub path: Option<PathBuf>,
     /// Original disk bytes, retained even when recovery text or edits differ.
     pub disk_revision: Option<super::FileRevision>,
+    pub disk_state: DiskState,
     pub buffer: EditorBuffer,
     pub selection: EditorSelection,
     selection_set: SelectionSet,
@@ -234,6 +245,7 @@ impl Document {
             id,
             path,
             disk_revision: None,
+            disk_state: DiskState::Current,
             buffer,
             selection,
             selection_set,
@@ -298,6 +310,7 @@ impl Document {
         }
         if self.path.as_ref() != Some(&path) {
             self.disk_revision = None;
+            self.disk_state = DiskState::Current;
             self.metadata_revision = self.metadata_revision.wrapping_add(1);
         }
         self.path = Some(path);

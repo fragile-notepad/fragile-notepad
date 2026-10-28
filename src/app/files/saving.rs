@@ -10,6 +10,22 @@ use crate::services::{file_dialogs, file_system};
 use iced::{Task, highlighter, window};
 use std::sync::Arc;
 
+fn preserve_after_save_error(document: &mut Document, error: &FileError) {
+    if matches!(
+        error,
+        FileError::FileChanged | FileError::UnknownFileRevision | FileError::Io(_)
+    ) {
+        // A failed write cannot establish that even previously saved text is
+        // still available on disk. Keep it in recovery and require a close choice.
+        document.mark_dirty();
+    }
+    if matches!(error, FileError::FileChanged)
+        && document.disk_state != crate::core::DiskState::Missing
+    {
+        document.disk_state = crate::core::DiskState::Changed;
+    }
+}
+
 fn save_dialog_options(document: &Document) -> SaveFileDialogOptions {
     let mut options = SaveFileDialogOptions {
         original_file: document
@@ -139,6 +155,8 @@ impl App {
             {
                 return load;
             }
+            let save = self.save_copy_active();
+            return Task::batch([load, save]);
         }
         if self.files.pending_save.is_some() {
             return Task::none();
@@ -240,6 +258,8 @@ impl App {
             {
                 return load;
             }
+            let save = self.save_one(document_id, force_save_as);
+            return Task::batch([load, save]);
         }
         if self.files.pending_save.is_some() {
             return Task::none();
@@ -324,12 +344,14 @@ impl App {
         match result {
             Ok(path) => {
                 self.file_status = None;
+                self.files.forget_disk_check(request.document_id);
                 let saved_path = path.clone();
                 if let Some(document) = self.workspace.document_mut(request.document_id) {
                     document.set_path(path);
                     document.set_had_decoding_errors(false);
                     document.disk_revision =
                         Some(crate::core::FileRevision::from_bytes(&request.snapshot));
+                    document.disk_state = crate::core::DiskState::Current;
                     let saved_snapshot_is_current = document
                         .bytes_for_save()
                         .is_ok_and(|bytes| bytes == request.snapshot.as_ref().as_slice());
@@ -343,6 +365,10 @@ impl App {
                 tasks.push(self.record_open_history(saved_path));
             }
             Err(error) => {
+                self.files.forget_disk_check(request.document_id);
+                if let Some(document) = self.workspace.document_mut(request.document_id) {
+                    preserve_after_save_error(document, &error);
+                }
                 self.file_status = Some(format!("Save failed: {}", error.summary()));
             }
         }
@@ -411,10 +437,20 @@ impl App {
                 {
                     document.disk_revision =
                         Some(crate::core::FileRevision::from_bytes(&request.snapshot));
+                    document.disk_state = crate::core::DiskState::Current;
+                    self.files.forget_disk_check(request.document_id);
                 }
                 self.file_status = Some(format!("Saved copy: {}", path.display()));
             }
             Err(error) => {
+                self.files.forget_disk_check(request.document_id);
+                if matches!(
+                    error,
+                    FileError::FileChanged | FileError::UnknownFileRevision
+                ) && let Some(document) = self.workspace.document_mut(request.document_id)
+                {
+                    preserve_after_save_error(document, &error);
+                }
                 self.file_status = Some(format!("Save copy failed: {}", error.summary()));
             }
         }
@@ -424,6 +460,10 @@ impl App {
 
     pub(super) fn save_failed(&mut self, document_id: DocumentId, error: FileError) {
         self.files.pending_save = None;
+        self.files.forget_disk_check(document_id);
+        if let Some(document) = self.workspace.document_mut(document_id) {
+            preserve_after_save_error(document, &error);
+        }
         self.file_status = Some(format!("Save failed: {}", error.summary()));
 
         if self.files.pending_save_all.front() == Some(&document_id) {
@@ -441,6 +481,92 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::tests::test_support::{TestFile, run_task};
+    use crate::core::{DiskState, FileRevision};
+
+    fn clean_file_app() -> (App, TestFile) {
+        let file = TestFile::new(b"saved text");
+        let mut app = App::new().0;
+        app.workspace
+            .insert_loaded_file(file.0.clone(), "saved text");
+        app.workspace.active_document_mut().unwrap().disk_revision =
+            Some(FileRevision::from_bytes(b"saved text"));
+        (app, file)
+    }
+
+    fn save_request(app: &App) -> SaveRequest {
+        let document = app.workspace.active_document().unwrap();
+        SaveRequest {
+            document_id: document.id,
+            revision: document.revision(),
+            snapshot: Arc::new(document.bytes_for_save().unwrap()),
+        }
+    }
+
+    #[test]
+    fn deleted_file_save_preserves_clean_text_and_requires_a_close_choice() {
+        let (mut app, file) = clean_file_app();
+        let id = app.workspace.active_document_id();
+        std::fs::remove_file(&file.0).unwrap();
+
+        let task = app.save_one(id, false);
+        run_task(&mut app, task);
+
+        let document = app.workspace.document(id).unwrap();
+        assert_eq!(document.text(), "saved text");
+        assert!(document.is_dirty);
+        assert_eq!(document.disk_state, DiskState::Changed);
+        assert!(!file.0.exists());
+        assert!(app.file_status.as_deref().unwrap().contains("Save As"));
+        let _ = app.close_request(id);
+        assert_eq!(app.close_prompt.document(), Some(id));
+    }
+
+    #[test]
+    fn failed_writes_keep_previously_clean_text_while_cancellation_does_not_dirty_it() {
+        for error in [
+            FileError::UnknownFileRevision,
+            FileError::Io(std::io::ErrorKind::PermissionDenied),
+            FileError::DialogClosed,
+        ] {
+            let (mut app, _file) = clean_file_app();
+            let request = save_request(&app);
+            let cancelled = error == FileError::DialogClosed;
+            let _ = app.save_done(request, Err(error));
+            let document = app.workspace.active_document().unwrap();
+            assert_eq!(document.text(), "saved text");
+            assert_eq!(document.is_dirty, !cancelled);
+            assert_eq!(
+                document.disk_revision,
+                Some(FileRevision::from_bytes(b"saved text"))
+            );
+        }
+    }
+
+    #[test]
+    fn disk_warning_clears_only_when_the_document_or_its_source_is_saved() {
+        let (mut app, file) = clean_file_app();
+        let document = app.workspace.active_document_mut().unwrap();
+        document.disk_state = DiskState::Missing;
+        document.mark_dirty();
+        let request = save_request(&app);
+
+        let _ = app.save_copy_done(request.clone(), Ok("other.txt".into()));
+        let document = app.workspace.active_document().unwrap();
+        assert_eq!(document.disk_state, DiskState::Missing);
+        assert!(document.is_dirty);
+
+        let _ = app.save_copy_done(request.clone(), Ok(file.0.clone()));
+        let document = app.workspace.active_document().unwrap();
+        assert_eq!(document.disk_state, DiskState::Current);
+        assert!(document.is_dirty);
+
+        app.workspace.active_document_mut().unwrap().disk_state = DiskState::Changed;
+        let _ = app.save_done(request, Ok(file.0.clone()));
+        let document = app.workspace.active_document().unwrap();
+        assert_eq!(document.disk_state, DiskState::Current);
+        assert!(!document.is_dirty);
+    }
 
     fn decoding_error_app() -> (App, crate::app::tests::test_support::TestFile) {
         let original = b"\xef\xbb\xbfhello\xff";

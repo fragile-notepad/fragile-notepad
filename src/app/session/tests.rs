@@ -94,7 +94,10 @@ fn decoding_errors_from_clean_disk_reload_override_legacy_recovery_metadata() {
     assert!(document.had_decoding_errors());
     let snapshot = app.snapshot_session();
     assert!(snapshot.documents[0].had_decoding_errors);
-    assert!(snapshot.documents[0].text.is_none());
+    assert_eq!(
+        snapshot.documents[0].text.as_deref(),
+        Some("malformed \u{fffd}")
+    );
 
     let encoded = serde_json::to_vec(&snapshot).unwrap();
     let saved = serde_json::from_slice(&encoded).unwrap();
@@ -178,6 +181,154 @@ fn recovered_edits_retain_the_original_disk_revision() {
         legacy.workspace.active_document().unwrap().disk_revision,
         None
     );
+}
+
+#[test]
+fn clean_recovery_without_original_disk_revision_requires_a_close_choice() {
+    let mut app = ready(Session {
+        documents: vec![SessionDocument {
+            path: Some("legacy-recovery.txt".into()),
+            text: Some("keep this recovered text".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let document = app.workspace.active_document().unwrap();
+    let id = document.id;
+    assert_eq!(document.text(), "keep this recovered text");
+    assert_eq!(document.disk_revision, None);
+    assert!(document.is_dirty);
+    let _ = app.update(Message::TabClosed(id));
+    assert_eq!(app.close_prompt.document(), Some(id));
+    assert!(app.workspace.document(id).is_some());
+}
+
+#[test]
+fn clean_file_recovery_preserves_text_and_reports_disk_changes() {
+    use crate::app::tests::test_support::{TestFile, run_task};
+    use crate::core::DiskState;
+    let original = b"last saved text\r\n";
+    for state in [DiskState::Current, DiskState::Missing, DiskState::Changed] {
+        let file = TestFile::new(original);
+        let mut app = ready(Session::default());
+        let _ = app.update(Message::FileOpened(Ok(
+            crate::services::types::OpenedFile {
+                path: file.0.clone(),
+                contents: Arc::new(crate::core::decode_bytes(original)),
+                disk_revision: crate::core::FileRevision::from_bytes(original),
+            },
+        )));
+        let snapshot = app.snapshot_session();
+        let entry = &snapshot.documents[snapshot.active_index];
+        assert!(!entry.is_dirty);
+        assert_eq!(entry.text.as_deref(), Some("last saved text\r\n"));
+
+        match state {
+            DiskState::Missing => std::fs::remove_file(&file.0).unwrap(),
+            DiskState::Changed => {
+                std::fs::write(&file.0, b"replacement from another program").unwrap();
+            }
+            _ => {}
+        }
+        let serialized = serde_json::to_vec(&snapshot).unwrap();
+        let (mut restored, _) = App::new_with_options(StartupOptions::default());
+        let _ = restored.update(Message::SettingsLoaded(Ok(None)));
+        let _ = restored.update(Message::SessionLoaded(Ok(Some(
+            serde_json::from_slice(&serialized).unwrap(),
+        ))));
+        let task = restored.update(Message::StartupReady);
+        run_task(&mut restored, task);
+        let document = restored.workspace.active_document().unwrap();
+        assert_eq!(document.text(), "last saved text\r\n");
+        assert_eq!(document.disk_state, state);
+        assert_eq!(document.is_dirty, state != DiskState::Current);
+        assert_eq!(
+            document.disk_revision,
+            Some(crate::core::FileRevision::from_bytes(original))
+        );
+        let recovered_snapshot = restored.snapshot_session();
+        assert_eq!(
+            recovered_snapshot.documents[recovered_snapshot.active_index]
+                .text
+                .as_deref(),
+            Some("last saved text\r\n")
+        );
+        if state == DiskState::Changed {
+            assert_eq!(
+                std::fs::read(&file.0).unwrap(),
+                b"replacement from another program"
+            );
+        }
+    }
+}
+
+#[test]
+fn recovery_during_reload_keeps_the_previous_complete_text() {
+    use crate::app::tests::test_support::TestFile;
+    let file = TestFile::new(b"previous complete file");
+    let mut app = ready(Session::default());
+    let _ = app.update(Message::FileOpened(Ok(
+        crate::services::types::OpenedFile {
+            path: file.0.clone(),
+            contents: Arc::new(crate::core::decode_bytes(b"previous complete file")),
+            disk_revision: crate::core::FileRevision::from_bytes(b"previous complete file"),
+        },
+    )));
+    std::fs::write(&file.0, b"changed disk text").unwrap();
+    let _ = app.update(Message::ReloadFromDisk);
+    let document = app.workspace.active_document().unwrap();
+    let id = document.id;
+    let generation = document.load_generation().unwrap();
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id: id,
+        generation,
+        path: file.0.clone(),
+        text: Arc::new("changed ".into()),
+        reset: false,
+        bytes_read: 8,
+        total_bytes: Some(17),
+    }));
+
+    let snapshot = app.snapshot_session();
+    let entry = &snapshot.documents[snapshot.active_index];
+    assert_eq!(entry.text.as_deref(), Some("previous complete file"));
+    let restored = ready(snapshot);
+    assert_eq!(
+        restored.workspace.active_document().unwrap().text(),
+        "previous complete file"
+    );
+}
+
+#[test]
+fn failed_initial_read_does_not_restore_partial_text_as_a_complete_file() {
+    use crate::services::types::{FileError, FileLoadFailure};
+    let mut app = App::new().0;
+    let path = std::path::absolute("initial-read-failure.txt").unwrap();
+    let _ = app.update(Message::FilePicked(Ok(path.clone())));
+    let document = app.workspace.active_document().unwrap();
+    let id = document.id;
+    let generation = document.load_generation().unwrap();
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id: id,
+        generation,
+        path: path.clone(),
+        text: Arc::new("partial text".into()),
+        reset: false,
+        bytes_read: 12,
+        total_bytes: Some(100),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+        document_id: id,
+        generation,
+        path: path.clone(),
+        error: FileError::Io(std::io::ErrorKind::PermissionDenied),
+    })));
+
+    let snapshot = app.snapshot_session();
+    let entry = &snapshot.documents[snapshot.active_index];
+    assert_eq!(entry.path.as_ref(), Some(&path));
+    assert!(entry.text.is_none());
+    assert!(!entry.is_dirty);
 }
 
 #[test]
@@ -754,7 +905,7 @@ fn duplicate_paths_select_existing_document() {
 }
 
 #[test]
-fn recovery_snapshot_contains_current_unsaved_edits_and_clean_file_paths_only() {
+fn recovery_snapshot_contains_unsaved_edits_and_clean_file_text() {
     let mut app = ready(Session {
         documents: vec![SessionDocument {
             text: Some("before".into()),
@@ -786,7 +937,8 @@ fn recovery_snapshot_contains_current_unsaved_edits_and_clean_file_paths_only() 
             .documents
             .iter()
             .any(
-                |d| d.path.as_deref() == Some(std::path::Path::new("disk.txt")) && d.text.is_none()
+                |d| d.path.as_deref() == Some(std::path::Path::new("disk.txt"))
+                    && d.text.as_deref() == Some("on disk")
             )
     );
     let document = app.workspace.document_mut(disk).unwrap();

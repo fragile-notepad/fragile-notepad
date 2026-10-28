@@ -45,6 +45,7 @@ impl App {
             return Task::batch([
                 self.refresh_window_state(window_id),
                 self.capture_window_geometry(window_id),
+                self.check_disk_files(),
             ]);
         }
         if matches!(event, Event::Window(window::Event::Unfocused)) {

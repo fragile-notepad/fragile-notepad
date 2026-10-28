@@ -407,7 +407,24 @@ fn advanced_search_controls_fit_and_dispatch_in_every_scope_and_theme() {
                         controls.label(&location),
                     );
                     assert!(
-                        matches!(messages.as_slice(), [Message::AdvancedSearchResultSelected(id, selection)] if *id == first.document_id && *selection == first.selection)
+                        matches!(messages.as_slice(), [Message::AdvancedSearchResultHighlighted(id, selection)] if *id == first.document_id && *selection == first.selection),
+                        "{tab_name}/{scope_name}/{theme_name}/result single click: {messages:?}"
+                    );
+                    let messages = click(
+                        &mut element,
+                        &mut tree,
+                        &node,
+                        &renderer,
+                        viewport,
+                        controls.label(&location),
+                    );
+                    assert!(
+                        matches!(messages.as_slice(), [
+                            Message::AdvancedSearchResultHighlighted(id, selection),
+                            Message::AdvancedSearchResultSelected(target, range),
+                        ] if *id == first.document_id && *selection == first.selection
+                            && *target == first.document_id && *range == first.selection),
+                        "{tab_name}/{scope_name}/{theme_name}/result double click: {messages:?}"
                     );
                     assert!(
                         matches!(type_into(&mut element, &mut tree, &node, &renderer, viewport, advanced_search_panel::QUERY_INPUT_ID).as_slice(), [Message::AdvancedSearchQueryChanged(query)] if query == "x")

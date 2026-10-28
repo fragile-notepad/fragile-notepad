@@ -326,6 +326,7 @@ message_catalog! {
         AdvancedReplaceAllRun => Reject,
         AdvancedReplaceAllCurrentRun => Reject,
         AdvancedReplaceAllOpenRun => Reject,
+        AdvancedSearchResultHighlighted(arg0: DocumentId, arg1: EditorSelection) => Reject,
         AdvancedSearchResultSelected(arg0: DocumentId, arg1: EditorSelection) => Reject,
         AdvancedSearchClosed => Reject,
     }

@@ -40,6 +40,7 @@ impl App {
         if !matches!(
             message,
             SearchMessage::AdvancedSearchPreviewDue(_)
+                | SearchMessage::AdvancedSearchResultHighlighted(_, _)
                 | SearchMessage::AdvancedSearchResultSelected(_, _)
                 | SearchMessage::AdvancedResultOptionsToggled
                 | SearchMessage::AdvancedResultLimitChanged(_)
@@ -55,6 +56,7 @@ impl App {
         if !matches!(
             message,
             SearchMessage::AdvancedSearchPreviewDue(_)
+                | SearchMessage::AdvancedSearchResultHighlighted(_, _)
                 | SearchMessage::FindReplacementChanged(_)
                 | SearchMessage::AdvancedSearchReplacementChanged(_)
                 | SearchMessage::FindWrapAroundToggled(_)
@@ -254,6 +256,13 @@ impl App {
             SearchMessage::AdvancedReplaceAllRun => self.advanced_replace_all(),
             SearchMessage::AdvancedReplaceAllCurrentRun
             | SearchMessage::AdvancedReplaceAllOpenRun => self.replace_all_in(self.dialog_scope()),
+            SearchMessage::AdvancedSearchResultHighlighted(document_id, selection) => {
+                self.search_dialog.selected_result =
+                    self.search_dialog.results.iter().position(|result| {
+                        result.document_id == document_id && result.selection == selection
+                    });
+                Task::none()
+            }
             SearchMessage::AdvancedSearchResultSelected(document_id, selection) => {
                 if self.workspace.document(document_id).is_some() {
                     let Some(owner) = self.workspace.owner_of(document_id) else {

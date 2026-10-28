@@ -1,6 +1,7 @@
 //! A compact search workspace with live, grouped results.
 use iced::widget::{
-    button, checkbox, column, container, row, rule, scrollable, space, text, text_input, tooltip,
+    button, checkbox, column, container, mouse_area, row, rule, scrollable, space, text,
+    text_input, tooltip,
 };
 use iced::{Center, Color, Element, Fill, Font};
 
@@ -10,6 +11,9 @@ use crate::search_dialog::{SearchCountSummary, SearchDialogState, SearchResult};
 use crate::ui::icons::hero::IconTone;
 use crate::ui::icons::search::{self, SearchIcon};
 use crate::ui::{motion, styles, utility};
+
+#[cfg(test)]
+mod tests;
 
 pub const QUERY_INPUT_ID: &str = "advanced-search-query";
 pub const REPLACEMENT_INPUT_ID: &str = "advanced-search-replacement";
@@ -674,27 +678,36 @@ fn result_row(result: &SearchResult, selected: bool) -> Element<'_, Message> {
             .wrapping(text::Wrapping::None)
             .into()
     };
-    button(
-        row![
-            container(
-                text(format!("{}:{}", start.line + 1, start.column + 1))
-                    .size(11)
-                    .font(Font::MONOSPACE)
-            )
-            .width(72)
-            .style(styles::info_muted),
-            container(preview).width(Fill).clip(true),
-        ]
-        .spacing(10)
-        .align_y(Center),
-    )
+
+    let item = row![
+        container(
+            text(format!("{}:{}", start.line + 1, start.column + 1))
+                .size(11)
+                .font(Font::MONOSPACE)
+        )
+        .width(72)
+        .style(styles::info_muted),
+        container(preview).width(Fill).clip(true),
+    ]
+    .spacing(10)
+    .align_y(Center)
     .padding([7, 10])
+    .width(Fill);
+    let highlight = Message::AdvancedSearchResultHighlighted(result.document_id, result.selection);
+
+    // Track clicks across the padded row before the enabled button consumes them.
+    button(
+        mouse_area(item)
+            .on_press(highlight.clone())
+            .on_double_click(Message::AdvancedSearchResultSelected(
+                result.document_id,
+                result.selection,
+            )),
+    )
+    .padding(0)
     .width(Fill)
     .style(styles::search_result(selected))
-    .on_press(Message::AdvancedSearchResultSelected(
-        result.document_id,
-        result.selection,
-    ))
+    .on_press(highlight)
     .into()
 }
 

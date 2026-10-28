@@ -397,6 +397,59 @@ fn replace_all_large_match_count_updates_document_once() {
 }
 
 #[test]
+fn advanced_search_result_highlight_keeps_editor_and_search_unchanged() {
+    let (mut app, _) = App::new();
+    let active = app.workspace.active_document_id();
+    let selection = EditorSelection::new(EditorPosition::new(0, 2), EditorPosition::new(0, 2));
+    set_active_document_text(&mut app, "first document", selection);
+    let target = app
+        .workspace
+        .insert_loaded_file("second.txt", "needle needle");
+    app.workspace.select(active);
+    app.search_dialog.set_query("needle");
+    app.search_dialog
+        .set_scope(crate::message::SearchScope::ThisWindow);
+    let _ = app.update(Message::AdvancedFindAllOpenRun);
+    let result = app.search_dialog.results[1].clone();
+    assert_eq!(result.document_id, target);
+    let target_selection = app.workspace.document(target).unwrap().main_selection();
+    let focused_window = app.focused_window_id;
+    let preview_generation = app.search_dialog.preview_generation;
+
+    let _ = app.update(Message::AdvancedSearchResultHighlighted(
+        target,
+        result.selection,
+    ));
+
+    assert_eq!(app.search_dialog.selected_result, Some(1));
+    assert_eq!(app.workspace.active_document_id(), active);
+    assert_eq!(
+        app.workspace.active_document().unwrap().main_selection(),
+        selection
+    );
+    assert_eq!(
+        app.workspace.document(target).unwrap().main_selection(),
+        target_selection
+    );
+    assert_eq!(app.focused_window_id, focused_window);
+    assert_eq!(app.search_dialog.preview_generation, preview_generation);
+
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    let _ = app.update(Message::AdvancedFindAllOpenRun);
+    assert!(app.pending_search.is_some());
+    let preview_generation = app.search_dialog.preview_generation;
+    let _ = app.update(Message::AdvancedSearchResultHighlighted(
+        target,
+        result.selection,
+    ));
+    assert!(app.pending_search.is_some());
+    assert_eq!(app.search_dialog.preview_generation, preview_generation);
+    finish_search_document(&mut app, disk, generation, "needle");
+    assert!(app.pending_search.is_none());
+    assert_eq!(app.search_dialog.results.len(), 3);
+}
+
+#[test]
 fn advanced_search_result_selection_scrolls_target_line_into_view() {
     let (mut app, _) = App::new();
     let document_id = app.workspace.active_document_id();

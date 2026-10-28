@@ -90,7 +90,7 @@ pub fn view(
         .align_y(Center),
     )
     .padding([2, 7])
-    .height(ROW_HEIGHT)
+    .center_y(ROW_HEIGHT)
     .width(Fill)
     .style(styles::search_field);
 
@@ -193,7 +193,7 @@ pub fn view(
             .align_y(Center),
         )
         .padding([2, 7])
-        .height(ROW_HEIGHT)
+        .center_y(ROW_HEIGHT)
         .width(Fill)
         .style(styles::search_field);
 

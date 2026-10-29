@@ -126,6 +126,7 @@ impl App {
                 Task::none()
             }
             SettingsMessage::SystemColorModeChanged(mode) => {
+                self.system_theme_loaded = true;
                 let dark = mode == iced::theme::Mode::Dark;
                 if self.system_dark != dark {
                     self.system_dark = dark;

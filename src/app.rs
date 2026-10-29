@@ -73,6 +73,7 @@ pub struct App {
     find: FindState,
     settings: EditorSettings,
     system_dark: bool,
+    system_theme_loaded: bool,
     outline_parsing: outline::OutlineParsing,
     syntax_parsing: syntax::SyntaxParsing,
     close_prompt: ClosePrompt,

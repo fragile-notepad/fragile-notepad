@@ -36,6 +36,7 @@ impl App {
             find: FindState::new(),
             settings: EditorSettings::default(),
             system_dark: false,
+            system_theme_loaded: false,
             outline_parsing: outline::OutlineParsing::new(),
             syntax_parsing: syntax::SyntaxParsing::default(),
             close_prompt: ClosePrompt::new(),

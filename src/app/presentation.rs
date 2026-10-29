@@ -111,7 +111,10 @@ impl App {
                 iced::theme::Mode::Light
             })
         });
-        ui::theme_transition::view(element, theme)
+        let animate = self.settings_persistence.is_loaded()
+            && (self.system_theme_loaded
+                || self.settings.appearance != crate::core::AppearanceMode::System);
+        ui::theme_transition::view(element, theme, animate)
             .map(move |message| Message::ForWindow(window_id, Box::new(message)))
     }
 

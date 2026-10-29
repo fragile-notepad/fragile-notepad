@@ -14,13 +14,20 @@ use crate::message::Message;
 const DURATION: Duration = Duration::from_millis(240);
 
 /// Blend two live drawings of a complete window, retaining one input tree.
-pub fn view(content: Element<'_, Message>, theme: Theme) -> Element<'_, Message> {
-    Element::new(ThemeTransition { content, theme })
+/// When `animate` is false, theme changes apply immediately. Enabling it also
+/// applies the current theme immediately; subsequent changes animate.
+pub fn view(content: Element<'_, Message>, theme: Theme, animate: bool) -> Element<'_, Message> {
+    Element::new(ThemeTransition {
+        content,
+        theme,
+        animate,
+    })
 }
 
 struct ThemeTransition<'a> {
     content: Element<'a, Message>,
     theme: Theme,
+    animate: bool,
 }
 
 #[derive(Clone)]
@@ -31,10 +38,11 @@ struct Blend {
     target: f32,
     from: f32,
     started: Option<Instant>,
+    animate: bool,
 }
 
 impl Blend {
-    fn new(theme: Theme) -> Self {
+    fn new(theme: Theme, animate: bool) -> Self {
         let dark = theme.palette().is_dark;
         Self {
             light: if dark { Theme::Light } else { theme.clone() },
@@ -43,10 +51,14 @@ impl Blend {
             target: f32::from(dark),
             from: f32::from(dark),
             started: None,
+            animate,
         }
     }
 
-    fn select(&mut self, theme: &Theme) {
+    fn select(&mut self, theme: &Theme, animate: bool) {
+        // Settle the final startup theme before animating later changes.
+        let should_animate = self.animate && animate;
+        self.animate = animate;
         let dark = theme.palette().is_dark;
         if dark {
             self.dark = theme.clone();
@@ -54,7 +66,12 @@ impl Blend {
             self.light = theme.clone();
         }
         let target = f32::from(dark);
-        if target != self.target {
+        if !should_animate {
+            self.amount = target;
+            self.from = target;
+            self.target = target;
+            self.started = None;
+        } else if target != self.target {
             self.from = self.amount;
             self.target = target;
             self.started = None;
@@ -87,11 +104,13 @@ impl Widget<Message, Theme, Renderer> for ThemeTransition<'_> {
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(Blend::new(self.theme.clone()))
+        tree::State::new(Blend::new(self.theme.clone(), self.animate))
     }
 
     fn diff(&mut self, tree: &mut Tree) {
-        tree.state.downcast_mut::<Blend>().select(&self.theme);
+        tree.state
+            .downcast_mut::<Blend>()
+            .select(&self.theme, self.animate);
         tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
@@ -488,10 +507,130 @@ mod tests {
     }
 
     #[test]
+    fn startup_color_modes_apply_immediately_in_either_load_order() {
+        use crate::app::App;
+        use crate::core::{AppearanceMode, EditorSettings};
+        use crate::services::types::SettingsError;
+
+        let saved = |appearance| {
+            let mut settings = EditorSettings::default();
+            settings.set_appearance(appearance);
+            Ok(Some(settings))
+        };
+        for result in [
+            saved(AppearanceMode::System),
+            saved(AppearanceMode::Light),
+            saved(AppearanceMode::Dark),
+            Ok(None),
+            Err(SettingsError::Unavailable),
+        ] {
+            let appearance = match &result {
+                Ok(Some(settings)) => settings.appearance,
+                _ => EditorSettings::default().appearance,
+            };
+            for settings_first in [false, true] {
+                let (mut app, _) = App::new();
+                let window_id = window::Id::unique();
+                let mut tree = Tree::new(app.view(window_id).as_widget());
+                let mut messages = [
+                    Message::SystemColorModeChanged(iced::theme::Mode::Dark),
+                    Message::SettingsLoaded(result.clone()),
+                ];
+                if settings_first {
+                    messages.reverse();
+                }
+                for message in messages {
+                    let _ = app.update(message);
+                    tree.diff(app.view(window_id).as_widget_mut());
+                    let blend = tree.state.downcast_ref::<Blend>();
+                    assert!(
+                        !blend.active(),
+                        "{appearance:?}, settings first: {settings_first}"
+                    );
+                }
+                let dark = appearance != AppearanceMode::Light;
+                assert_eq!(tree.state.downcast_ref::<Blend>().amount, f32::from(dark));
+
+                // Once startup finishes, an actual settings edit still animates.
+                let _ = app.update(Message::DraftAppearanceSelected(if dark {
+                    AppearanceMode::Light
+                } else {
+                    AppearanceMode::Dark
+                }));
+                let _ = app.update(Message::ApplySettings);
+                tree.diff(app.view(window_id).as_widget_mut());
+                let blend = tree.state.downcast_ref::<Blend>();
+                assert!(blend.active());
+                assert_eq!(blend.target, f32::from(!dark));
+
+                if appearance == AppearanceMode::System {
+                    let _ = app.update(Message::DraftAppearanceSelected(AppearanceMode::System));
+                    let _ = app.update(Message::ApplySettings);
+                    tree.diff(app.view(window_id).as_widget_mut());
+                    let _ = app.update(Message::SystemColorModeChanged(iced::theme::Mode::Light));
+                    tree.diff(app.view(window_id).as_widget_mut());
+                    let blend = tree.state.downcast_ref::<Blend>();
+                    assert!(blend.active());
+                    assert_eq!(blend.target, 0.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_color_modes_animate_without_waiting_for_the_system_theme() {
+        use crate::app::App;
+        use crate::core::{AppearanceMode, EditorSettings};
+
+        for appearance in [AppearanceMode::Light, AppearanceMode::Dark] {
+            let (mut app, _) = App::new();
+            let window_id = window::Id::unique();
+            let mut tree = Tree::new(app.view(window_id).as_widget());
+            let mut settings = EditorSettings::default();
+            settings.set_appearance(appearance);
+            let _ = app.update(Message::SettingsLoaded(Ok(Some(settings))));
+            tree.diff(app.view(window_id).as_widget_mut());
+            assert!(!tree.state.downcast_ref::<Blend>().active());
+
+            let dark = appearance == AppearanceMode::Dark;
+            let _ = app.update(Message::DraftAppearanceSelected(if dark {
+                AppearanceMode::Light
+            } else {
+                AppearanceMode::Dark
+            }));
+            let _ = app.update(Message::ApplySettings);
+            tree.diff(app.view(window_id).as_widget_mut());
+            let blend = tree.state.downcast_ref::<Blend>();
+            assert!(blend.active());
+            assert_eq!(blend.target, f32::from(!dark));
+        }
+    }
+
+    #[test]
+    fn disabling_animation_settles_an_active_transition() {
+        let mut blend = Blend::new(Theme::Light, true);
+        blend.select(&Theme::Dark, true);
+        let start = Instant::now();
+        blend.tick(start);
+        blend.tick(start + DURATION / 2);
+        assert!(blend.active());
+
+        blend.select(&Theme::Dark, false);
+        assert!(!blend.active());
+        assert_eq!(blend.amount, 1.0);
+
+        blend.select(&Theme::Light, true);
+        assert!(!blend.active());
+        assert_eq!(blend.amount, 0.0);
+        blend.select(&Theme::Dark, true);
+        assert!(blend.active());
+    }
+
+    #[test]
     fn both_variants_draw_live_contents_and_menus_during_the_transition() {
         let mut renderer = renderer();
         let mut ui = UserInterface::build(
-            view(Element::new(Scene { marker_x: 20.0 }), Theme::Light),
+            view(Element::new(Scene { marker_x: 20.0 }), Theme::Light, true),
             SIZE,
             Default::default(),
             &mut renderer,
@@ -500,7 +639,7 @@ mod tests {
         assert_eq!(pixel(&light, 2, 2), [255, 0, 0, 255]);
         let cache = ui.into_cache();
         let mut ui = UserInterface::build(
-            view(Element::new(Scene { marker_x: 40.0 }), Theme::Dark),
+            view(Element::new(Scene { marker_x: 40.0 }), Theme::Dark, true),
             SIZE,
             cache,
             &mut renderer,
@@ -548,13 +687,13 @@ mod tests {
 
     #[test]
     fn reversing_a_transition_preserves_the_current_color_mix_and_finishes() {
-        let mut blend = Blend::new(Theme::Light);
-        blend.select(&Theme::Dark);
+        let mut blend = Blend::new(Theme::Light, true);
+        blend.select(&Theme::Dark, true);
         let start = Instant::now();
         blend.tick(start);
         blend.tick(start + DURATION / 3);
         let midway = blend.amount;
-        blend.select(&Theme::Light);
+        blend.select(&Theme::Light, true);
         assert_eq!(blend.amount, midway);
         blend.tick(start + DURATION / 3);
         assert_eq!(blend.amount, midway);
@@ -580,8 +719,12 @@ mod tests {
                     .id("theme-input")
                     .on_input(|_| Message::ZoomIn)
             ];
-            let mut ui =
-                UserInterface::build(view(content.into(), theme), SIZE, cache, &mut renderer);
+            let mut ui = UserInterface::build(
+                view(content.into(), theme, true),
+                SIZE,
+                cache,
+                &mut renderer,
+            );
             if index == 0 {
                 let mut focus =
                     iced::advanced::widget::operation::focusable::focus("theme-input".into());

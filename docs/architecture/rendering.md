@@ -27,8 +27,9 @@ their existing rendering paths. All windows share the selected renderer backend.
 
 ## Theme transitions
 
-Changing between light and dark mode blends two live drawings of each window
-over 240 ms. The root widget keeps one input tree and draws the complete scene,
+The initial theme applies immediately as startup settings load. Later changes
+between light and dark mode blend two live drawings of each window over 240 ms.
+The root widget keeps one input tree and draws the complete scene,
 including nested menus, in both modes. The dark drawing is composited over the
 light drawing with group opacity. Reversing a transition starts from the current
 color mix; a settled window draws once.

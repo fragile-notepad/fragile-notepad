@@ -776,6 +776,132 @@ fn dragging_preserves_the_grab_point_clamps_and_suppresses_tab_release() {
 }
 
 #[test]
+fn vertical_wheel_scrolls_tabs_both_ways_over_the_body_and_top_lane() {
+    let renderer = renderer();
+    for y in [2.0, 15.0] {
+        let mut element = strip();
+        let (mut tree, node) = mount(&mut element, &renderer);
+        let cursor = pointer(Point::new(100.0, y));
+        for (steps, expected) in [
+            (-1.0, 60.0),
+            (1.0, 0.0),
+            (-100.0, CONTENT_WIDTH - WIDTH),
+            (100.0, 0.0),
+        ] {
+            let before = tree.state.downcast_ref::<State>().metrics.offset;
+            let (captured, redraw, _) = dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Lines { x: 0.0, y: steps },
+                }),
+                cursor,
+            );
+            assert!(captured);
+            assert_ne!(redraw, window::RedrawRequest::Wait);
+            close(tree.state.downcast_ref::<State>().metrics.offset, before);
+            let now = Instant::now();
+            if expected == 60.0 {
+                dispatch(
+                    &mut element,
+                    &mut tree,
+                    &node,
+                    &renderer,
+                    Event::Window(window::Event::RedrawRequested(
+                        now + Duration::from_millis(40),
+                    )),
+                    cursor,
+                );
+                let offset = tree.state.downcast_ref::<State>().metrics.offset;
+                assert!(offset > 0.0 && offset < expected);
+            }
+            dispatch(
+                &mut element,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    now + Duration::from_millis(400),
+                )),
+                cursor,
+            );
+            close(tree.state.downcast_ref::<State>().metrics.offset, expected);
+        }
+    }
+}
+
+#[test]
+fn vertical_precise_input_keeps_fractions_and_prefers_existing_horizontal_motion() {
+    let renderer = renderer();
+    let mut element = strip();
+    let (mut tree, node) = mount(&mut element, &renderer);
+    let cursor = pointer(Point::new(100.0, 15.0));
+    for (delta, expected) in [
+        (mouse::ScrollDelta::Pixels { x: 0.0, y: -12.5 }, 12.5),
+        (
+            mouse::ScrollDelta::Pixels {
+                x: -3.25,
+                y: -100.0,
+            },
+            15.75,
+        ),
+        (mouse::ScrollDelta::Lines { x: 0.0, y: -0.25 }, 30.75),
+        (mouse::ScrollDelta::Lines { x: -0.5, y: -3.0 }, 60.75),
+        (mouse::ScrollDelta::Pixels { x: 0.0, y: 5.5 }, 55.25),
+    ] {
+        let (captured, _, _) = dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Mouse(mouse::Event::WheelScrolled { delta }),
+            cursor,
+        );
+        assert!(captured);
+        close(tree.state.downcast_ref::<State>().metrics.offset, expected);
+    }
+}
+
+#[test]
+fn vertical_wheel_does_not_scroll_or_capture_when_tabs_fit_or_pointer_is_outside() {
+    let renderer = renderer();
+    for (width, point) in [
+        (1000.0, Point::new(100.0, 15.0)),
+        (WIDTH, Point::new(WIDTH + 1.0, 15.0)),
+    ] {
+        let mut element = strip();
+        let (mut tree, _) = mount(&mut element, &renderer);
+        let node = relayout(&mut element, &mut tree, &renderer, width);
+        let cursor = pointer(point);
+        let (captured, _, _) = dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+            }),
+            cursor,
+        );
+        assert!(!captured);
+        close(tree.state.downcast_ref::<State>().metrics.offset, 0.0);
+        dispatch(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(400),
+            )),
+            cursor,
+        );
+        close(tree.state.downcast_ref::<State>().metrics.offset, 0.0);
+    }
+}
+
+#[test]
 fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
     let renderer = renderer();
     let mut element = strip();

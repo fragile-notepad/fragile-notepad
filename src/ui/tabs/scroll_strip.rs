@@ -325,9 +325,6 @@ impl ScrollStrip<'_> {
             shell.publish(Message::TabStripGeometry(geometry.clone()));
         }
         match event {
-            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                state.modifiers = *modifiers
-            }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
@@ -482,6 +479,9 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
         let state = tree.state.downcast_mut::<State>();
         let was_dragging = state.grabbed_at.is_some();
         match event {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+            }
             Event::Window(window::Event::Unfocused) => {
                 state.focused = false;
                 state.grabbed_at = None;
@@ -568,12 +568,31 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
         } else {
             cursor
         };
+        let wheel_event = match event {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if over_strip => {
+                let delta = match *delta {
+                    // Scrollable already swaps line axes for Shift on Windows
+                    // and Linux. macOS sends those packets with swapped axes.
+                    mouse::ScrollDelta::Lines { x: 0.0, y }
+                        if !state.modifiers.shift() || cfg!(target_os = "macos") =>
+                    {
+                        Some(mouse::ScrollDelta::Lines { x: y, y: 0.0 })
+                    }
+                    mouse::ScrollDelta::Pixels { x: 0.0, y } => {
+                        Some(mouse::ScrollDelta::Pixels { x: y, y: 0.0 })
+                    }
+                    _ => None,
+                };
+                delta.map(|delta| Event::Mouse(mouse::Event::WheelScrolled { delta }))
+            }
+            _ => None,
+        };
         if offset.is_some() {
             self.sync_scroll(tree, layout.child(0), renderer, offset);
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
-            event,
+            wheel_event.as_ref().unwrap_or(event),
             layout.child(0),
             child_cursor,
             renderer,

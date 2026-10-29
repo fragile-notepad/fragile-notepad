@@ -142,6 +142,52 @@ fn collapsed_indicator_click_expands_fold_without_changing_selection() {
 }
 
 #[test]
+fn collapsed_indicator_click_stops_wheel_motion_at_the_displayed_row() {
+    let range = FoldRange::new(0, 2);
+    let mut folds = FoldModel::new(vec![range]);
+    folds.set_collapsed(range, true);
+    let source = format!("{{\n    child\n}}\n{}", "after\n".repeat(40));
+    let fixture = FoldPointerFixture::new(&source, folds);
+    let mut editor = fixture.editor();
+    let node = fold_test_node();
+    let point = first_fold_indicator_center(&editor, &node);
+    // Hold the animation before its first frame so font loading cannot change
+    // the clicked row while the real event clock runs.
+    let started = Instant::now() + Duration::from_secs(60);
+    let mut scroll = scroll::ScrollAnimation::new(
+        editor.editor_layout(node.bounds()),
+        editor.viewport_key,
+        editor.viewport.visible_row_count(),
+        editor.viewport.wrap_columns(),
+        started,
+    );
+    scroll.scroll_by(20.0, started);
+    editor.scroll.first_visible_row = scroll.target_row();
+    let mut tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
+    tree.state
+        .downcast_mut::<AdvancedEditorState<()>>()
+        .smooth_scroll = Some(scroll);
+
+    let (messages, captured) = press_fold_test_editor(&mut editor, &mut tree, &node, point);
+
+    assert_eq!(
+        messages,
+        [
+            EditorAction::ScrollToRow(0),
+            EditorAction::Focus,
+            EditorAction::ToggleFold(range),
+        ],
+    );
+    assert!(captured);
+    assert!(
+        tree.state
+            .downcast_ref::<AdvancedEditorState<()>>()
+            .smooth_scroll
+            .is_none()
+    );
+}
+
+#[test]
 fn wrapped_fold_indicator_hits_only_the_final_header_fragment() {
     let range = FoldRange::new(0, 2);
     let mut folds = FoldModel::new(vec![range]);
@@ -172,9 +218,10 @@ fn wrapped_fold_indicator_hits_only_the_final_header_fragment() {
     let last_point = indicator.center() + iced::Vector::new(node.bounds().x, node.bounds().y);
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&node),
+            node.bounds(),
             mouse::Cursor::Available(last_point),
-            &()
+            &(),
+            editor.editor_layout(node.bounds()),
         ),
         Some(range)
     );
@@ -184,9 +231,10 @@ fn wrapped_fold_indicator_hits_only_the_final_header_fragment() {
     );
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&node),
+            node.bounds(),
             mouse::Cursor::Available(first_point),
-            &()
+            &(),
+            editor.editor_layout(node.bounds()),
         ),
         None
     );
@@ -361,17 +409,19 @@ fn collapsed_indicator_hit_follows_scroll_and_excludes_gutter_and_scrollbar() {
     assert_eq!(original_point.x - scrolled_point.x, 32.0);
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&node),
+            node.bounds(),
             mouse::Cursor::Available(scrolled_point),
-            &()
+            &(),
+            editor.editor_layout(node.bounds()),
         ),
         Some(range),
     );
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&node),
+            node.bounds(),
             mouse::Cursor::Available(original_point),
-            &()
+            &(),
+            editor.editor_layout(node.bounds()),
         ),
         None,
     );
@@ -383,9 +433,10 @@ fn collapsed_indicator_hit_follows_scroll_and_excludes_gutter_and_scrollbar() {
     );
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&node),
+            node.bounds(),
             mouse::Cursor::Available(hidden_in_gutter),
-            &()
+            &(),
+            editor.editor_layout(node.bounds()),
         ),
         None,
     );
@@ -396,9 +447,10 @@ fn collapsed_indicator_hit_follows_scroll_and_excludes_gutter_and_scrollbar() {
     assert!(over_scrollbar.x > narrow_node.bounds().x + 138.0);
     assert_eq!(
         editor.hit_collapsed_indicator(
-            Layout::new(&narrow_node),
+            narrow_node.bounds(),
             mouse::Cursor::Available(over_scrollbar),
-            &()
+            &(),
+            editor.editor_layout(narrow_node.bounds()),
         ),
         None,
     );
@@ -419,9 +471,10 @@ fn collapsed_indicator_uses_outer_span_when_folds_share_a_header() {
 
         assert_eq!(
             editor.hit_collapsed_indicator(
-                Layout::new(&node),
+                node.bounds(),
                 mouse::Cursor::Available(point),
-                &()
+                &(),
+                editor.editor_layout(node.bounds()),
             ),
             Some(outer),
         );
@@ -523,9 +576,10 @@ fn matched_fold_placeholder_clicks_expand_from_the_opener_through_the_closer() {
             let point = Point::new(node.bounds().x + x, node.bounds().y + indicator.center_y());
             assert_eq!(
                 editor.hit_collapsed_indicator(
-                    Layout::new(&node),
+                    node.bounds(),
                     mouse::Cursor::Available(point),
-                    &()
+                    &(),
+                    editor.editor_layout(node.bounds()),
                 ),
                 Some(range),
                 "wrapped={wrapped}, point={point:?}, indicator={indicator:?}, row={row:?}"
@@ -695,9 +749,10 @@ fn projected_suffix_text_and_each_placeholder_keep_their_source_targets() {
                     );
                     assert_eq!(
                         editor.hit_collapsed_indicator(
-                            Layout::new(&node),
+                            node.bounds(),
                             mouse::Cursor::Available(point),
-                            &()
+                            &(),
+                            editor.editor_layout(node.bounds()),
                         ),
                         Some(*range)
                     );

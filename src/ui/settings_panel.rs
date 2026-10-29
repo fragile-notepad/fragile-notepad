@@ -556,18 +556,29 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         ),
         section(
             "Scrolling",
-            described_row(
-                "Scroll speed",
-                "Mouse wheel scroll distance.",
-                stepper(
-                    format!("{:.2}×", settings.scroll_speed),
-                    Message::SettingsScrollSpeedDecrease,
-                    Message::SettingsScrollSpeedIncrease,
-                    Message::SettingsScrollSpeedReset,
-                    settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED,
-                    settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED
+            column![
+                described_toggle(
+                    "Smooth scrolling",
+                    "Animate mouse wheel scrolling.",
+                    settings.smooth_scrolling,
+                    Message::DraftSmoothScrollingToggled,
                 ),
-            )
+                divider(),
+                described_row(
+                    "Scroll speed",
+                    "Mouse wheel scroll distance.",
+                    stepper(
+                        format!("{:.2}×", settings.scroll_speed),
+                        Message::SettingsScrollSpeedDecrease,
+                        Message::SettingsScrollSpeedIncrease,
+                        Message::SettingsScrollSpeedReset,
+                        settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED,
+                        settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED
+                    ),
+                ),
+            ]
+            .spacing(12)
+            .into()
         ),
     ]
     .spacing(14)

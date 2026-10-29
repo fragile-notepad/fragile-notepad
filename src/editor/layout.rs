@@ -85,6 +85,8 @@ impl ScrollOffset {
 pub struct EditorLayout {
     pub metrics: EditorMetrics,
     pub scroll: ScrollOffset,
+    /// Pixels scrolled into the first row, from zero to less than one line height.
+    pub vertical_offset_px: f32,
     pub width: f32,
     pub height: f32,
 }
@@ -99,21 +101,23 @@ impl EditorLayout {
         Self {
             metrics,
             scroll,
+            vertical_offset_px: 0.0,
             width,
             height,
         }
     }
 
     pub fn visible_row_capacity(self) -> usize {
-        if self.metrics.line_height <= 0.0 || self.height <= self.metrics.padding_top {
+        let height = self.height - self.metrics.padding_top + self.vertical_offset_px;
+        if self.metrics.line_height <= 0.0 || height <= 0.0 {
             return 0;
         }
 
-        ((self.height - self.metrics.padding_top) / self.metrics.line_height).ceil() as usize
+        (height / self.metrics.line_height).ceil() as usize
     }
 
-    /// Rows that fit completely, used by navigation and scroll limits so the
-    /// final row can always be brought fully into view.
+    /// Whole rows when the first row is aligned, used by navigation and scroll
+    /// limits so the final row can always be brought fully into view.
     pub fn complete_visible_row_capacity(self) -> usize {
         if self.metrics.line_height <= 0.0 || self.height <= self.metrics.padding_top {
             return 0;
@@ -219,19 +223,20 @@ pub fn hit_visible_row(
     layout: EditorLayout,
     viewport: &ViewportModel,
 ) -> Option<(usize, usize)> {
-    if y < layout.metrics.padding_top || layout.metrics.line_height <= 0.0 {
+    let content_y = y - layout.metrics.padding_top + layout.vertical_offset_px;
+    if content_y < 0.0 || layout.metrics.line_height <= 0.0 {
         return None;
     }
 
-    let visible_row = layout.scroll.first_visible_row
-        + ((y - layout.metrics.padding_top) / layout.metrics.line_height) as usize;
+    let visible_row =
+        layout.scroll.first_visible_row + (content_y / layout.metrics.line_height) as usize;
     let line = viewport.visible_row_to_document_line(visible_row)?;
 
     Some((visible_row, line))
 }
 
 pub fn row_y(visible_row: usize, layout: EditorLayout) -> f32 {
-    layout.metrics.padding_top
+    layout.metrics.padding_top - layout.vertical_offset_px
         + visible_row.saturating_sub(layout.scroll.first_visible_row) as f32
             * layout.metrics.line_height
 }
@@ -344,5 +349,42 @@ pub fn visual_width_with_tab_width(ch: char, visual_column: usize, tab_width: us
     match ch {
         '\t' => tab_width - visual_column % tab_width,
         _ => UnicodeWidthChar::width(ch).unwrap_or(0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::FoldModel;
+
+    #[test]
+    fn fractional_scroll_keeps_row_positions_and_hits_together() {
+        let viewport = ViewportModel::new(20, &FoldModel::default());
+        let mut layout = EditorLayout::new(
+            EditorMetrics::new(20.0, 8.0),
+            ScrollOffset::ZERO,
+            300.0,
+            64.0,
+        );
+        layout.scroll.first_visible_row = 5;
+        layout.vertical_offset_px = 10.0;
+
+        assert_eq!(row_y(5, layout), -6.0);
+        assert_eq!(row_y(6, layout), 14.0);
+        assert_eq!(hit_visible_row(0.0, layout, &viewport), Some((5, 5)));
+        assert_eq!(hit_visible_row(13.9, layout, &viewport), Some((5, 5)));
+        assert_eq!(hit_visible_row(14.0, layout, &viewport), Some((6, 6)));
+        assert_eq!(hit_visible_row(63.0, layout, &viewport), Some((8, 8)));
+        assert_eq!(layout.visible_row_capacity(), 4);
+        assert_eq!(layout.complete_visible_row_capacity(), 3);
+    }
+
+    #[test]
+    fn unscrolled_top_padding_stays_outside_text_rows() {
+        let viewport = ViewportModel::new(20, &FoldModel::default());
+        let layout = EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 300.0, 94.0);
+
+        assert_eq!(hit_visible_row(0.0, layout, &viewport), None);
+        assert_eq!(hit_visible_row(4.0, layout, &viewport), Some((0, 0)));
     }
 }

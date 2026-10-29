@@ -6,6 +6,28 @@ use crate::core::{
 use iced::widget::text_editor::LineEnding;
 
 #[test]
+fn smooth_scrolling_changes_apply_save_and_cancel_with_the_settings_dialog() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::ToggleSettingsPanel);
+    let _ = app.update(Message::DraftSmoothScrollingToggled(false));
+    assert!(app.settings.smooth_scrolling);
+    assert!(!app.settings_dialog.draft.smooth_scrolling);
+
+    let _ = app.update(Message::ApplySettings);
+    assert!(!app.settings.smooth_scrolling);
+    let _ = app.update(Message::DraftSmoothScrollingToggled(true));
+    let _ = app.update(Message::CancelSettings);
+    assert!(!app.settings.smooth_scrolling);
+    assert!(!app.settings_dialog.draft.smooth_scrolling);
+
+    let _ = app.update(Message::DraftSmoothScrollingToggled(true));
+    let _ = app.update(Message::SaveSettings);
+    assert!(app.settings.smooth_scrolling);
+    assert!(app.settings_persistence.flush_scheduled());
+}
+
+#[test]
 fn search_result_preferences_keep_settings_inputs_in_sync() {
     let (mut app, _) = App::new();
     let _ = app.update(Message::SettingsLoaded(Ok(None)));

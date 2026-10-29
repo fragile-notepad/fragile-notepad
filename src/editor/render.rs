@@ -1443,6 +1443,62 @@ mod decoration_lookup_tests {
     }
 }
 
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+    use crate::editor::{DecorationSettings, FoldModel, ScrollOffset};
+
+    #[test]
+    fn fractional_scroll_moves_rows_selections_and_carets_together() {
+        let buffer = EditorBuffer::from_text("hello\n".repeat(20));
+        let viewport = ViewportModel::new(buffer.line_count(), &FoldModel::default());
+        let decorations = DecorationModel::new(DecorationSettings::default());
+        let mut layout = EditorLayout::new(
+            EditorMetrics::new(20.0, 8.0),
+            ScrollOffset {
+                first_visible_row: 5,
+                horizontal_px: 0.0,
+            },
+            300.0,
+            64.0,
+        );
+        layout.vertical_offset_px = 10.0;
+        let selections = SelectionSet::from_ranges(
+            vec![
+                EditorSelection::new(EditorPosition::new(5, 0), EditorPosition::new(5, 0)),
+                EditorSelection::new(EditorPosition::new(6, 1), EditorPosition::new(7, 3)),
+                EditorSelection::new(EditorPosition::new(8, 0), EditorPosition::new(8, 0)),
+            ],
+            2,
+        );
+        let plan = build_render_plan_for_selection_set_with_cache(
+            &buffer,
+            &viewport,
+            &decorations,
+            selections,
+            layout,
+            &SyntaxLineCache::default(),
+        );
+
+        assert_eq!(plan.rows.first().unwrap().y, -6.0);
+        assert!(
+            plan.rows
+                .iter()
+                .any(|row| row.visible_row == 8 && row.y == 54.0)
+        );
+        assert_eq!(
+            plan.selections
+                .iter()
+                .map(|selection| selection.y)
+                .collect::<Vec<_>>(),
+            [14.0, 34.0],
+        );
+        assert!(plan.carets.iter().any(|caret| caret.y == -6.0));
+        assert!(plan.carets.iter().any(|caret| caret.y == 54.0));
+        assert_eq!(plan.caret.unwrap().y, 54.0);
+    }
+}
+
 fn whitespace_plan(
     line: usize,
     text: &str,

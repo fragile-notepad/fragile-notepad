@@ -40,7 +40,9 @@ pub fn vertical_scrollbar_geometry(
     let progress = if max_first_row == 0 {
         0.0
     } else {
-        layout.scroll.first_visible_row.min(max_first_row) as f32 / max_first_row as f32
+        let first_row = layout.scroll.first_visible_row as f64
+            + f64::from(layout.vertical_offset_px / layout.metrics.line_height);
+        (first_row / max_first_row as f64).clamp(0.0, 1.0) as f32
     };
     let thumb = Rectangle {
         x: track.x + VERTICAL_SCROLLBAR_MARGIN,
@@ -79,6 +81,21 @@ pub fn scrollbar_row_for_position(
 mod tests {
     use super::*;
     use crate::editor::layout::{EditorMetrics, ScrollOffset, row_y};
+
+    #[test]
+    fn scrollbar_thumb_follows_fractional_vertical_offset() {
+        let mut layout =
+            EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 300.0, 94.0);
+        let start = vertical_scrollbar_geometry(layout, 100).unwrap();
+        layout.scroll.first_visible_row = 1;
+        let next_row = vertical_scrollbar_geometry(layout, 100).unwrap();
+        layout.scroll.first_visible_row = 0;
+        layout.vertical_offset_px = layout.metrics.line_height / 2.0;
+        let halfway = vertical_scrollbar_geometry(layout, 100).unwrap();
+
+        assert_eq!(halfway.thumb.height, start.thumb.height);
+        assert!((halfway.thumb.y - (start.thumb.y + next_row.thumb.y) / 2.0).abs() < 0.001);
+    }
 
     #[test]
     fn scrollbar_exposes_a_final_row_that_only_partially_fits() {

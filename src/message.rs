@@ -186,6 +186,7 @@ message_catalog! {
         DraftThemeSelected(arg0: highlighter::Theme) => Reject,
         SystemColorModeChanged(arg0: iced::theme::Mode) => Reject,
         DraftWordWrapToggled(arg0: bool) => Reject,
+        DraftSmoothScrollingToggled(arg0: bool) => Reject,
         DraftFixedWrapSelected(arg0: bool) => Reject,
         DraftWrapColumnChanged(arg0: String) => Reject,
         DraftWrapColumnPreset(arg0: usize) => Reject,

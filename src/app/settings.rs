@@ -139,6 +139,10 @@ impl App {
                 self.settings_dialog.draft.set_word_wrap(word_wrap);
                 Task::none()
             }
+            SettingsMessage::DraftSmoothScrollingToggled(smooth_scrolling) => {
+                self.settings_dialog.draft.smooth_scrolling = smooth_scrolling;
+                Task::none()
+            }
             SettingsMessage::DraftFixedWrapSelected(fixed) => {
                 self.settings_dialog.draft.wrap_column_limit = if fixed {
                     Some(
@@ -658,6 +662,7 @@ pub(super) fn merge_initial_settings(
         recent_file_limit,
         zoom,
         scroll_speed,
+        smooth_scrolling,
         indentation,
         appearance,
         hardware_acceleration,

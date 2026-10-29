@@ -9,6 +9,7 @@ use crate::editor::position::{EditorPosition, SelectionSet};
 
 use super::LineGeometryCache;
 use super::cache::RichParagraphCache;
+use super::scroll::ScrollAnimation;
 
 pub(super) const CARET_BLINK_INTERVAL_MS: u128 = 500;
 const DOUBLE_CLICK_INTERVAL_MS: u128 = 500;
@@ -28,6 +29,7 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) last_text_click: Option<TextClick>,
     pub(super) scrollbar_grab_offset_y: Option<f32>,
     pub(super) partial_scroll_lines: f32,
+    pub(super) smooth_scroll: Option<ScrollAnimation>,
     pub(super) viewport_geometry: Option<(u64, usize, u32, u32, u32, Option<u32>)>,
     pub preedit: Option<input_method::Preedit>,
     pub(super) scroll_fast_until: Cell<Option<Instant>>,
@@ -60,6 +62,7 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             last_text_click: None,
             scrollbar_grab_offset_y: None,
             partial_scroll_lines: 0.0,
+            smooth_scroll: None,
             viewport_geometry: None,
             preedit: None,
             scroll_fast_until: Cell::new(None),
@@ -108,6 +111,9 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
             | (u64::from(self.preedit.is_some()) << 5)
             | (u64::from(fade.opacity(now).to_bits()) << 8);
         let live = fade.animating(now)
+            || self
+                .smooth_scroll
+                .is_some_and(|scroll| scroll.animating(now))
             || self.drag_anchor.is_some()
             || self.text_drag.is_some()
             || self.drag_scroll_at.is_some()
@@ -121,6 +127,11 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
 
         self.caret_updated_at = now;
         self.caret_now.set(now);
+    }
+
+    /// Shows the document's destination immediately for keyboard navigation.
+    pub(crate) fn finish_scrolling(&mut self) -> bool {
+        self.smooth_scroll.take().is_some()
     }
 
     pub(super) fn record_text_click(&mut self, position: EditorPosition, now: Instant) -> bool {

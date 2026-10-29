@@ -2,8 +2,7 @@ use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Layout, Shell, graphics::geometry, mouse, text};
-use iced::time::Duration;
-use iced::time::Instant;
+use iced::time::{Duration, Instant};
 use iced::{Background, Element, Event, Font, Length, Rectangle, Size, Theme, highlighter};
 #[cfg(test)]
 use iced::{Color, Pixels, Point, alignment};
@@ -45,6 +44,7 @@ mod interaction;
 pub(crate) mod line_cache;
 mod markers;
 mod rich_text;
+mod scroll;
 mod scrollbar;
 mod state;
 mod style;
@@ -88,6 +88,7 @@ pub struct AdvancedEditor<'a, Message> {
     caret_row: Option<usize>,
     caret_rows: &'a [(EditorPosition, usize)],
     scroll_speed: f32,
+    smooth_scrolling: bool,
     wrap_guide_column: usize,
     viewport_key: u64,
     cjk_context: Option<Arc<CjkContext>>,
@@ -120,6 +121,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
             caret_row: None,
             caret_rows: &[],
             scroll_speed: 1.5,
+            smooth_scrolling: true,
             wrap_guide_column: crate::core::EditorSettings::DEFAULT_WRAP_COLUMN,
             viewport_key: 0,
             cjk_context: None,
@@ -167,6 +169,12 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
 
     pub fn scroll_speed(mut self, scroll_speed: f32) -> Self {
         self.scroll_speed = scroll_speed.max(0.0);
+        self
+    }
+
+    /// Animates wheel scrolling. Disabled views move immediately by whole rows.
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
         self
     }
 
@@ -226,12 +234,13 @@ where
     ) {
         let trace_enabled = crate::perf_trace::enabled();
         let draw_started = trace_enabled.then(StdInstant::now);
+        let now = Instant::now();
         let bounds = layout.bounds();
-        let editor_layout = self.editor_layout(bounds);
         let editor_style = EditorStyle::from_theme(theme);
         let state = tree
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
+        let editor_layout = self.display_layout(state, self.editor_layout(bounds), now);
         let fold_controls_hovered = self.fold_controls_hovered(bounds, cursor);
         // A first draw can arrive before a pointer event (e.g. a restored view).
         if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
@@ -239,10 +248,10 @@ where
             state.fold_fade.set(state::FoldFade {
                 from: target,
                 target,
-                started: Instant::now(),
+                started: now,
             });
         }
-        let fold_controls_opacity = state.fold_fade.get().opacity(Instant::now());
+        let fold_controls_opacity = state.fold_fade.get().opacity(now);
         let fast_text = is_scroll_fast_frame(state);
         let caret_visible = state.is_caret_visible() && state.text_drag.is_none();
         // Drawing only consumes completed spans. Parser work is scheduled by
@@ -444,12 +453,16 @@ where
     ) {
         let trace_enabled = crate::perf_trace::enabled();
         let update_started = trace_enabled.then(StdInstant::now);
+        let now = match event {
+            Event::Window(iced::window::Event::RedrawRequested(now)) => *now,
+            _ => Instant::now(),
+        };
+        let bounds = layout.bounds();
         let state = tree
             .state
             .downcast_mut::<AdvancedEditorState<Renderer::Paragraph>>();
-        let fold_controls_hovered = self.fold_controls_hovered(layout.bounds(), cursor);
+        let fold_controls_hovered = self.fold_controls_hovered(bounds, cursor);
         if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
-            let now = Instant::now();
             state.fold_fade.set(state::FoldFade {
                 from: state.fold_fade.get().opacity(now),
                 target: f32::from(fold_controls_hovered),
@@ -457,16 +470,22 @@ where
             });
             shell.request_redraw();
         }
-        if state.fold_fade.get().animating(Instant::now()) {
-            shell.request_redraw_at(Instant::now() + Duration::from_millis(16));
+        if state.fold_fade.get().animating(now) {
+            shell.request_redraw_at(now + Duration::from_millis(16));
         }
-        let editor_layout = self.editor_layout(layout.bounds());
+        let editor_layout = self.editor_layout(bounds);
+        let display_layout = self.display_layout(state, editor_layout, now);
         let outcome = if matches!(
             event,
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) && let Some(range) =
-            self.hit_collapsed_indicator(layout, cursor, renderer)
+            self.hit_collapsed_indicator(bounds, cursor, renderer, display_layout)
         {
+            let visible_row = display_layout.scroll.first_visible_row;
+            state.finish_scrolling();
+            if visible_row != self.scroll.first_visible_row {
+                shell.publish((self.on_action)(EditorAction::ScrollToRow(visible_row)));
+            }
             state.is_focused = true;
             state.reset_caret_blink();
             state.cancel_pointer_drag();
@@ -484,7 +503,7 @@ where
         } else {
             handle_event(
                 InteractionContext {
-                    now: Instant::now(),
+                    now,
                     buffer: self.buffer,
                     viewport: self.viewport,
                     decorations: self.decorations,
@@ -492,6 +511,7 @@ where
                     metrics: self.metrics,
                     caret_row: self.caret_row,
                     scroll_speed: self.scroll_speed,
+                    smooth_scrolling: self.smooth_scrolling,
                     viewport_key: self.viewport_key,
                     cjk_context: self.cjk_context.as_deref(),
                     shortcuts: self.shortcuts,
@@ -499,7 +519,7 @@ where
                 },
                 state,
                 event,
-                layout.bounds(),
+                bounds,
                 cursor,
                 editor_layout,
                 renderer,
@@ -515,8 +535,8 @@ where
                     update_started.elapsed().as_micros(),
                     outcome.should_capture,
                     editor_layout.scroll.first_visible_row,
-                    layout.bounds().width,
-                    layout.bounds().height,
+                    bounds.width,
+                    bounds.height,
                 ),
             );
         }
@@ -531,16 +551,13 @@ where
         renderer: &Renderer,
     ) -> mouse::Interaction {
         let bounds = layout.bounds();
-        if tree
+        let state = tree
             .state
-            .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>()
-            .text_drag
-            .as_ref()
-            .is_some_and(|drag| drag.started)
-        {
+            .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
+        if state.text_drag.as_ref().is_some_and(|drag| drag.started) {
             return mouse::Interaction::Grabbing;
         }
-        let editor_layout = self.editor_layout(bounds);
+        let editor_layout = self.display_layout(state, self.editor_layout(bounds), Instant::now());
         let Some(position) = cursor.position_in(bounds) else {
             return mouse::Interaction::None;
         };
@@ -563,7 +580,7 @@ where
         if over_scrollbar
             || over_fold_control
             || self
-                .hit_collapsed_indicator(layout, cursor, renderer)
+                .hit_collapsed_indicator(bounds, cursor, renderer, editor_layout)
                 .is_some()
         {
             mouse::Interaction::Pointer
@@ -592,18 +609,37 @@ impl<Message> AdvancedEditor<'_, Message> {
         EditorLayout::new(self.metrics, scroll, bounds.width, bounds.height)
     }
 
+    fn display_layout<Paragraph>(
+        &self,
+        state: &AdvancedEditorState<Paragraph>,
+        layout: EditorLayout,
+        now: Instant,
+    ) -> EditorLayout {
+        state
+            .smooth_scroll
+            .filter(|scroll| {
+                self.smooth_scrolling
+                    && scroll.matches(
+                        layout,
+                        self.viewport_key,
+                        self.viewport.visible_row_count(),
+                        self.viewport.wrap_columns(),
+                    )
+            })
+            .map_or(layout, |scroll| scroll.display_layout(now))
+    }
+
     fn hit_collapsed_indicator<Renderer>(
         &self,
-        layout: Layout<'_>,
+        bounds: Rectangle,
         cursor: mouse::Cursor,
         renderer: &Renderer,
+        editor_layout: EditorLayout,
     ) -> Option<FoldRange>
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        let bounds = layout.bounds();
         let position = cursor.position_in(bounds)?;
-        let editor_layout = self.editor_layout(bounds);
         let text_right =
             vertical_scrollbar_geometry(editor_layout, self.viewport.visible_row_count())
                 .map_or(bounds.width, |scrollbar| scrollbar.track.x);

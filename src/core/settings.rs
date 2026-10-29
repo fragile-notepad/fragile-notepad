@@ -105,6 +105,7 @@ pub struct EditorSettings {
     pub recent_file_limit: usize,
     pub zoom: f32,
     pub scroll_speed: f32,
+    pub smooth_scrolling: bool,
     pub search_results: SearchResultSettings,
     pub indentation: IndentationMode,
     pub appearance: AppearanceMode,
@@ -334,6 +335,7 @@ impl EditorSettings {
                     .attribute("word-wrap", self.word_wrap)
                     .attribute("wrap-column", self.wrap_column_limit.unwrap_or(0))
                     .attribute("indentation", indentation_key(self.indentation))
+                    .attribute("smooth-scrolling", self.smooth_scrolling)
                     .attribute("scroll-speed", format!("{:.3}", self.scroll_speed)),
             )
             .child(XmlElement::new("appearance").attribute("zoom", format!("{:.3}", self.zoom)))
@@ -430,6 +432,11 @@ impl EditorSettings {
                 .filter(|value| Self::valid_wrap_column(*value));
             if let Some(indentation) = editor.attribute("indentation").and_then(parse_indentation) {
                 settings.set_indentation(indentation);
+            }
+            if let Some(smooth_scrolling) =
+                editor.attribute("smooth-scrolling").and_then(parse_bool)
+            {
+                settings.smooth_scrolling = smooth_scrolling;
             }
             if let Some(scroll_speed) = editor
                 .attribute("scroll-speed")
@@ -546,6 +553,7 @@ impl Default for EditorSettings {
             recent_file_limit: Self::DEFAULT_RECENT_FILE_LIMIT,
             zoom: Self::DEFAULT_ZOOM,
             scroll_speed: Self::DEFAULT_SCROLL_SPEED,
+            smooth_scrolling: true,
             search_results: SearchResultSettings::default(),
             indentation: IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH),
             appearance: AppearanceMode::System,

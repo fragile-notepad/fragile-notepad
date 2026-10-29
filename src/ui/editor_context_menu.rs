@@ -136,6 +136,7 @@ impl Widget<Message, Theme, Renderer> for EditorContextMenu<'_> {
             let editor_state = tree.children[0]
                 .state
                 .downcast_mut::<AdvancedEditorState<<Renderer as text::Renderer>::Paragraph>>();
+            editor_state.finish_scrolling();
             editor_state.unfocus();
             editor_state.focus();
             let editor_layout = crate::editor::EditorLayout::new(

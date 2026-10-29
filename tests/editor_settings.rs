@@ -400,6 +400,25 @@ fn wrap_visual_settings_are_independent_and_backward_compatible() {
 }
 
 #[test]
+fn smooth_scrolling_defaults_on_for_existing_settings_and_preserves_explicit_choices() {
+    for xml in [
+        "<fragile-notepad-settings />",
+        "<fragile-notepad-settings><editor scroll-speed=\"2\" /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><editor smooth-scrolling=\"maybe\" /></fragile-notepad-settings>",
+    ] {
+        assert!(EditorSettings::from_xml_str(xml).smooth_scrolling);
+    }
+    for enabled in [false, true] {
+        let settings = EditorSettings {
+            smooth_scrolling: enabled,
+            ..EditorSettings::default()
+        };
+        let restored = EditorSettings::from_xml_str(&settings.to_xml_string());
+        assert_eq!(restored.smooth_scrolling, enabled);
+    }
+}
+
+#[test]
 fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
     let settings = EditorSettings::from_xml_str(
         "\
@@ -520,6 +539,7 @@ fn editor_settings_round_trip_preserves_general_and_decoration_settings() {
     settings.set_auto_save(true);
     settings.set_zoom(1.5);
     settings.set_scroll_speed(2.25);
+    settings.smooth_scrolling = false;
     settings.set_indentation(IndentationMode::spaces(2));
     settings.set_appearance(AppearanceMode::Light);
     settings.set_show_line_numbers(false);

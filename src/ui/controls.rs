@@ -1,10 +1,28 @@
 //! Reusable UI control builders.
 
-use iced::widget::{button, container, text};
+use iced::widget::{button, container, scrollable, text};
 use iced::{Element, Fill};
 
 use crate::message::Message;
 use crate::ui::styles;
+
+pub(super) const MENU_SCROLLBAR_WIDTH: f32 = 10.0;
+pub(super) const MENU_SCROLLBAR_GAP: f32 = 4.0;
+
+/// Keeps the menu's scrollbar separate from its clickable rows.
+pub fn menu_scrollable<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    scrollable(content)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(MENU_SCROLLBAR_WIDTH)
+                .scroller_width(5)
+                .spacing(MENU_SCROLLBAR_GAP),
+        ))
+        .style(styles::menu_scrollable)
+        .smooth_scroll(true)
+}
 
 pub fn centered_button_content<'a>(
     content: impl Into<Element<'a, Message>>,

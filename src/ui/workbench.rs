@@ -92,7 +92,10 @@ pub(crate) fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         } else {
             raster_cache::cached(toolbar::menu_bar(active_menu), retain)
         },
-        raster_cache::cached(toolbar::tool_bar(active_document), retain),
+        raster_cache::cached(
+            toolbar::tool_bar(active_document, settings, is_function_list_visible),
+            retain,
+        ),
         tabs::view_with_drag(
             workspace,
             editor_window,

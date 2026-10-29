@@ -1,25 +1,31 @@
+#[cfg(test)]
+mod cascade_tests;
+#[cfg(test)]
+mod render_tests;
+
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, tree};
-use iced::advanced::{Layout, Shell, Widget};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
+use iced::advanced::{Layout, Renderer as _, Shell, Widget};
+use iced::widget::{button, column, container, mouse_area, row, space, text};
 use iced::{Center, Element, Event, Fill, Length, Point, Rectangle, Size};
 
 use crate::core::{KeyBinding, ShortcutDisplay, ShortcutDisplayPart, ShortcutModifierIcon};
 use crate::message::{Menu, MenuPath, Message};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut::{self, ShortcutIcon};
-use crate::ui::{motion, styles};
+use crate::ui::{controls, motion, styles};
 
-const ROW_HEIGHT: f32 = 27.0;
-const PANEL_PADDING: u16 = 3;
-const PANEL_OUTER_PADDING: u16 = 4;
+const ROW_HEIGHT: f32 = 28.0;
+const PANEL_PADDING: u16 = 6;
+const SEPARATOR_HEIGHT: f32 = 9.0;
 const LABEL_TEXT_SIZE: f32 = 13.0;
 const SHORTCUT_TEXT_SIZE: f32 = 12.0;
 const SUBMENU_ICON_WIDTH: f32 = 14.0;
-const ROW_HORIZONTAL_PADDING: f32 = 18.0;
-const PANEL_HORIZONTAL_PADDING: f32 = 8.0;
+const ROW_PADDING: u16 = 10;
+const ROW_HORIZONTAL_PADDING: f32 = ROW_PADDING as f32 * 2.0;
+const PANEL_HORIZONTAL_PADDING: f32 = PANEL_PADDING as f32 * 2.0;
 const LABEL_SHORTCUT_GAP: f32 = 24.0;
 const LABEL_SUBMENU_GAP: f32 = 16.0;
 const TEXT_WIDTH_FACTOR: f32 = 0.62;
@@ -167,7 +173,13 @@ pub fn separator() -> MenuNode {
 }
 
 pub fn view(menu: Menu, tree: MenuTree, active_path: &[String]) -> Element<'_, Message> {
-    let base_width = panel_width(&tree.entries, tree.width);
+    // Leave room beside the rows for the scrollbar and its gap.
+    let base_width = panel_width(&tree.entries, tree.width)
+        + if tree.max_height.is_some() {
+            controls::MENU_SCROLLBAR_WIDTH + controls::MENU_SCROLLBAR_GAP
+        } else {
+            0.0
+        };
     let flyouts = active_flyouts(&tree.entries, active_path, tree.width);
     let base = motion::dropdown_with_key(
         format!("{menu:?}"),
@@ -187,8 +199,6 @@ pub fn view(menu: Menu, tree: MenuTree, active_path: &[String]) -> Element<'_, M
                         flyout.depth,
                     ),
                 ),
-                flyout.x,
-                flyout.y,
                 flyout.row_offset,
             )
         })
@@ -206,26 +216,23 @@ fn menu_panel(
 ) -> Element<'_, Message> {
     let content = entries
         .into_iter()
-        .fold(column![].spacing(0).padding(3), |column, entry| {
-            column.push(menu_entry_view(entry, active_path, depth, width))
+        .fold(column![].spacing(0), |column, entry| {
+            column.push(menu_entry_view(entry, active_path, depth))
         });
 
-    let content: Element<_> = if let Some(height) = max_height {
-        scrollable(content)
-            .style(styles::scrollable)
-            .smooth_scroll(true)
-            .height(Length::Fixed(height))
+    let content: Element<_> = if max_height.is_some() {
+        controls::menu_scrollable(content)
+            .height(Length::Shrink)
             .into()
     } else {
         content.into()
     };
-
-    let panel = container(content)
-        .padding([0, PANEL_OUTER_PADDING])
+    container(content)
+        .padding(PANEL_PADDING)
         .width(Length::Fixed(width))
-        .style(styles::menu_dropdown_band);
-
-    panel.into()
+        .max_height(max_height.unwrap_or(f32::INFINITY))
+        .style(styles::menu_dropdown_band)
+        .into()
 }
 
 #[derive(Debug, Clone)]
@@ -233,24 +240,18 @@ struct Flyout {
     entries: Vec<MenuNode>,
     depth: usize,
     width: f32,
-    x: f32,
-    y: f32,
     row_offset: f32,
 }
 
 struct PositionedLayer<'a> {
     element: Element<'a, Message>,
-    x: f32,
-    y: f32,
     row_offset: f32,
 }
 
 impl<'a> PositionedLayer<'a> {
-    fn new(element: Element<'a, Message>, x: f32, y: f32, row_offset: f32) -> Self {
+    fn new(element: Element<'a, Message>, row_offset: f32) -> Self {
         Self {
             element,
-            x,
-            y,
             row_offset,
         }
     }
@@ -265,6 +266,14 @@ impl<'a> MenuCascade<'a> {
     fn new(base: Element<'a, Message>, layers: Vec<PositionedLayer<'a>>) -> Self {
         Self { base, layers }
     }
+}
+
+fn panel_under_cursor(layout: Layout<'_>, cursor: mouse::Cursor) -> Option<usize> {
+    layout
+        .children()
+        .enumerate()
+        .filter_map(|(index, panel)| cursor.is_over(panel.bounds()).then_some(index))
+        .next_back()
 }
 
 impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
@@ -334,8 +343,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
                     let y = (parent_y + layer.row_offset)
                         .clamp(0.0, (available.height - size.height).max(0.0));
 
-                    layer.x = x;
-                    layer.y = y;
                     parent_x = x;
                     parent_y = y;
                     parent_width = size.width;
@@ -380,10 +387,17 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let front_panel = panel_under_cursor(layout, cursor);
         for index in (0..tree.children.len()).rev() {
             if shell.is_event_captured() {
                 break;
             }
+
+            let cursor = if front_panel.is_some_and(|front| index < front) {
+                mouse::Cursor::Unavailable
+            } else {
+                cursor
+            };
 
             if index == 0 {
                 self.base.as_widget_mut().update(
@@ -395,8 +409,8 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
                     shell,
                     viewport,
                 );
-            } else if let Some(layer) = self.layers.get_mut(index - 1) {
-                layer.element.as_widget_mut().update(
+            } else {
+                self.layers[index - 1].element.as_widget_mut().update(
                     &mut tree.children[index],
                     event,
                     layout.child(index),
@@ -406,6 +420,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
                     viewport,
                 );
             }
+        }
+        // Flyouts can extend beyond the base panel's bounds. Their padding
+        // must also stop clicks from reaching the menu's dismiss area.
+        if front_panel.is_some() && matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_))) {
+            shell.capture_event();
         }
     }
 
@@ -417,7 +436,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        for index in (0..tree.children.len()).rev() {
+        if let Some(index) = panel_under_cursor(layout, cursor) {
             let interaction = if index == 0 {
                 self.base.as_widget().mouse_interaction(
                     &tree.children[index],
@@ -426,21 +445,23 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
                     viewport,
                     renderer,
                 )
-            } else if let Some(layer) = self.layers.get(index - 1) {
-                layer.element.as_widget().mouse_interaction(
-                    &tree.children[index],
-                    layout.child(index),
-                    cursor,
-                    viewport,
-                    renderer,
-                )
             } else {
-                mouse::Interaction::None
+                self.layers[index - 1]
+                    .element
+                    .as_widget()
+                    .mouse_interaction(
+                        &tree.children[index],
+                        layout.child(index),
+                        cursor,
+                        viewport,
+                        renderer,
+                    )
             };
 
             if interaction != mouse::Interaction::None {
                 return interaction;
             }
+            return mouse::Interaction::Idle;
         }
 
         mouse::Interaction::None
@@ -456,14 +477,25 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        let front_panel = panel_under_cursor(layout, cursor);
         std::iter::once(&self.base)
             .chain(self.layers.iter().map(|layer| &layer.element))
             .zip(&tree.children)
             .zip(layout.children())
-            .for_each(|((element, tree), layout)| {
-                element
-                    .as_widget()
-                    .draw(tree, renderer, theme, style, layout, cursor, viewport);
+            .enumerate()
+            .for_each(|(index, ((element, tree), layout))| {
+                let cursor = if front_panel.is_some_and(|front| index < front) {
+                    mouse::Cursor::Unavailable
+                } else {
+                    cursor
+                };
+                // A panel can fold back over an ancestor. Separate layers keep
+                // its background above the ancestor's text and icons.
+                renderer.with_layer(*viewport, |renderer| {
+                    element
+                        .as_widget()
+                        .draw(tree, renderer, theme, style, layout, cursor, viewport);
+                });
             });
     }
 }
@@ -477,31 +509,21 @@ impl<'a> From<MenuCascade<'a>> for Element<'a, Message> {
 fn active_flyouts(entries: &[MenuNode], active_path: &[String], min_width: f32) -> Vec<Flyout> {
     let mut flyouts = Vec::new();
     let mut entries = entries;
-    let mut parent_x = 0.0;
-    let mut parent_y = 0.0;
-    let mut parent_width = panel_width(entries, min_width);
 
     for (depth, id) in active_path.iter().enumerate() {
         let Some((row_index, children)) = active_submenu(entries, id) else {
             break;
         };
-        let x = parent_x + parent_width;
         let row_offset = submenu_y(entries, row_index);
-        let y = parent_y + row_offset;
         let width = panel_width(children, min_width);
 
         flyouts.push(Flyout {
             entries: children.clone(),
             depth: depth + 1,
             width,
-            x,
-            y,
             row_offset,
         });
 
-        parent_x = x;
-        parent_y = y;
-        parent_width = width;
         entries = children;
     }
 
@@ -531,7 +553,7 @@ fn submenu_y(entries: &[MenuNode], row_index: usize) -> f32 {
             .take(row_index)
             .map(|entry| {
                 if matches!(entry, MenuNode::Separator) {
-                    7.0
+                    SEPARATOR_HEIGHT
                 } else {
                     ROW_HEIGHT
                 }
@@ -594,12 +616,7 @@ fn shortcut_part_width(part: &ShortcutDisplayPart) -> f32 {
     }
 }
 
-fn menu_entry_view(
-    entry: MenuNode,
-    active_path: &[String],
-    depth: usize,
-    width: f32,
-) -> Element<'_, Message> {
+fn menu_entry_view(entry: MenuNode, active_path: &[String], depth: usize) -> Element<'_, Message> {
     match entry {
         MenuNode::Item {
             label,
@@ -608,16 +625,17 @@ fn menu_entry_view(
         } => mouse_area(
             button(
                 row![
-                    text(label).size(13),
+                    text(label).size(LABEL_TEXT_SIZE),
                     space::horizontal(),
                     shortcut_hint_view(shortcut),
                 ]
+                .height(Fill)
                 .align_y(Center)
                 .width(Fill),
             )
             .height(Length::Fixed(ROW_HEIGHT))
             .width(Fill)
-            .padding([5, 9])
+            .padding([0, ROW_PADDING])
             .style(styles::menu_dropdown_item)
             .on_press(message),
         )
@@ -631,15 +649,16 @@ fn menu_entry_view(
         } => mouse_area(
             container(
                 row![
-                    text(label).size(13),
+                    text(label).size(LABEL_TEXT_SIZE),
                     space::horizontal(),
                     shortcut_hint_view(shortcut)
                 ]
+                .height(Fill)
                 .align_y(Center),
             )
             .height(Length::Fixed(ROW_HEIGHT))
             .width(Fill)
-            .padding([5, 9])
+            .padding([0, ROW_PADDING])
             .style(styles::menu_dropdown_disabled),
         )
         .on_enter(Message::MenuPathHovered(MenuPath {
@@ -657,16 +676,21 @@ fn menu_entry_view(
             mouse_area(
                 container(
                     row![
-                        text(label).size(13),
+                        text(label).size(LABEL_TEXT_SIZE),
                         space::horizontal(),
-                        hero::icon(HeroIcon::ChevronRight, 14, IconTone::Muted)
+                        hero::icon(
+                            HeroIcon::ChevronRight,
+                            SUBMENU_ICON_WIDTH as u32,
+                            IconTone::Muted
+                        )
                     ]
+                    .height(Fill)
                     .align_y(Center)
                     .width(Fill),
                 )
                 .height(Length::Fixed(ROW_HEIGHT))
                 .width(Fill)
-                .padding([5, 9])
+                .padding([0, ROW_PADDING])
                 .style(styles::menu_submenu_item(is_active)),
             )
             .on_enter(Message::MenuPathHovered(path))
@@ -678,9 +702,9 @@ fn menu_entry_view(
                     .height(1)
                     .style(styles::separator),
             )
-            .height(7)
-            .width(Length::Fixed(width - 8.0))
-            .padding([3, 0])
+            .height(SEPARATOR_HEIGHT)
+            .width(Fill)
+            .padding([4, ROW_PADDING])
             .style(styles::transparent),
         )
         .on_enter(Message::MenuPathHovered(MenuPath {
@@ -694,7 +718,7 @@ fn menu_entry_view(
 fn shortcut_hint_view<'a>(shortcut: Option<MenuShortcutHint>) -> Element<'a, Message> {
     match shortcut {
         Some(MenuShortcutHint::Text(shortcut)) => text(shortcut)
-            .size(12)
+            .size(SHORTCUT_TEXT_SIZE)
             .style(styles::menu_shortcut_hint)
             .into(),
         Some(MenuShortcutHint::Binding(binding)) => shortcut_binding_view(binding),
@@ -709,14 +733,18 @@ fn shortcut_binding_view<'a>(display: ShortcutDisplay) -> Element<'a, Message> {
         binding = binding.push(shortcut_display_part(modifier));
     }
 
-    binding = binding.push(text(display.key).size(12).style(styles::menu_shortcut_hint));
+    binding = binding.push(
+        text(display.key)
+            .size(SHORTCUT_TEXT_SIZE)
+            .style(styles::menu_shortcut_hint),
+    );
     binding.into()
 }
 
 fn shortcut_display_part<'a>(part: ShortcutDisplayPart) -> Element<'a, Message> {
     match part {
         ShortcutDisplayPart::Text(label) => text(label)
-            .size(12)
+            .size(SHORTCUT_TEXT_SIZE)
             .style(styles::menu_shortcut_hint)
             .into(),
         ShortcutDisplayPart::Icon(icon) => shortcut_modifier_icon(icon),
@@ -747,20 +775,20 @@ fn active_path_to(active_path: &[String], depth: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Message, ROW_HEIGHT, active_flyouts, item, item_with_shortcut, item_with_shortcut_binding,
-        panel_width, submenu,
+        Message, PANEL_PADDING, ROW_HEIGHT, active_flyouts, item, item_with_shortcut,
+        item_with_shortcut_binding, panel_width, submenu,
     };
     use crate::core::{KeyBinding, ShortcutKey, ShortcutModifiers};
 
     #[test]
-    fn nested_flyouts_follow_parent_width_and_row_offsets() {
+    fn nested_flyouts_keep_child_widths_and_parent_row_offsets() {
         for root_offset in [false, true] {
             for label in [
-                "Character sets",
-                "A very long parent submenu label that expands the menu",
+                "Arabic",
+                "A very long child menu label that expands the menu",
             ] {
                 let children = vec![
-                    item("Arabic", Message::None),
+                    item(label, Message::None),
                     item("Baltic", Message::None),
                     submenu(
                         "western",
@@ -773,24 +801,20 @@ mod tests {
                 if root_offset {
                     entries.push(item("Root item", Message::None));
                 }
-                entries.push(submenu("sets", label, children));
-                let root_width = panel_width(&entries, 260.0);
+                entries.push(submenu("sets", "Character sets", children));
                 let flyouts =
                     active_flyouts(&entries, &["sets".to_owned(), "western".to_owned()], 260.0);
-                let parent_y = 3.0 + if root_offset { ROW_HEIGHT } else { 0.0 };
+                let parent_y =
+                    f32::from(PANEL_PADDING) + if root_offset { ROW_HEIGHT } else { 0.0 };
 
                 assert_eq!(flyouts.len(), 2);
                 assert_eq!(
-                    (flyouts[0].depth, flyouts[0].x, flyouts[0].y),
-                    (1, root_width, parent_y)
+                    (flyouts[0].depth, flyouts[0].width, flyouts[0].row_offset),
+                    (1, child_width, parent_y)
                 );
                 assert_eq!(
-                    (flyouts[1].depth, flyouts[1].x, flyouts[1].y),
-                    (
-                        2,
-                        root_width + child_width,
-                        parent_y + 3.0 + ROW_HEIGHT * 2.0
-                    )
+                    (flyouts[1].depth, flyouts[1].width, flyouts[1].row_offset),
+                    (2, 260.0, f32::from(PANEL_PADDING) + ROW_HEIGHT * 2.0)
                 );
             }
         }

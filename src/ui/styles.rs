@@ -396,7 +396,6 @@ pub fn tool_bar(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(tool_bar_background(theme))),
         text_color: Some(palette.text),
-        border: hairline(palette.border_soft),
         ..container::Style::default()
     }
 }
@@ -1147,17 +1146,48 @@ pub fn menu_dropdown_band(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(palette.overlay)),
         text_color: Some(palette.text),
-        border: border(1.0, palette.border_soft, RADIUS),
-        shadow: elevation(palette, 5.0, 18.0),
+        border: border(1.0, palette.border.scale_alpha(0.7), 8.0),
+        shadow: elevation(palette, 4.0, 16.0),
         ..container::Style::default()
     }
+}
+
+pub fn menu_scrollable(
+    theme: &Theme,
+    status: iced::widget::scrollable::Status,
+) -> iced::widget::scrollable::Style {
+    use iced::widget::scrollable::Status;
+    let palette = VisualPalette::from_theme(theme);
+    let active = matches!(
+        status,
+        Status::Hovered {
+            is_vertical_scrollbar_hovered: true,
+            ..
+        } | Status::Dragged {
+            is_vertical_scrollbar_dragged: true,
+            ..
+        }
+    );
+    let mut style = scrollable(theme, status);
+    style.vertical_rail.background = active.then(|| palette.border_soft.scale_alpha(0.45).into());
+    style.vertical_rail.border = border(0.0, Color::TRANSPARENT, 5.0);
+    style.vertical_rail.scroller.background = if active {
+        palette.muted_text
+    } else {
+        palette.faint_text.scale_alpha(0.6)
+    }
+    .into();
+    style.vertical_rail.scroller.border = border(0.0, Color::TRANSPARENT, 5.0);
+    style
 }
 
 pub fn menu_dropdown_item(theme: &Theme, status: button::Status) -> button::Style {
     let palette = VisualPalette::from_theme(theme);
     let background = match status {
-        button::Status::Hovered => Some(Background::Color(palette.selected)),
-        button::Status::Pressed => Some(Background::Color(palette.selected)),
+        button::Status::Hovered => Some(Background::Color(palette.accent_soft)),
+        button::Status::Pressed => Some(Background::Color(
+            palette.accent_soft.mix(palette.accent, 0.12),
+        )),
         _ => None,
     };
 
@@ -1193,7 +1223,7 @@ pub fn menu_submenu_item(is_active: bool) -> impl Fn(&Theme) -> container::Style
 
         container::Style {
             background: if is_active {
-                Some(Background::Color(palette.selected))
+                Some(Background::Color(palette.accent_soft))
             } else {
                 None
             },
@@ -1274,15 +1304,7 @@ pub fn dropdown_option(
 }
 
 pub fn dropdown_menu(theme: &Theme) -> container::Style {
-    let palette = VisualPalette::from_theme(theme);
-
-    container::Style {
-        background: Some(Background::Color(palette.overlay)),
-        text_color: Some(palette.text),
-        border: border(1.0, palette.border_soft, RADIUS),
-        shadow: elevation(palette, 4.0, 14.0),
-        ..container::Style::default()
-    }
+    menu_dropdown_band(theme)
 }
 
 pub fn tool_button(theme: &Theme, status: button::Status) -> button::Style {
@@ -1328,6 +1350,22 @@ pub fn icon_button(theme: &Theme, status: button::Status) -> button::Style {
             CONTROL_RADIUS,
         ),
         ..button::Style::default()
+    }
+}
+
+pub fn toolbar_button(is_selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let mut style = icon_button(theme, status);
+        if is_selected && !matches!(status, button::Status::Disabled) {
+            let palette = VisualPalette::from_theme(theme);
+            style.background = Some(Background::Color(match status {
+                button::Status::Hovered => palette.accent_soft.mix(palette.accent, 0.12),
+                button::Status::Pressed => palette.accent_soft.mix(palette.accent, 0.2),
+                _ => palette.accent_soft,
+            }));
+            style.border = border(1.0, palette.accent.scale_alpha(0.5), CONTROL_RADIUS);
+        }
+        style
     }
 }
 

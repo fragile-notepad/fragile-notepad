@@ -1,8 +1,11 @@
+#[cfg(test)]
+mod tests;
+
 use iced::highlighter;
 use iced::widget::{
     button, column, container, mouse_area, opaque, row, scrollable, space, stack, text, tooltip,
 };
-use iced::{Center, Element, Fill, Length};
+use iced::{Center, Element, Fill};
 
 use crate::core::{Document, EditorSettings, ShortcutCommand, TextEncoding};
 use crate::editor::EditorAction;
@@ -73,30 +76,6 @@ impl WindowMenuState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Icon {
-    New,
-    Open,
-    Save,
-    SaveAll,
-    Close,
-    CloseAll,
-    Print,
-    Cut,
-    Copy,
-    Paste,
-    Undo,
-    Redo,
-    Find,
-    Replace,
-    ZoomIn,
-    ZoomOut,
-    Wrap,
-    AllCharacters,
-    IndentGuide,
-    FunctionList,
-}
-
 pub fn menu_bar<'a>(active_menu: Option<Menu>) -> Element<'a, Message> {
     let menu_items = MENU_ITEMS
         .iter()
@@ -146,7 +125,12 @@ pub fn menu_overlay<'a>(
                         space::horizontal(),
                     ]
                     .spacing(0)
-                    .padding([0, MENU_BAR_PADDING[1]])
+                    .padding(iced::Padding {
+                        top: 4.0,
+                        right: f32::from(MENU_BAR_PADDING[1]),
+                        bottom: 8.0,
+                        left: f32::from(MENU_BAR_PADDING[1]),
+                    })
                     .width(Fill),
                 ]
                 .width(Fill)
@@ -173,72 +157,99 @@ fn menu_prefix<'a>(active_menu: Menu) -> Element<'a, Message> {
         .into()
 }
 
-pub fn tool_bar<'a>(document: Option<&Document>) -> Element<'a, Message> {
-    let buttons = row![
-        icon_button(Icon::New, "New", Message::NewFile),
-        icon_button(Icon::Open, "Open", Message::OpenFile),
-        icon_button(Icon::Save, "Save", Message::SaveFile),
+pub fn tool_bar<'a>(
+    document: Option<&Document>,
+    settings: &EditorSettings,
+    is_function_list_visible: bool,
+) -> Element<'a, Message> {
+    let files = tool_group([
+        icon_button(ColoredIcon::New, "New", Message::NewFile),
+        icon_button(ColoredIcon::Open, "Open", Message::OpenFile),
+        icon_button(ColoredIcon::Save, "Save", Message::SaveFile),
         icon_button(
-            Icon::SaveAll,
+            ColoredIcon::SaveAll,
             "Save all in this window",
-            Message::SaveScoped(BulkScope::ThisWindow)
+            Message::SaveScoped(BulkScope::ThisWindow),
         ),
-        icon_button(Icon::Close, "Close", Message::CloseFile),
+        icon_button(ColoredIcon::Close, "Close", Message::CloseFile),
         icon_button(
-            Icon::CloseAll,
+            ColoredIcon::CloseAll,
             "Close all in this window",
-            Message::CloseScoped(BulkScope::ThisWindow)
+            Message::CloseScoped(BulkScope::ThisWindow),
         ),
-        disabled_icon_button(Icon::Print, "Print"),
-        separator(),
-        editor_icon_button(Icon::Cut, "Cut", Message::Cut, document),
-        editor_icon_button(Icon::Copy, "Copy", Message::Copy, document),
-        editor_icon_button(Icon::Paste, "Paste", Message::Paste, document),
-        separator(),
-        editor_icon_button(Icon::Undo, "Undo", Message::Undo, document),
-        editor_icon_button(Icon::Redo, "Redo", Message::Redo, document),
-        separator(),
-        icon_button(Icon::Find, "Find", Message::ToggleFind),
-        icon_button(Icon::Replace, "Replace", Message::ShowInlineReplace),
-        separator(),
-        icon_button(Icon::ZoomIn, "Zoom in", Message::ZoomIn),
-        icon_button(Icon::ZoomOut, "Zoom out", Message::ZoomOut),
-        separator(),
-        icon_button(Icon::Wrap, "Word wrap", Message::ToggleWordWrap),
-        icon_button(
-            Icon::AllCharacters,
+    ]);
+    let editing = tool_group([
+        editor_icon_button(ColoredIcon::Undo, "Undo", Message::Undo, document),
+        editor_icon_button(ColoredIcon::Redo, "Redo", Message::Redo, document),
+        editor_icon_button(ColoredIcon::Cut, "Cut", Message::Cut, document),
+        editor_icon_button(ColoredIcon::Copy, "Copy", Message::Copy, document),
+        editor_icon_button(ColoredIcon::Paste, "Paste", Message::Paste, document),
+    ]);
+    let search = tool_group([
+        icon_button(ColoredIcon::Find, "Find", Message::ToggleFind),
+        icon_button(ColoredIcon::Replace, "Replace", Message::ShowInlineReplace),
+    ]);
+    let decorations = &settings.decorations;
+    let view = tool_group([
+        icon_button(ColoredIcon::ZoomOut, "Zoom out", Message::ZoomOut),
+        icon_button(ColoredIcon::ZoomIn, "Zoom in", Message::ZoomIn),
+        toggle_icon_button(
+            ColoredIcon::WordWrap,
+            "Word wrap",
+            Message::ToggleWordWrap,
+            settings.word_wrap,
+        ),
+        toggle_icon_button(
+            ColoredIcon::AllCharacters,
             "Show all characters",
             Message::ToggleAllCharacters,
+            decorations.show_spaces
+                && decorations.show_tabs
+                && decorations.show_end_of_line_markers,
         ),
-        icon_button(
-            Icon::IndentGuide,
+        toggle_icon_button(
+            ColoredIcon::IndentGuide,
             "Indent guide",
             Message::ToggleIndentationGuides,
+            decorations.show_indentation_guides,
         ),
-        separator(),
-        icon_button(
-            Icon::FunctionList,
+        toggle_icon_button(
+            ColoredIcon::FunctionList,
             "Function List",
             Message::ToggleFunctionList,
+            is_function_list_visible,
         ),
-        space::horizontal(),
+    ]);
+    let buttons = row![
+        files,
+        separator(),
+        editing,
+        separator(),
+        search,
+        separator(),
+        view
     ]
-    .spacing(1)
-    .padding([2, 4])
-    .align_y(Center)
-    .width(Fill);
+    .padding([4, 8])
+    .align_y(Center);
 
     container(
         scrollable(buttons)
             .style(styles::scrollable)
             .smooth_scroll(true)
-            .horizontal()
-            .width(Fill),
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new().width(3).scroller_width(3),
+            ))
+            .width(Fill)
+            .height(Fill),
     )
-    .height(30)
+    .height(36)
     .width(Fill)
     .style(styles::tool_bar)
     .into()
+}
+
+fn tool_group<'a>(buttons: impl IntoIterator<Item = Element<'a, Message>>) -> Element<'a, Message> {
+    row(buttons).spacing(1).align_y(Center).into()
 }
 
 fn menu_button<'a>(
@@ -629,7 +640,7 @@ fn editor_command_available(message: &Message, document: Option<&Document>) -> b
 }
 
 fn editor_icon_button<'a>(
-    icon: Icon,
+    icon: ColoredIcon,
     label: &'static str,
     message: Message,
     document: Option<&Document>,
@@ -1175,37 +1186,50 @@ fn encoding_character_sets() -> Vec<MenuNode> {
 
 fn menu_width(menu: Menu) -> f32 {
     match menu {
-        Menu::Language => 288.0,
-        Menu::Encoding => 260.0,
+        Menu::Language | Menu::Encoding => 260.0,
         Menu::Window => 244.0,
         _ => 202.0,
     }
 }
 
-fn icon_button<'a>(icon: Icon, label: &'static str, message: Message) -> Element<'a, Message> {
-    toolbar_button(icon, label, Some(message))
+fn icon_button<'a>(
+    icon: ColoredIcon,
+    label: &'static str,
+    message: Message,
+) -> Element<'a, Message> {
+    toolbar_button(icon, label, Some(message), false)
 }
 
-fn disabled_icon_button<'a>(icon: Icon, label: &'static str) -> Element<'a, Message> {
-    toolbar_button(icon, label, None)
+fn disabled_icon_button<'a>(icon: ColoredIcon, label: &'static str) -> Element<'a, Message> {
+    toolbar_button(icon, label, None, false)
+}
+
+fn toggle_icon_button<'a>(
+    icon: ColoredIcon,
+    label: &'static str,
+    message: Message,
+    is_selected: bool,
+) -> Element<'a, Message> {
+    toolbar_button(icon, label, Some(message), is_selected)
 }
 
 fn toolbar_button<'a>(
-    icon: Icon,
+    icon: ColoredIcon,
     label: &'static str,
     message: Option<Message>,
+    is_selected: bool,
 ) -> Element<'a, Message> {
     let icon = if message.is_some() {
-        colored::icon(colored_icon(icon), 18)
+        colored::icon(icon, 18)
     } else {
-        colored::disabled_icon(colored_icon(icon), 18)
+        colored::disabled_icon(icon, 18)
     };
     tooltip(
         button(centered_button_content(icon))
-            .width(25)
-            .height(24)
-            .padding(3)
-            .style(styles::icon_button)
+            .width(28)
+            .height(28)
+            .padding(0)
+            .style(styles::toolbar_button(is_selected))
             .on_press_maybe(message),
         container(text(label).size(12))
             .padding([4, 7])
@@ -1217,35 +1241,9 @@ fn toolbar_button<'a>(
 }
 
 fn separator<'a>() -> Element<'a, Message> {
-    container(space::horizontal().width(1))
-        .height(22)
-        .width(Length::Fixed(5.0))
-        .padding([2, 2])
-        .style(styles::separator)
+    // Paint only the line, leaving the space between groups transparent.
+    container(container(space::horizontal().width(1).height(16)).style(styles::separator))
+        .center_x(13)
+        .center_y(28)
         .into()
-}
-
-fn colored_icon(icon: Icon) -> ColoredIcon {
-    match icon {
-        Icon::New => ColoredIcon::New,
-        Icon::Open => ColoredIcon::Open,
-        Icon::Save => ColoredIcon::Save,
-        Icon::SaveAll => ColoredIcon::SaveAll,
-        Icon::Close => ColoredIcon::Close,
-        Icon::CloseAll => ColoredIcon::CloseAll,
-        Icon::Print => ColoredIcon::Print,
-        Icon::Cut => ColoredIcon::Cut,
-        Icon::Copy => ColoredIcon::Copy,
-        Icon::Paste => ColoredIcon::Paste,
-        Icon::Undo => ColoredIcon::Undo,
-        Icon::Redo => ColoredIcon::Redo,
-        Icon::Find => ColoredIcon::Find,
-        Icon::Replace => ColoredIcon::Replace,
-        Icon::ZoomIn => ColoredIcon::ZoomIn,
-        Icon::ZoomOut => ColoredIcon::ZoomOut,
-        Icon::Wrap => ColoredIcon::WordWrap,
-        Icon::AllCharacters => ColoredIcon::AllCharacters,
-        Icon::IndentGuide => ColoredIcon::IndentGuide,
-        Icon::FunctionList => ColoredIcon::FunctionList,
-    }
 }

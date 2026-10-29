@@ -9,11 +9,12 @@ use fragile_notepad::{
         AppearanceMode, Document, DocumentId, EditorSettings, SearchMode, SearchResultSettings,
         ShortcutCommand, ShortcutConflict, ShortcutGroup, Workspace,
     },
-    message::{AdvancedSearchTab, Message, SettingsCategory, WindowTarget},
+    message::{AdvancedSearchTab, Menu, Message, SettingsCategory, WindowTarget},
     search_dialog::SearchDialogState,
     settings_dialog::SettingsDialogState,
     ui::{
-        advanced_search_panel, go_to_line_prompt, settings_panel, styles, tab_list_dialog,
+        advanced_search_panel, go_to_line_prompt, settings_panel, styles, tab_list_dialog, tabs,
+        toolbar,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -26,7 +27,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "Usage: preview_dialogs [--panel <name>]
-Panels: all (default), settings, search, go-to-line, windows, tabs, editor
+Panels: all (default), settings, search, go-to-line, windows, tabs, editor, toolbar, menus
 Output: target/dialog-review/
 Use --help to display this help.";
 
@@ -39,6 +40,8 @@ enum PreviewPanel {
     Windows,
     Tabs,
     Editor,
+    Toolbar,
+    Menus,
 }
 
 impl PreviewPanel {
@@ -51,6 +54,8 @@ impl PreviewPanel {
             "windows" => Some(Self::Windows),
             "tabs" => Some(Self::Tabs),
             "editor" => Some(Self::Editor),
+            "toolbar" => Some(Self::Toolbar),
+            "menus" => Some(Self::Menus),
             _ => None,
         }
     }
@@ -105,6 +110,89 @@ fn main() -> ExitCode {
     ] {
         let theme = styles::modern_theme(appearance).unwrap();
         for (width, height, size_name) in [(900, 600, "normal"), (640, 364, "minimum")] {
+            if selected.includes(PreviewPanel::Menus) {
+                let mut workspace = Workspace::new();
+                let document_id = workspace.insert_loaded_file(
+                    "main.rs",
+                    "fn main() {\n    println!(\"Hello, world!\");\n}\n",
+                );
+                let settings = EditorSettings {
+                    appearance,
+                    ..EditorSettings::default()
+                };
+                let document = workspace.document_mut(document_id).unwrap();
+                document.set_word_wrap(settings.word_wrap);
+                document.set_decoration_settings(settings.decoration_settings());
+                let document = workspace.active_document().unwrap();
+                document.ensure_syntax_cache(
+                    settings.resolved_syntax_theme(appearance == AppearanceMode::Dark),
+                );
+                for (menu, path, menu_name) in [
+                    (Menu::Language, vec![], "language"),
+                    (Menu::File, vec![], "file"),
+                    (
+                        Menu::Encoding,
+                        vec!["character-sets".to_owned()],
+                        "encoding",
+                    ),
+                    (
+                        Menu::Encoding,
+                        vec!["character-sets".to_owned(), "baltic".to_owned()],
+                        "encoding-baltic",
+                    ),
+                ] {
+                    let background = editor_preview(&workspace, &settings, Some(menu), false);
+                    render(
+                        &mut renderer,
+                        iced::widget::stack![
+                            background,
+                            toolbar::menu_overlay(
+                                Some(menu),
+                                &path,
+                                toolbar::WindowMenuState::default(),
+                                &settings,
+                                Some(document),
+                            ),
+                        ]
+                        .into(),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("menu-{menu_name}-{name}-{size_name}"),
+                    );
+                }
+            }
+            if selected.includes(PreviewPanel::Toolbar) {
+                let mut workspace = Workspace::new();
+                workspace.insert_loaded_file(
+                    "main.rs",
+                    "fn main() {\n    println!(\"Hello, world!\");\n}\n",
+                );
+                for (enabled, state) in [(false, "off"), (true, "on")] {
+                    let mut settings = EditorSettings {
+                        appearance,
+                        word_wrap: enabled,
+                        ..EditorSettings::default()
+                    };
+                    settings.set_show_spaces(enabled);
+                    settings.set_show_tabs(enabled);
+                    settings.set_show_end_of_line_markers(enabled);
+                    settings.set_show_indentation_guides(enabled);
+                    let document = workspace.active_document_mut().unwrap();
+                    document.set_word_wrap(settings.word_wrap);
+                    document.set_decoration_settings(settings.decoration_settings());
+                    let document = workspace.active_document().unwrap();
+                    document.ensure_syntax_cache(
+                        settings.resolved_syntax_theme(appearance == AppearanceMode::Dark),
+                    );
+                    render(
+                        &mut renderer,
+                        editor_preview(&workspace, &settings, None, enabled),
+                        &theme,
+                        Size::new(width, 180),
+                        &format!("toolbar-{state}-{name}-{size_name}"),
+                    );
+                }
+            }
             if selected.includes(PreviewPanel::GoToLine) {
                 for (value, error, suffix) in [
                     ("120", None, "ready"),
@@ -478,6 +566,25 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn editor_preview<'a>(
+    workspace: &'a Workspace,
+    settings: &'a EditorSettings,
+    active_menu: Option<Menu>,
+    functions_visible: bool,
+) -> Element<'a, Message> {
+    let document = workspace.active_document().unwrap();
+    iced::widget::container(iced::widget::column![
+        toolbar::menu_bar(active_menu),
+        toolbar::tool_bar(Some(document), settings, functions_visible),
+        tabs::view(workspace, None, None),
+        fragile_notepad::ui::editor::view(document, settings),
+    ])
+    .width(iced::Fill)
+    .height(iced::Fill)
+    .style(|theme| styles::app_shell(theme).background(styles::app_shell_background(theme)))
+    .into()
+}
+
 fn render_selector_transition(
     renderer: &mut Renderer,
     content: Element<'_, Message>,
@@ -521,7 +628,7 @@ fn render(
     let viewport = Rectangle::with_size(size);
     let mut tree = Tree::empty();
     tree.diff(content.as_widget_mut());
-    let node =
+    let mut node =
         content
             .as_widget_mut()
             .layout(&mut tree, renderer, &layout::Limits::new(size, size));
@@ -538,6 +645,10 @@ fn render(
             &mut shell,
             &viewport,
         );
+        node =
+            content
+                .as_widget_mut()
+                .layout(&mut tree, renderer, &layout::Limits::new(size, size));
     }
     renderer.reset(viewport);
     content.as_widget().draw(

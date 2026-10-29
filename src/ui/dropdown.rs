@@ -6,12 +6,12 @@ use std::rc::Rc;
 use iced::advanced::widget::{self, Operation, Tree, operation, tree};
 use iced::advanced::{Layout, Shell, Widget, layout, mouse, overlay, renderer};
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Center, Element, Event, Fill, Length, Rectangle, Renderer, Size, Theme, Vector};
 
 use crate::message::Message;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
-use crate::ui::{motion, styles};
+use crate::ui::{controls, motion, styles};
 
 const ROW_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 4.0;
@@ -328,15 +328,10 @@ impl<T: Clone + PartialEq> Widget<Message, Theme, Renderer> for Dropdown<'_, T> 
                 )
             });
         let mut content = motion::dropdown(
-            container(
-                scrollable(rows)
-                    .style(styles::scrollable)
-                    .smooth_scroll(true)
-                    .height(Length::Shrink),
-            )
-            .padding(MENU_PADDING)
-            .width(Fill)
-            .style(styles::dropdown_menu),
+            container(controls::menu_scrollable(rows).height(Length::Shrink))
+                .padding(MENU_PADDING)
+                .width(Fill)
+                .style(styles::dropdown_menu),
         );
         state.menu.diff(content.as_widget_mut());
         Some(overlay::Element::new(Box::new(Menu {

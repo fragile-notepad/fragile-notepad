@@ -43,6 +43,21 @@ pub struct Renderer {
     settings: renderer::Settings,
     layers: layer::Stack,
     engine: Engine, // TODO: Shared engine
+    opacity_recordings: Vec<OpacityRecording>,
+    opacity_pixels: Vec<OpacityPixels>,
+}
+
+#[derive(Debug)]
+struct OpacityRecording {
+    parent: layer::Stack,
+    bounds: Rectangle,
+    opacity: f32,
+}
+
+#[derive(Debug)]
+struct OpacityPixels {
+    pixels: tiny_skia::Pixmap,
+    mask: tiny_skia::Mask,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,6 +79,8 @@ impl Renderer {
             settings,
             layers: layer::Stack::new(),
             engine: Engine::new(),
+            opacity_recordings: Vec::new(),
+            opacity_pixels: Vec::new(),
         }
     }
 
@@ -93,7 +110,6 @@ impl Renderer {
         scrolls: &[layer::Scroll],
     ) -> DrawStats {
         let scale_factor = viewport.scale_factor();
-        let scale = Transformation::scale(scale_factor);
         self.layers.flush();
         let text_stats_before = self.engine.text_stats();
         let mut stats = DrawStats::default();
@@ -141,333 +157,398 @@ impl Renderer {
             );
         }
 
-        let Some(damage_bounds) = damage_regions.iter().copied().reduce(|a, b| a.union(&b)) else {
+        if damage_regions.is_empty() {
             self.engine.trim();
             stats.clip_mask = ClipMaskStats::default();
             stats.text_pipeline = self.engine.text_stats().saturating_delta(text_stats_before);
             return stats;
-        };
+        }
 
         let mut clip_mask = engine::ClipMask::new(clip_mask);
 
-        for (layer_index, layer) in self.layers.iter().enumerate() {
-            let layer_physical_bounds = layer.bounds * scale_factor;
-            let layer_regions = collect_clip_regions(&damage_regions, layer_physical_bounds);
+        draw_layers(
+            &mut self.engine,
+            self.layers.as_slice(),
+            pixels,
+            &mut clip_mask,
+            &damage_regions,
+            scale_factor,
+            &mut self.opacity_pixels,
+            &mut stats,
+        );
+        if !self
+            .layers
+            .as_slice()
+            .iter()
+            .any(|layer| layer.opacity.is_some())
+        {
+            self.opacity_pixels.clear();
+        }
+        self.engine.trim();
+        stats.clip_mask = clip_mask.stats();
+        stats.text_pipeline = self.engine.text_stats().saturating_delta(text_stats_before);
+        trace::flush();
+        stats
+    }
+}
 
-            if layer_regions.is_empty() {
-                if trace::enabled() {
-                    trace::event(
-                        "tiny_skia_layer_skip",
-                        0,
-                        format_args!(
-                            "layer={layer_index} reason=no_intersection damage={} layer={}",
-                            format_rect(damage_bounds),
-                            format_rect(layer_physical_bounds)
-                        ),
-                    );
-                }
-                continue;
-            };
+fn draw_layers(
+    engine: &mut Engine,
+    layers: &[Layer],
+    pixels: &mut tiny_skia::PixmapMut<'_>,
+    clip_mask: &mut engine::ClipMask<'_>,
+    damage_regions: &[Rectangle],
+    scale_factor: f32,
+    scratch: &mut Vec<OpacityPixels>,
+    stats: &mut DrawStats,
+) {
+    let scale = Transformation::scale(scale_factor);
+    let damage_bounds = damage_regions
+        .iter()
+        .copied()
+        .reduce(|a, b| a.union(&b))
+        .unwrap_or(Rectangle::default());
+    for (layer_index, layer) in layers.iter().enumerate() {
+        let layer_physical_bounds = layer.bounds * scale_factor;
+        let layer_regions = collect_clip_regions(&damage_regions, layer_physical_bounds);
 
-            let layer_bounds = layer_regions
-                .iter()
-                .copied()
-                .reduce(|a, b| a.union(&b))
-                .unwrap_or(damage_bounds);
-            let multi_region_layer = layer_regions.len() > 1;
-            stats.layer_visits += 1;
-
+        if layer_regions.is_empty() {
             if trace::enabled() {
                 trace::event(
-                    "tiny_skia_layer_visit",
+                    "tiny_skia_layer_skip",
                     0,
                     format_args!(
-                        "layer={layer_index} layer_bounds={} clipped={} regions={}",
-                        format_rect(layer_physical_bounds),
-                        format_rect(layer_bounds),
-                        layer_regions.len()
+                        "layer={layer_index} reason=no_intersection damage={} layer={}",
+                        format_rect(damage_bounds),
+                        format_rect(layer_physical_bounds)
                     ),
                 );
             }
+            continue;
+        };
 
-            if !layer.quads.is_empty() {
-                let render_span = debug::render(debug::Primitive::Quad);
-                for (quad_index, (quad, background)) in layer.quads.iter().enumerate() {
-                    let visible_bounds = quad_visible_bounds(quad) * scale_factor;
-                    if !visible_bounds.intersects(&layer_bounds) {
+        let layer_bounds = layer_regions
+            .iter()
+            .copied()
+            .reduce(|a, b| a.union(&b))
+            .unwrap_or(damage_bounds);
+        let multi_region_layer = layer_regions.len() > 1;
+        stats.layer_visits += 1;
+
+        if trace::enabled() {
+            trace::event(
+                "tiny_skia_layer_visit",
+                0,
+                format_args!(
+                    "layer={layer_index} layer_bounds={} clipped={} regions={}",
+                    format_rect(layer_physical_bounds),
+                    format_rect(layer_bounds),
+                    layer_regions.len()
+                ),
+            );
+        }
+
+        if let Some(group) = &layer.opacity {
+            if group.opacity <= 0.0 {
+                continue;
+            }
+            let regions = collect_clip_regions(&layer_regions, group.bounds * scale_factor);
+            if regions.is_empty() {
+                continue;
+            }
+            let mut offscreen = scratch
+                .pop()
+                .filter(|buffer| {
+                    buffer.pixels.width() == pixels.width()
+                        && buffer.pixels.height() == pixels.height()
+                })
+                .unwrap_or_else(|| OpacityPixels {
+                    pixels: tiny_skia::Pixmap::new(pixels.width(), pixels.height())
+                        .expect("Create opacity pixels"),
+                    mask: tiny_skia::Mask::new(pixels.width(), pixels.height())
+                        .expect("Create opacity clip mask"),
+                });
+            offscreen.pixels.fill(tiny_skia::Color::TRANSPARENT);
+            let mut inner_mask = engine::ClipMask::new(&mut offscreen.mask);
+            draw_layers(
+                engine,
+                &group.layers,
+                &mut offscreen.pixels.as_mut(),
+                &mut inner_mask,
+                &regions,
+                scale_factor,
+                scratch,
+                stats,
+            );
+            for region in regions {
+                pixels.draw_pixmap(
+                    0,
+                    0,
+                    offscreen.pixels.as_ref(),
+                    &tiny_skia::PixmapPaint {
+                        opacity: group.opacity,
+                        ..Default::default()
+                    },
+                    tiny_skia::Transform::identity(),
+                    Some(clip_mask.set(region)),
+                );
+            }
+            scratch.push(offscreen);
+            continue;
+        }
+
+        if !layer.quads.is_empty() {
+            let render_span = debug::render(debug::Primitive::Quad);
+            for (quad_index, (quad, background)) in layer.quads.iter().enumerate() {
+                let visible_bounds = quad_visible_bounds(quad) * scale_factor;
+                if !visible_bounds.intersects(&layer_bounds) {
+                    if trace::enabled() {
+                        trace::event(
+                            "tiny_skia_quad_skip",
+                            0,
+                            format_args!(
+                                "layer={layer_index} quad={quad_index} reason=no_intersection visible={} clip={}",
+                                format_rect(visible_bounds),
+                                format_rect(layer_bounds)
+                            ),
+                        );
+                    }
+                    continue;
+                }
+
+                if multi_region_layer {
+                    for_each_clip_region(
+                        &layer_regions,
+                        visible_bounds,
+                        |clip_index, clip_bounds| {
+                            stats.quads += 1;
+                            if trace::enabled() {
+                                trace::event(
+                                    "tiny_skia_quad_draw",
+                                    0,
+                                    format_args!(
+                                        "clip_index={clip_index} layer={layer_index} quad={quad_index} bounds={} visible={} clip={}",
+                                        format_rect(quad.bounds * scale_factor),
+                                        format_rect(visible_bounds),
+                                        format_rect(clip_bounds)
+                                    ),
+                                );
+                            }
+                            engine.draw_quad(
+                                quad,
+                                background,
+                                scale,
+                                pixels,
+                                clip_mask,
+                                clip_bounds,
+                            );
+                        },
+                    );
+                } else {
+                    stats.quads += 1;
+                    if trace::enabled() {
+                        trace::event(
+                            "tiny_skia_quad_draw",
+                            0,
+                            format_args!(
+                                "layer={layer_index} quad={quad_index} bounds={} visible={} clip={}",
+                                format_rect(quad.bounds * scale_factor),
+                                format_rect(visible_bounds),
+                                format_rect(layer_bounds)
+                            ),
+                        );
+                    }
+                    engine.draw_quad(quad, background, scale, pixels, clip_mask, layer_bounds);
+                }
+            }
+            render_span.finish();
+        }
+
+        if !layer.primitives.is_empty() {
+            let render_span = debug::render(debug::Primitive::Triangle);
+
+            for group in &layer.primitives {
+                let group_transformation = scale * group.transformation();
+                let Some(group_bounds) =
+                    (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
+                else {
+                    continue;
+                };
+
+                for primitive in group.as_slice() {
+                    let primitive_bounds = primitive.visible_bounds() * group_transformation;
+
+                    if !primitive_bounds.intersects(&group_bounds) {
+                        continue;
+                    }
+
+                    let Some(visible_bounds) = primitive_bounds.intersection(&group_bounds) else {
+                        continue;
+                    };
+
+                    if multi_region_layer {
+                        for_each_clip_region(&layer_regions, visible_bounds, |_, clip_bounds| {
+                            stats.primitives += 1;
+                            engine.draw_primitive(
+                                primitive,
+                                group_transformation,
+                                pixels,
+                                clip_mask,
+                                clip_bounds,
+                            );
+                        });
+                    } else {
+                        stats.primitives += 1;
+                        engine.draw_primitive(
+                            primitive,
+                            group_transformation,
+                            pixels,
+                            clip_mask,
+                            group_bounds,
+                        );
+                    }
+                }
+            }
+
+            render_span.finish();
+        }
+
+        if !layer.images.is_empty() {
+            let render_span = debug::render(debug::Primitive::Image);
+
+            for image in &layer.images {
+                let visible_bounds = image.bounds() * scale;
+                if !visible_bounds.intersects(&layer_bounds) {
+                    continue;
+                }
+
+                if multi_region_layer {
+                    for_each_clip_region(&layer_regions, visible_bounds, |_, clip_bounds| {
+                        stats.images += 1;
+                        engine.draw_image(image, scale, pixels, clip_mask, clip_bounds);
+                    });
+                } else {
+                    stats.images += 1;
+                    engine.draw_image(image, scale, pixels, clip_mask, layer_bounds);
+                }
+            }
+
+            render_span.finish();
+        }
+
+        if !layer.text.is_empty() {
+            let render_span = debug::render(debug::Primitive::Image);
+            stats.text_groups += layer.text.len();
+
+            for (group_index, group) in layer.text.iter().enumerate() {
+                let group_transformation = group.transformation();
+                let scaled_group_transformation = scale * group_transformation;
+                let Some(group_bounds) =
+                    (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
+                else {
+                    if trace::enabled() {
+                        trace::event(
+                            "tiny_skia_text_group_skip",
+                            0,
+                            format_args!(
+                                "layer={layer_index} group={group_index} reason=no_group_intersection group_clip={} layer_clip={}",
+                                format_rect(group.clip_bounds() * scale_factor),
+                                format_rect(layer_bounds)
+                            ),
+                        );
+                    }
+                    continue;
+                };
+
+                for (text_index, text) in group.as_slice().iter().enumerate() {
+                    let Some(text_bounds) = text
+                        .visible_bounds()
+                        .map(|bounds| bounds * group_transformation * scale_factor)
+                    else {
                         if trace::enabled() {
                             trace::event(
-                                "tiny_skia_quad_skip",
+                                "tiny_skia_text_skip",
                                 0,
                                 format_args!(
-                                    "layer={layer_index} quad={quad_index} reason=no_intersection visible={} clip={}",
-                                    format_rect(visible_bounds),
-                                    format_rect(layer_bounds)
+                                    "layer={layer_index} group={group_index} text={text_index} reason=no_visible_bounds group_clip={}",
+                                    format_rect(group_bounds)
+                                ),
+                            );
+                        };
+                        continue;
+                    };
+
+                    if !text_bounds.intersects(&group_bounds) {
+                        if trace::enabled() {
+                            trace::event(
+                                "tiny_skia_text_skip",
+                                0,
+                                format_args!(
+                                    "layer={layer_index} group={group_index} text={text_index} reason=no_intersection visible={} clip={}",
+                                    format_rect(text_bounds),
+                                    format_rect(group_bounds)
                                 ),
                             );
                         }
                         continue;
                     }
+
+                    let Some(visible_bounds) = text_bounds.intersection(&group_bounds) else {
+                        continue;
+                    };
 
                     if multi_region_layer {
                         for_each_clip_region(
                             &layer_regions,
                             visible_bounds,
                             |clip_index, clip_bounds| {
-                                stats.quads += 1;
+                                stats.text_items += 1;
                                 if trace::enabled() {
                                     trace::event(
-                                        "tiny_skia_quad_draw",
+                                        "tiny_skia_text_draw",
                                         0,
                                         format_args!(
-                                            "clip_index={clip_index} layer={layer_index} quad={quad_index} bounds={} visible={} clip={}",
-                                            format_rect(quad.bounds * scale_factor),
-                                            format_rect(visible_bounds),
+                                            "clip_index={clip_index} layer={layer_index} group={group_index} text={text_index} visible={} clip={}",
+                                            format_rect(text_bounds),
                                             format_rect(clip_bounds)
                                         ),
                                     );
                                 }
-                                self.engine.draw_quad(
-                                    quad,
-                                    background,
-                                    scale,
+                                engine.draw_text(
+                                    text,
+                                    scaled_group_transformation,
                                     pixels,
-                                    &mut clip_mask,
+                                    clip_mask,
                                     clip_bounds,
                                 );
                             },
                         );
                     } else {
-                        stats.quads += 1;
+                        stats.text_items += 1;
                         if trace::enabled() {
                             trace::event(
-                                "tiny_skia_quad_draw",
+                                "tiny_skia_text_draw",
                                 0,
                                 format_args!(
-                                    "layer={layer_index} quad={quad_index} bounds={} visible={} clip={}",
-                                    format_rect(quad.bounds * scale_factor),
-                                    format_rect(visible_bounds),
-                                    format_rect(layer_bounds)
+                                    "layer={layer_index} group={group_index} text={text_index} visible={} clip={}",
+                                    format_rect(text_bounds),
+                                    format_rect(group_bounds)
                                 ),
                             );
                         }
-                        self.engine.draw_quad(
-                            quad,
-                            background,
-                            scale,
+                        engine.draw_text(
+                            text,
+                            scaled_group_transformation,
                             pixels,
-                            &mut clip_mask,
-                            layer_bounds,
+                            clip_mask,
+                            group_bounds,
                         );
                     }
                 }
-                render_span.finish();
             }
 
-            if !layer.primitives.is_empty() {
-                let render_span = debug::render(debug::Primitive::Triangle);
-
-                for group in &layer.primitives {
-                    let group_transformation = scale * group.transformation();
-                    let Some(group_bounds) =
-                        (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
-                    else {
-                        continue;
-                    };
-
-                    for primitive in group.as_slice() {
-                        let primitive_bounds = primitive.visible_bounds() * group_transformation;
-
-                        if !primitive_bounds.intersects(&group_bounds) {
-                            continue;
-                        }
-
-                        let Some(visible_bounds) = primitive_bounds.intersection(&group_bounds)
-                        else {
-                            continue;
-                        };
-
-                        if multi_region_layer {
-                            for_each_clip_region(
-                                &layer_regions,
-                                visible_bounds,
-                                |_, clip_bounds| {
-                                    stats.primitives += 1;
-                                    self.engine.draw_primitive(
-                                        primitive,
-                                        group_transformation,
-                                        pixels,
-                                        &mut clip_mask,
-                                        clip_bounds,
-                                    );
-                                },
-                            );
-                        } else {
-                            stats.primitives += 1;
-                            self.engine.draw_primitive(
-                                primitive,
-                                group_transformation,
-                                pixels,
-                                &mut clip_mask,
-                                group_bounds,
-                            );
-                        }
-                    }
-                }
-
-                render_span.finish();
-            }
-
-            if !layer.images.is_empty() {
-                let render_span = debug::render(debug::Primitive::Image);
-
-                for image in &layer.images {
-                    let visible_bounds = image.bounds() * scale;
-                    if !visible_bounds.intersects(&layer_bounds) {
-                        continue;
-                    }
-
-                    if multi_region_layer {
-                        for_each_clip_region(&layer_regions, visible_bounds, |_, clip_bounds| {
-                            stats.images += 1;
-                            self.engine.draw_image(
-                                image,
-                                scale,
-                                pixels,
-                                &mut clip_mask,
-                                clip_bounds,
-                            );
-                        });
-                    } else {
-                        stats.images += 1;
-                        self.engine
-                            .draw_image(image, scale, pixels, &mut clip_mask, layer_bounds);
-                    }
-                }
-
-                render_span.finish();
-            }
-
-            if !layer.text.is_empty() {
-                let render_span = debug::render(debug::Primitive::Image);
-                stats.text_groups += layer.text.len();
-
-                for (group_index, group) in layer.text.iter().enumerate() {
-                    let group_transformation = group.transformation();
-                    let scaled_group_transformation = scale * group_transformation;
-                    let Some(group_bounds) =
-                        (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
-                    else {
-                        if trace::enabled() {
-                            trace::event(
-                                "tiny_skia_text_group_skip",
-                                0,
-                                format_args!(
-                                    "layer={layer_index} group={group_index} reason=no_group_intersection group_clip={} layer_clip={}",
-                                    format_rect(group.clip_bounds() * scale_factor),
-                                    format_rect(layer_bounds)
-                                ),
-                            );
-                        }
-                        continue;
-                    };
-
-                    for (text_index, text) in group.as_slice().iter().enumerate() {
-                        let Some(text_bounds) = text
-                            .visible_bounds()
-                            .map(|bounds| bounds * group_transformation * scale_factor)
-                        else {
-                            if trace::enabled() {
-                                trace::event(
-                                    "tiny_skia_text_skip",
-                                    0,
-                                    format_args!(
-                                        "layer={layer_index} group={group_index} text={text_index} reason=no_visible_bounds group_clip={}",
-                                        format_rect(group_bounds)
-                                    ),
-                                );
-                            };
-                            continue;
-                        };
-
-                        if !text_bounds.intersects(&group_bounds) {
-                            if trace::enabled() {
-                                trace::event(
-                                    "tiny_skia_text_skip",
-                                    0,
-                                    format_args!(
-                                        "layer={layer_index} group={group_index} text={text_index} reason=no_intersection visible={} clip={}",
-                                        format_rect(text_bounds),
-                                        format_rect(group_bounds)
-                                    ),
-                                );
-                            }
-                            continue;
-                        }
-
-                        let Some(visible_bounds) = text_bounds.intersection(&group_bounds) else {
-                            continue;
-                        };
-
-                        if multi_region_layer {
-                            for_each_clip_region(
-                                &layer_regions,
-                                visible_bounds,
-                                |clip_index, clip_bounds| {
-                                    stats.text_items += 1;
-                                    if trace::enabled() {
-                                        trace::event(
-                                            "tiny_skia_text_draw",
-                                            0,
-                                            format_args!(
-                                                "clip_index={clip_index} layer={layer_index} group={group_index} text={text_index} visible={} clip={}",
-                                                format_rect(text_bounds),
-                                                format_rect(clip_bounds)
-                                            ),
-                                        );
-                                    }
-                                    self.engine.draw_text(
-                                        text,
-                                        scaled_group_transformation,
-                                        pixels,
-                                        &mut clip_mask,
-                                        clip_bounds,
-                                    );
-                                },
-                            );
-                        } else {
-                            stats.text_items += 1;
-                            if trace::enabled() {
-                                trace::event(
-                                    "tiny_skia_text_draw",
-                                    0,
-                                    format_args!(
-                                        "layer={layer_index} group={group_index} text={text_index} visible={} clip={}",
-                                        format_rect(text_bounds),
-                                        format_rect(group_bounds)
-                                    ),
-                                );
-                            }
-                            self.engine.draw_text(
-                                text,
-                                scaled_group_transformation,
-                                pixels,
-                                &mut clip_mask,
-                                group_bounds,
-                            );
-                        }
-                    }
-                }
-
-                render_span.finish();
-            }
+            render_span.finish();
         }
-
-        self.engine.trim();
-        stats.clip_mask = clip_mask.stats();
-        stats.text_pipeline = self.engine.text_stats().saturating_delta(text_stats_before);
-        trace::flush();
-        stats
     }
 }
 
@@ -648,6 +729,37 @@ impl core::Renderer for Renderer {
         self.layers.pop_clip();
     }
 
+    fn start_opacity_layer(&mut self, bounds: Rectangle, opacity: f32) {
+        self.layers.flush();
+        let transformation = self.layers.transformation();
+        let parent_bounds = self.layers.current_mut().0.bounds;
+        let bounds = (bounds * transformation)
+            .intersection(&parent_bounds)
+            .unwrap_or_default();
+        let mut layers = layer::Stack::new();
+        layers.reset(bounds);
+        layers.push_transformation(transformation);
+        self.opacity_recordings.push(OpacityRecording {
+            parent: std::mem::replace(&mut self.layers, layers),
+            bounds,
+            opacity: opacity.clamp(0.0, 1.0),
+        });
+    }
+
+    fn end_opacity_layer(&mut self) {
+        self.layers.flush();
+        let recording = self.opacity_recordings.pop().expect("End opacity layer");
+        let group = layer::OpacityGroup {
+            layers: self.layers.as_slice().to_vec().into(),
+            bounds: recording.bounds,
+            opacity: recording.opacity,
+        };
+        self.layers = recording.parent;
+        self.layers.next_layer();
+        self.layers.current_mut().0.opacity = Some(group);
+        self.layers.next_layer();
+    }
+
     fn start_transformation(&mut self, transformation: Transformation) {
         self.layers.push_transformation(transformation);
     }
@@ -685,6 +797,7 @@ impl core::Renderer for Renderer {
     }
 
     fn reset(&mut self, new_bounds: Rectangle) {
+        self.opacity_recordings.clear();
         self.layers.reset(new_bounds);
     }
 }
@@ -869,6 +982,92 @@ impl renderer::Headless for Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {
+        use crate::core::Renderer as _;
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                ..Default::default()
+            },
+            color,
+        );
+    }
+
+    fn opacity_pixels(renderer: &mut Renderer) -> Vec<u8> {
+        use crate::core::renderer::Headless as _;
+        renderer.screenshot(Size::new(16, 16), 1.0, Color::from_rgb(0.0, 0.0, 1.0))
+    }
+
+    fn pixel(bytes: &[u8], x: usize, y: usize) -> &[u8] {
+        &bytes[(y * 16 + x) * 4..(y * 16 + x + 1) * 4]
+    }
+
+    #[test]
+    fn opacity_is_applied_once_after_overlapping_content_and_repaints_live() {
+        use crate::core::Renderer as _;
+        let bounds = Rectangle::with_size(Size::new(16.0, 16.0));
+        let left = Rectangle::with_size(Size::new(8.0, 16.0));
+        let mut renderer = Renderer::new(renderer::Settings::default());
+        for (color, expected) in [
+            (Color::from_rgb(0.0, 1.0, 0.0), [0, 128, 127, 255]),
+            (Color::WHITE, [128, 128, 255, 255]),
+        ] {
+            renderer.reset(bounds);
+            renderer.with_opacity_layer(bounds, 0.5, |renderer| {
+                fill(renderer, bounds, Color::from_rgb(1.0, 0.0, 0.0));
+                renderer.with_layer(left, |renderer| fill(renderer, left, color));
+            });
+            let actual = opacity_pixels(&mut renderer);
+            for (actual, expected) in pixel(&actual, 4, 4).iter().zip(expected) {
+                assert!((*actual as i16 - expected as i16).abs() <= 1);
+            }
+            assert_eq!(renderer.opacity_pixels.len(), 1);
+        }
+        renderer.reset(bounds);
+        let _ = opacity_pixels(&mut renderer);
+        assert!(
+            renderer.opacity_pixels.is_empty(),
+            "idle frames release offscreen pixels"
+        );
+    }
+
+    #[test]
+    fn opacity_groups_preserve_nesting_clipping_transforms_and_following_draws() {
+        use crate::core::Renderer as _;
+        let bounds = Rectangle::with_size(Size::new(16.0, 16.0));
+        let mut renderer = Renderer::new(renderer::Settings::default());
+        renderer.reset(bounds);
+        renderer.with_transformation(Transformation::translate(4.0, 0.0), |renderer| {
+            let clip = Rectangle::with_size(Size::new(8.0, 16.0));
+            renderer.with_opacity_layer(clip, 0.5, |renderer| {
+                fill(renderer, bounds, Color::from_rgb(1.0, 0.0, 0.0));
+                renderer.with_opacity_layer(clip, 0.5, |renderer| {
+                    fill(renderer, bounds, Color::from_rgb(0.0, 1.0, 0.0));
+                });
+            });
+        });
+        fill(
+            &mut renderer,
+            Rectangle {
+                x: 8.0,
+                y: 0.0,
+                width: 2.0,
+                height: 16.0,
+            },
+            Color::WHITE,
+        );
+        let actual = opacity_pixels(&mut renderer);
+        assert_eq!(pixel(&actual, 2, 4), &[0, 0, 255, 255]);
+        assert_eq!(pixel(&actual, 13, 4), &[0, 0, 255, 255]);
+        assert_eq!(pixel(&actual, 8, 4), &[255, 255, 255, 255]);
+        let blended = pixel(&actual, 6, 4);
+        assert!((blended[0] as i16 - 64).abs() <= 1);
+        assert!((blended[1] as i16 - 64).abs() <= 1);
+        assert!((blended[2] as i16 - 127).abs() <= 1);
+        assert_eq!(blended[3], 255);
+        assert_eq!(renderer.opacity_pixels.len(), 2);
+    }
 
     #[test]
     fn in_place_scroll_matches_snapshot_composition_exactly() {

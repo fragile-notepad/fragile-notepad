@@ -17,11 +17,20 @@ pub struct Pipeline {
     layout: wgpu::BindGroupLayout,
     clear_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    opacity_layout: wgpu::BindGroupLayout,
+    opaque: Opacity,
 }
 
 /// An immutable premultiplied clear color binding.
 #[derive(Debug, Clone)]
 pub struct Clear {
+    _buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+/// An immutable opacity used when compositing a complete offscreen group.
+#[derive(Debug, Clone)]
+pub struct Opacity {
     _buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -43,6 +52,7 @@ pub struct Instance {
     pub bounds: Rectangle<f32>,
     pub _owner: core::renderer::Cache,
     pub revision: u64,
+    pub opacity: Option<Opacity>,
 }
 
 impl Pipeline {
@@ -81,9 +91,23 @@ impl Pipeline {
             ],
         });
 
+        let opacity_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("iced_wgpu::raster opacity layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(16),
+                },
+                count: None,
+            }],
+        });
+        let opaque = create_opacity(device, &opacity_layout, 1.0);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("iced_wgpu::raster pipeline layout"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&opacity_layout)],
             immediate_size: 0,
         });
 
@@ -150,6 +174,8 @@ impl Pipeline {
             layout,
             clear_layout,
             sampler,
+            opacity_layout,
+            opaque,
         }
     }
 
@@ -244,6 +270,25 @@ impl Pipeline {
         pass.set_viewport(bounds.x, bounds.y, bounds.width, bounds.height, 0.0, 1.0);
         pass.set_pipeline(&self.raw);
         pass.set_bind_group(0, &target.bind_group, &[]);
+        pass.set_bind_group(1, &self.opaque.bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    pub fn create_opacity(&self, device: &wgpu::Device, opacity: f32) -> Opacity {
+        create_opacity(device, &self.opacity_layout, opacity)
+    }
+
+    pub fn draw_with_opacity<'a>(
+        &'a self,
+        target: &'a Target,
+        bounds: Rectangle<f32>,
+        opacity: &'a Opacity,
+        pass: &mut wgpu::RenderPass<'a>,
+    ) {
+        pass.set_viewport(bounds.x, bounds.y, bounds.width, bounds.height, 0.0, 1.0);
+        pass.set_pipeline(&self.raw);
+        pass.set_bind_group(0, &target.bind_group, &[]);
+        pass.set_bind_group(1, &opacity.bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 
@@ -260,6 +305,7 @@ impl Pipeline {
         pass.set_viewport(bounds.x, bounds.y, bounds.width, bounds.height, 0.0, 1.0);
         pass.set_pipeline(&self.replace);
         pass.set_bind_group(0, &target.bind_group, &[]);
+        pass.set_bind_group(1, &self.opaque.bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 
@@ -268,6 +314,26 @@ impl Pipeline {
         pass.set_pipeline(&self.clear_raw);
         pass.set_bind_group(0, &clear.bind_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+fn create_opacity(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, opacity: f32) -> Opacity {
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("iced_wgpu::raster group opacity"),
+        contents: bytemuck::bytes_of(&[opacity, 0.0_f32, 0.0, 0.0]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("iced_wgpu::raster group opacity binding"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        }],
+    });
+    Opacity {
+        _buffer: buffer,
+        bind_group,
     }
 }
 

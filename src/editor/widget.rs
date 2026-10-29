@@ -323,7 +323,8 @@ where
 
         let frame_id = state.render_frame.get().wrapping_add(1);
         state.render_frame.set(frame_id);
-        let mut rich_paragraphs = state.rich_paragraphs.borrow_mut();
+        let mut rich_paragraphs =
+            state.rich_paragraphs[usize::from(theme.palette().is_dark)].borrow_mut();
         let mut line_geometries = state.line_geometries.borrow_mut();
         let record_started = trace_enabled.then(StdInstant::now);
         renderer.with_layer(bounds, |renderer| {

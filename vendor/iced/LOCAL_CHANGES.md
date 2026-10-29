@@ -48,6 +48,14 @@ These patches adapt Iced to Fragile Notepad's
 
 ## Application patches
 
+- Add group-opacity drawing to the renderer interface. Software blends a live
+  group through reusable pixels; Vulkan draws it to a reusable texture and
+  applies opacity once when compositing. Nested clips and groups stay inside
+  that drawing, and unused group buffers are released.
+- Expose paired light/dark syntax colors from one parse and scope walk so the
+  editor can draw both modes without restarting syntax work.
+- Build missing overlay layouts when drawing a fresh interface or after a base
+  widget captures input, so a window drawn through its root overlay stays visible.
 - Join adjacent compatible quad runs and text groups after layer merging,
   preserving transformation, clip, and cached-text ordering boundaries.
 - Geometry caches identify their backend so a handoff cannot mix software and

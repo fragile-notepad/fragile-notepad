@@ -363,6 +363,14 @@ mod tests {
     }
 
     impl renderer::Renderer for RecordingRenderer {
+        fn start_opacity_layer(&mut self, bounds: Rectangle, _opacity: f32) {
+            self.start_layer(bounds);
+        }
+
+        fn end_opacity_layer(&mut self) {
+            self.end_layer();
+        }
+
         fn start_layer(&mut self, _bounds: Rectangle) {}
         fn end_layer(&mut self) {}
         fn start_transformation(&mut self, _transformation: Transformation) {}

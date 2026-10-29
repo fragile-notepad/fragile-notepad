@@ -32,8 +32,8 @@ mod profile {
     use iced::advanced::graphics::core::shell::Waker;
     use iced::advanced::renderer::{self, Renderer as _};
     use iced::advanced::widget::Tree;
-    use iced::advanced::{Layout, Shell, layout, mouse};
-    use iced::{Background, Color, Element, Event, Point, Rectangle, Size, Theme, window};
+    use iced::advanced::{Layout, Shell, layout, mouse, overlay};
+    use iced::{Background, Color, Element, Event, Point, Rectangle, Size, Theme, Vector, window};
     use iced_wgpu::graphics::{Shell as GraphicsShell, Viewport};
     use std::time::{Duration, Instant};
 
@@ -523,14 +523,33 @@ mod profile {
         let node = content
             .as_widget_mut()
             .layout(tree, renderer, &layout::Limits::new(size, size));
+        let theme = app.theme(window_id).unwrap_or(Theme::Light);
+        let style = renderer::Style::default();
         content.as_widget().draw(
             tree,
             renderer,
-            &app.theme(window_id).unwrap_or(Theme::Light),
-            &renderer::Style::default(),
+            &theme,
+            &style,
             Layout::new(&node),
             mouse::Cursor::Unavailable,
             &bounds,
         );
+        if let Some(overlay) = content.as_widget_mut().overlay(
+            tree,
+            Layout::new(&node),
+            renderer,
+            &bounds,
+            Vector::ZERO,
+        ) {
+            let mut overlay = overlay::Nested::new(overlay);
+            let node = overlay.layout(renderer, size);
+            overlay.draw(
+                renderer,
+                &theme,
+                &style,
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+            );
+        }
     }
 }

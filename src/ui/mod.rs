@@ -22,6 +22,7 @@ pub mod status_bar;
 pub mod styles;
 pub mod tab_list_dialog;
 pub mod tabs;
+pub mod theme_transition;
 pub mod title_bar;
 pub mod toolbar;
 mod utility;

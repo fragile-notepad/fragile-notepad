@@ -34,6 +34,22 @@ pub trait Renderer {
         self.end_layer();
     }
 
+    /// Starts a clipped group whose contents are painted together at `opacity`.
+    ///
+    /// Opacity is applied once to the finished group, including overlapping
+    /// primitives and nested layers. Values are clamped to the range 0 to 1.
+    fn start_opacity_layer(&mut self, bounds: Rectangle, opacity: f32);
+
+    /// Ends the group started by [`start_opacity_layer`](Self::start_opacity_layer).
+    fn end_opacity_layer(&mut self);
+
+    /// Paints live contents into a group and blends the group at `opacity`.
+    fn with_opacity_layer(&mut self, bounds: Rectangle, opacity: f32, f: impl FnOnce(&mut Self)) {
+        self.start_opacity_layer(bounds, opacity);
+        f(self);
+        self.end_opacity_layer();
+    }
+
     /// Starts a clipped layer whose painted pixels may be cached.
     ///
     /// The caller must change `key` whenever anything affecting painting changes,

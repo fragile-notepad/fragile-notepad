@@ -1,20 +1,36 @@
 use super::{DEFAULT_SYNTAX_TOKEN, SyntaxRenderSpan};
 use crate::editor::buffer::EditorBuffer;
 use iced::advanced::text::Highlighter as _;
-use iced::highlighter;
+use iced::{Color, highlighter};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, PartialEq)]
+struct CachedSyntaxSpan {
+    range: std::ops::Range<usize>,
+    colors: [Option<Color>; 2],
+}
+
+impl CachedSyntaxSpan {
+    fn rendered(&self, dark: bool) -> SyntaxRenderSpan {
+        SyntaxRenderSpan {
+            range: self.range.clone(),
+            color: self.colors[usize::from(dark)],
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SyntaxLineCache {
+    draw_dark: bool,
     settings: Option<highlighter::Settings>,
-    lines: Vec<Vec<SyntaxRenderSpan>>,
+    lines: Vec<Vec<CachedSyntaxSpan>>,
     highlighter: Option<iced::highlighter::Highlighter>,
     generation: Arc<()>,
     failed: bool,
-    preview: BTreeMap<usize, Vec<SyntaxRenderSpan>>,
+    preview: BTreeMap<usize, Vec<CachedSyntaxSpan>>,
     preview_parser: Option<PreviewParser>,
     preview_anchor: usize,
     preview_batches: usize,
@@ -26,11 +42,11 @@ pub struct SyntaxLineCache {
 #[derive(Debug, Clone)]
 struct DisplayedSyntaxLine {
     text: String,
-    spans: Vec<SyntaxRenderSpan>,
+    spans: Vec<CachedSyntaxSpan>,
 }
 
 impl DisplayedSyntaxLine {
-    fn rebase(&self, text: &str) -> Vec<SyntaxRenderSpan> {
+    fn rebase(&self, text: &str) -> Vec<CachedSyntaxSpan> {
         if self.text == text {
             return self.spans.clone();
         }
@@ -56,30 +72,30 @@ impl DisplayedSyntaxLine {
         for span in &self.spans {
             let end = span.range.end.min(prefix);
             if span.range.start < end {
-                spans.push(SyntaxRenderSpan {
+                spans.push(CachedSyntaxSpan {
                     range: span.range.start..end,
-                    color: span.color,
+                    colors: span.colors,
                 });
             }
         }
         if prefix < new_end {
-            let color = self
+            let colors = self
                 .spans
                 .iter()
                 .find(|span| span.range.end > prefix)
                 .or_else(|| self.spans.last())
-                .and_then(|span| span.color);
-            spans.push(SyntaxRenderSpan {
+                .map_or([None; 2], |span| span.colors);
+            spans.push(CachedSyntaxSpan {
                 range: prefix..new_end,
-                color,
+                colors,
             });
         }
         for span in &self.spans {
             let start = span.range.start.max(old_end);
             if start < span.range.end {
-                spans.push(SyntaxRenderSpan {
+                spans.push(CachedSyntaxSpan {
                     range: start - old_end + new_end..span.range.end - old_end + new_end,
-                    color: span.color,
+                    colors: span.colors,
                 });
             }
         }
@@ -91,6 +107,7 @@ impl DisplayedSyntaxLine {
 impl Clone for SyntaxLineCache {
     fn clone(&self) -> Self {
         Self {
+            draw_dark: self.draw_dark,
             settings: self.settings.clone(),
             lines: self.lines.clone(),
             line_count: self.line_count,
@@ -123,6 +140,7 @@ impl SyntaxLineCache {
         }
 
         Self {
+            draw_dark: settings.theme.is_dark(),
             settings: Some(settings.clone()),
             lines: Vec::new(),
             highlighter: Some(iced::highlighter::Highlighter::new(settings)),
@@ -132,7 +150,7 @@ impl SyntaxLineCache {
 
     pub fn is_current(&self, settings: &highlighter::Settings, line_count: usize) -> bool {
         if uses_syntax_highlighting(settings) {
-            self.settings.as_ref() == Some(settings) && self.lines.len() >= line_count
+            self.is_compatible(settings) && self.lines.len() >= line_count
         } else {
             self.settings.is_none() && self.lines.is_empty()
         }
@@ -140,7 +158,9 @@ impl SyntaxLineCache {
 
     pub fn is_compatible(&self, settings: &highlighter::Settings) -> bool {
         if uses_syntax_highlighting(settings) {
-            self.settings.as_ref() == Some(settings)
+            self.settings
+                .as_ref()
+                .is_some_and(|current| same_family(current, settings))
         } else {
             self.settings.is_none()
         }
@@ -162,6 +182,7 @@ impl SyntaxLineCache {
             *self = Self::new(settings);
         }
 
+        self.draw_dark = settings.theme.is_dark();
         self.line_count = buffer.line_count();
 
         let target_last_line = last_line.min(buffer.line_count().saturating_sub(1));
@@ -253,11 +274,17 @@ impl SyntaxLineCache {
         self.preview_batches = 0;
     }
 
+    #[cfg(test)]
     pub(super) fn spans(&self, line: usize) -> Option<Vec<SyntaxRenderSpan>> {
         self.lines
             .get(line)
             .or_else(|| self.preview.get(&line))
-            .cloned()
+            .map(|spans| {
+                spans
+                    .iter()
+                    .map(|span| span.rendered(self.draw_dark))
+                    .collect()
+            })
     }
 
     pub(super) fn spans_for_text(&self, line: usize, text: &str) -> Option<Vec<SyntaxRenderSpan>> {
@@ -270,7 +297,7 @@ impl SyntaxLineCache {
             // these colors instead of flashing through a provisional palette.
             previous.rebase(text)
         } else {
-            self.spans(line)?
+            self.preview.get(&line)?.clone()
         };
         if !displayed
             .get(&line)
@@ -285,10 +312,16 @@ impl SyntaxLineCache {
             );
         }
         trim_displayed(&mut displayed, line);
-        Some(spans)
+        Some(
+            spans
+                .iter()
+                .map(|span| span.rendered(self.draw_dark))
+                .collect(),
+        )
     }
 
-    /// Invalidates incompatible spans without initializing or running a parser.
+    /// Selects the draw colors and invalidates spans when the language or theme
+    /// family changes. Light/dark changes reuse both colors from the same parse.
     pub fn configure(&mut self, settings: &highlighter::Settings) {
         if !self.is_compatible(settings) {
             self.clear();
@@ -296,6 +329,7 @@ impl SyntaxLineCache {
                 self.settings = Some(settings.clone());
             }
         }
+        self.draw_dark = settings.theme.is_dark();
     }
 
     pub(crate) fn needs_parse(&self, last_line: usize) -> bool {
@@ -345,7 +379,7 @@ impl SyntaxLineCache {
 
     pub(crate) fn apply_parsed(&mut self, result: SyntaxParseResult) -> bool {
         if !Arc::ptr_eq(&self.generation, &result.generation)
-            || self.settings.as_ref() != Some(&result.settings)
+            || !self.is_compatible(&result.settings)
         {
             return false;
         }
@@ -505,11 +539,11 @@ impl SyntaxParseRequest {
 enum SyntaxChunk {
     Context {
         first_line: usize,
-        lines: Vec<Vec<SyntaxRenderSpan>>,
+        lines: Vec<Vec<CachedSyntaxSpan>>,
         highlighter: highlighter::Highlighter,
     },
     Viewport {
-        lines: Vec<(usize, Vec<SyntaxRenderSpan>)>,
+        lines: Vec<(usize, Vec<CachedSyntaxSpan>)>,
         parser: Option<PreviewParser>,
     },
 }
@@ -533,12 +567,12 @@ impl std::fmt::Debug for SyntaxParseResult {
 fn syntax_span_plan(
     highlighter: &mut iced::highlighter::Highlighter,
     text: &str,
-) -> Vec<SyntaxRenderSpan> {
+) -> Vec<CachedSyntaxSpan> {
     let mut spans = highlighter
-        .highlight_line(text)
-        .map(|(range, highlight)| SyntaxRenderSpan {
+        .highlight_line_pair(text)
+        .map(|(range, highlights)| CachedSyntaxSpan {
             range,
-            color: highlight.color(),
+            colors: highlights.map(|highlight| highlight.color()),
         })
         .collect::<Vec<_>>();
 
@@ -551,13 +585,17 @@ fn uses_syntax_highlighting(settings: &highlighter::Settings) -> bool {
     settings.token != DEFAULT_SYNTAX_TOKEN
 }
 
-fn merge_adjacent_syntax_spans(spans: &mut Vec<SyntaxRenderSpan>) {
-    let mut merged: Vec<SyntaxRenderSpan> = Vec::with_capacity(spans.len());
+fn same_family(left: &highlighter::Settings, right: &highlighter::Settings) -> bool {
+    left.token == right.token && left.theme.family() == right.theme.family()
+}
+
+fn merge_adjacent_syntax_spans(spans: &mut Vec<CachedSyntaxSpan>) {
+    let mut merged: Vec<CachedSyntaxSpan> = Vec::with_capacity(spans.len());
 
     for span in spans.drain(..) {
         if let Some(previous) = merged.last_mut()
             && previous.range.end == span.range.start
-            && previous.color == span.color
+            && previous.colors == span.colors
         {
             previous.range.end = span.range.end;
             continue;
@@ -572,6 +610,89 @@ fn merge_adjacent_syntax_spans(spans: &mut Vec<SyntaxRenderSpan>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn byte_colors(text: &str, spans: Vec<SyntaxRenderSpan>) -> Vec<Option<Color>> {
+        let mut colors = vec![None; text.len()];
+        for span in spans {
+            colors[span.range].fill(span.color);
+        }
+        colors
+    }
+
+    #[test]
+    fn both_color_modes_reuse_parsed_multiline_syntax_without_invalidating_it() {
+        let source = [
+            "<!-- comment",
+            "<p>still comment</p>",
+            "-->",
+            "<p title=\"café\">text</p>",
+        ];
+        let buffer = EditorBuffer::from_text(source.join("\n"));
+        for &family in highlighter::Theme::ALL {
+            let settings = highlighter::Settings {
+                token: "html".into(),
+                theme: family.variant(false),
+            };
+            let mut cache = SyntaxLineCache::rebuild(&buffer, &settings);
+            let generation = cache.generation().clone();
+            let parsed_lines = cache.cached_line_count();
+            for dark in [false, true, false] {
+                let selected = highlighter::Settings {
+                    theme: family.variant(dark),
+                    ..settings.clone()
+                };
+                cache.configure(&selected);
+                assert!(Arc::ptr_eq(cache.generation(), &generation));
+                assert_eq!(cache.cached_line_count(), parsed_lines);
+                let mut reference = highlighter::Highlighter::new(&selected);
+                for (line, text) in source.iter().enumerate() {
+                    let expected = reference
+                        .highlight_line(text)
+                        .map(|(range, highlight)| SyntaxRenderSpan {
+                            range,
+                            color: highlight.color(),
+                        })
+                        .collect();
+                    let actual = cache.spans_for_text(line, text).unwrap();
+                    assert_eq!(
+                        byte_colors(text, actual),
+                        byte_colors(text, expected),
+                        "{family:?}/{dark}/{line}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_mode_changes_keep_inflight_parser_results_and_retained_edit_colors() {
+        let text = "let café = \"🦀 text\"; // comment";
+        let buffer = Arc::new(EditorBuffer::from_text(text));
+        let light = highlighter::Settings {
+            token: "rs".into(),
+            theme: highlighter::Theme::VSCodeLight,
+        };
+        let dark = highlighter::Settings {
+            theme: highlighter::Theme::VSCodeDark,
+            ..light.clone()
+        };
+        let mut cache = SyntaxLineCache::default();
+        cache.configure(&light);
+        let result = cache.parse_request(buffer.clone(), &[0]).parse();
+        cache.configure(&dark);
+        assert!(cache.apply_parsed(result));
+        assert_eq!(
+            cache.spans_for_text(0, text),
+            SyntaxLineCache::rebuild(&buffer, &dark).spans(0)
+        );
+        cache.invalidate_from(0);
+        let edited = "let café_more = \"🦀 text\"; // comment";
+        cache.configure(&light);
+        assert_eq!(
+            cache.spans_for_text(0, edited),
+            SyntaxLineCache::rebuild(&EditorBuffer::from_text(edited), &light).spans(0)
+        );
+    }
 
     fn settings() -> highlighter::Settings {
         highlighter::Settings {

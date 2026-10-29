@@ -66,6 +66,8 @@ pub fn syntaxes() -> &'static [Syntax] {
 pub struct Highlighter {
     syntax: &'static parsing::SyntaxReference,
     highlighter: highlighting::Highlighter<'static>,
+    opposite_highlighter: highlighting::Highlighter<'static>,
+    theme: Theme,
     caches: Vec<(parsing::ParseState, parsing::ScopeStack)>,
     current_line: usize,
 }
@@ -89,6 +91,10 @@ impl highlighter::Highlighter for Highlighter {
         Highlighter {
             syntax,
             highlighter,
+            opposite_highlighter: highlighting::Highlighter::new(
+                &THEMES.themes[settings.theme.variant(!settings.theme.is_dark()).key()],
+            ),
+            theme: settings.theme,
             caches: vec![(parser, stack)],
             current_line: 0,
         }
@@ -100,6 +106,13 @@ impl highlighter::Highlighter for Highlighter {
             .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
 
         self.highlighter = highlighting::Highlighter::new(&THEMES.themes[new_settings.theme.key()]);
+        self.opposite_highlighter = highlighting::Highlighter::new(
+            &THEMES.themes[new_settings
+                .theme
+                .variant(!new_settings.theme.is_dark())
+                .key()],
+        );
+        self.theme = new_settings.theme;
 
         // Restart the highlighter
         self.change_line(0);
@@ -144,6 +157,49 @@ impl highlighter::Highlighter for Highlighter {
 
     fn current_line(&self) -> usize {
         self.current_line
+    }
+}
+
+impl Highlighter {
+    /// Highlights a line in both color modes using one parser pass.
+    ///
+    /// Each pair contains the light color scheme followed by the dark one.
+    /// The two schemes belong to the configured theme family and share byte
+    /// ranges and parser state, including multiline syntax.
+    pub fn highlight_line_pair(
+        &mut self,
+        line: &str,
+    ) -> impl Iterator<Item = (Range<usize>, [Highlight; 2])> + '_ {
+        if self.current_line / LINES_PER_SNAPSHOT >= self.caches.len() {
+            let (parser, stack) = self.caches.last().expect("Caches must not be empty");
+            self.caches.push((parser.clone(), stack.clone()));
+        }
+        self.current_line += 1;
+        let (parser, stack) = self.caches.last_mut().expect("Caches must not be empty");
+        let ops = parser.parse_line(line, &SYNTAXES).unwrap_or_default();
+        let (light, dark) = if self.theme.is_dark() {
+            (&self.opposite_highlighter, &self.highlighter)
+        } else {
+            (&self.highlighter, &self.opposite_highlighter)
+        };
+        ScopeRangeIterator {
+            ops,
+            line_length: line.len(),
+            index: 0,
+            last_str_index: 0,
+        }
+        .filter_map(move |(range, scope)| {
+            let _ = stack.apply(&scope);
+            (!range.is_empty()).then(|| {
+                (
+                    range,
+                    [
+                        Highlight(light.style_mod_for_stack(&stack.scopes)),
+                        Highlight(dark.style_mod_for_stack(&stack.scopes)),
+                    ],
+                )
+            })
+        })
     }
 }
 

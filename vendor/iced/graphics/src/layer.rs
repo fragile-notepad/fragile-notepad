@@ -106,6 +106,22 @@ impl<T: Layer> Stack<T> {
         self.current = self.previous.pop().unwrap();
     }
 
+    /// Starts a sibling layer with the current clipping bounds.
+    ///
+    /// This preserves drawing order around content that is composited as a group.
+    pub fn next_layer(&mut self) {
+        self.flush();
+        let bounds = self.layers[self.current].bounds();
+        self.current = self.active_count;
+        self.active_count += 1;
+
+        if self.current == self.layers.len() {
+            self.layers.push(T::with_bounds(bounds));
+        } else {
+            self.layers[self.current].resize(bounds);
+        }
+    }
+
     /// Pushes a new [`Transformation`] in the [`Stack`].
     ///
     /// Future drawing operations will be affected by this new [`Transformation`] until

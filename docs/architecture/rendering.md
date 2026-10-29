@@ -25,6 +25,19 @@ Startup disables antialiasing and vsync. The Vulkan handoff enables vsync and
 4× multisample antialiasing for vector icon meshes. Text, images, and quads use
 their existing rendering paths. All windows share the selected renderer backend.
 
+## Theme transitions
+
+Changing between light and dark mode blends two live drawings of each window
+over 240 ms. The root widget keeps one input tree and draws the complete scene,
+including nested menus, in both modes. The dark drawing is composited over the
+light drawing with group opacity. Reversing a transition starts from the current
+color mix; a settled window draws once.
+
+Software uses reusable offscreen pixels; Vulkan uses a reusable texture without
+reading pixels back to the CPU. Syntax parsing supplies both color variants
+together, and each mode keeps its own shaped-text cache. Widget redraw requests
+advance the transition without rebuilding application state every frame.
+
 ## Handoff lifecycle
 
 The runtime keeps software rendering available until every participating window

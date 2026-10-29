@@ -62,6 +62,18 @@ where
         delegate!(self, renderer, renderer.end_layer());
     }
 
+    fn start_opacity_layer(&mut self, bounds: Rectangle, opacity: f32) {
+        delegate!(
+            self,
+            renderer,
+            renderer.start_opacity_layer(bounds, opacity)
+        );
+    }
+
+    fn end_opacity_layer(&mut self) {
+        delegate!(self, renderer, renderer.end_opacity_layer());
+    }
+
     fn start_cached_layer(&mut self, cache: &renderer::Cache, key: u64, bounds: Rectangle) -> bool {
         delegate!(
             self,

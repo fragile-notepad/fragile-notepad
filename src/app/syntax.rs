@@ -163,7 +163,7 @@ impl SyntaxParsing {
         };
         if document.revision() != pending.revision
             || document.render_syntax_token() != pending.settings.token
-            || theme != pending.settings.theme
+            || theme.family() != pending.settings.theme.family()
         {
             return;
         }

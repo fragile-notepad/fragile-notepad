@@ -104,7 +104,15 @@ impl App {
         } else {
             element
         };
-        element.map(move |message| Message::ForWindow(window_id, Box::new(message)))
+        let theme = self.theme(window_id).unwrap_or_else(|| {
+            <Theme as iced::theme::Base>::default(if self.system_dark {
+                iced::theme::Mode::Dark
+            } else {
+                iced::theme::Mode::Light
+            })
+        });
+        ui::theme_transition::view(element, theme)
+            .map(move |message| Message::ForWindow(window_id, Box::new(message)))
     }
 
     pub fn title(&self, window_id: window::Id) -> String {

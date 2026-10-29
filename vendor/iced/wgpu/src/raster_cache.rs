@@ -30,13 +30,13 @@ struct Stamp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Geometry {
-    bounds: Rectangle,
-    size: Size<u32>,
+pub(super) struct Geometry {
+    pub(super) bounds: Rectangle,
+    pub(super) size: Size<u32>,
 }
 
 impl Geometry {
-    fn new(bounds: Rectangle, scale: f32, limit: u32) -> Option<Self> {
+    pub(super) fn new(bounds: Rectangle, scale: f32, limit: u32) -> Option<Self> {
         if !scale.is_finite() || scale <= 0.0 || bounds.width <= 0.0 || bounds.height <= 0.0 {
             return None;
         }
@@ -229,6 +229,7 @@ impl State {
                         bounds: geometry.bounds,
                         _owner: owner.clone(),
                         revision: entry.revision,
+                        opacity: None,
                     });
                 self.statistics.hits += 1;
                 self.captures.push(Capture::Hit);
@@ -335,6 +336,7 @@ impl State {
                         bounds: entry.stamp.geometry.bounds,
                         _owner: owner,
                         revision: entry.revision,
+                        opacity: None,
                     });
                 let _ = self.entries.insert(id, *entry);
             }

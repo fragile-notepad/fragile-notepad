@@ -927,3 +927,87 @@ fn retained_transparency_painter_order_and_parent_clipping_match_direct_renderin
         assert_eq!(statistics.bytes, 64 * 48 * 4);
     }
 }
+
+#[test]
+fn opacity_groups_blend_overlapping_contents_once_and_repaint_each_frame() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new() else { return };
+    let mut renderer = gpu.renderer();
+    // A required opacity group must work when optional retained layers are off.
+    renderer.set_raster_cache_budget(0);
+    let bounds = rect(8.0, 8.0, 64.0, 48.0);
+    let frame = rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
+    for (color, expected) in [
+        (Color::from_rgb(0.0, 1.0, 0.0), [0, 128, 128, 255]),
+        (Color::from_rgb(1.0, 1.0, 0.0), [128, 128, 128, 255]),
+    ] {
+        let viewport = begin_frame(&mut renderer, 1.0);
+        fill(&mut renderer, frame, Color::from_rgb(0.0, 0.0, 1.0));
+        renderer.with_opacity_layer(bounds, 0.5, |renderer| {
+            fill(renderer, bounds, Color::from_rgb(1.0, 0.0, 0.0));
+            renderer.with_layer(rect(24.0, 16.0, 16.0, 16.0), |renderer| {
+                fill(renderer, bounds, color);
+            });
+        });
+        // This quad uses the parent scope and must paint above the group.
+        fill(&mut renderer, rect(48.0, 24.0, 8.0, 8.0), Color::WHITE);
+        let actual = renderer.screenshot(&viewport, Color::BLACK);
+        for (actual, expected) in pixel(&actual, 28, 20).iter().zip(expected) {
+            assert!((i16::from(*actual) - expected).abs() <= 1);
+        }
+        assert_eq!(pixel(&actual, 4, 4), [0, 0, 255, 255]);
+        assert_eq!(pixel(&actual, 52, 28), [255, 255, 255, 255]);
+    }
+    // An opaque primitive in a half-opacity child of a half-opacity group
+    // contributes one quarter; the enclosing red remains beneath the child.
+    let viewport = begin_frame(&mut renderer, 1.0);
+    fill(&mut renderer, frame, Color::from_rgb(0.0, 0.0, 1.0));
+    renderer.with_opacity_layer(bounds, 0.5, |renderer| {
+        fill(renderer, bounds, Color::from_rgb(1.0, 0.0, 0.0));
+        renderer.with_opacity_layer(bounds, 0.5, |renderer| {
+            fill(renderer, bounds, Color::from_rgb(0.0, 1.0, 0.0));
+        });
+    });
+    let actual = renderer.screenshot(&viewport, Color::BLACK);
+    for (actual, expected) in pixel(&actual, 28, 20).iter().zip([64, 64, 128, 255]) {
+        assert!((i16::from(*actual) - expected).abs() <= 1);
+    }
+}
+
+#[test]
+fn opacity_groups_preserve_transforms_parent_clipping_and_zero_opacity() {
+    let _guard = lock_vulkan_test();
+    let Some(gpu) = Gpu::new() else { return };
+    let mut renderer = gpu.renderer();
+    let frame = rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
+    for opacity in [0.0, 0.5, 1.0] {
+        let viewport = begin_frame(&mut renderer, 1.0);
+        fill(&mut renderer, frame, Color::from_rgb(0.0, 0.0, 1.0));
+        renderer.with_layer(rect(16.0, 12.0, 48.0, 36.0), |renderer| {
+            renderer.with_transformation(Transformation::translate(8.0, 4.0), |renderer| {
+                renderer.with_opacity_layer(rect(0.0, 0.0, 80.0, 60.0), opacity, |renderer| {
+                    fill(renderer, frame, Color::from_rgb(1.0, 0.0, 0.0));
+                });
+            });
+            renderer.with_layer(rect(48.0, 28.0, 8.0, 8.0), |renderer| {
+                fill(renderer, frame, Color::WHITE);
+            });
+        });
+        // Closing the nested clip and transform restores the frame's scope.
+        renderer.with_layer(frame, |renderer| {
+            fill(renderer, rect(96.0, 72.0, 8.0, 8.0), Color::WHITE);
+        });
+        let actual = renderer.screenshot(&viewport, Color::BLACK);
+        assert_eq!(pixel(&actual, 8, 8), [0, 0, 255, 255]);
+        assert_eq!(pixel(&actual, 68, 20), [0, 0, 255, 255]);
+        assert_eq!(pixel(&actual, 52, 32), [255, 255, 255, 255]);
+        assert_eq!(pixel(&actual, 100, 76), [255, 255, 255, 255]);
+        let expected_red = (opacity * 255.0).round() as i16;
+        let expected_blue = ((1.0 - opacity) * 255.0).round() as i16;
+        let inside = pixel(&actual, 24, 20);
+        assert!((i16::from(inside[0]) - expected_red).abs() <= 1);
+        assert_eq!(inside[1], 0);
+        assert!((i16::from(inside[2]) - expected_blue).abs() <= 1);
+        assert_eq!(inside[3], 255);
+    }
+}

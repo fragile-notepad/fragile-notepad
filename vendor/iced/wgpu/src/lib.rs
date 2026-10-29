@@ -34,6 +34,7 @@ mod color;
 mod composition;
 mod engine;
 mod nudge;
+mod opacity;
 mod quad;
 mod raster;
 mod raster_cache;
@@ -89,6 +90,8 @@ pub struct Renderer {
     text_viewport: text::Viewport,
     raster_cache: raster_cache::State,
     composition: composition::State,
+    opacity: opacity::State,
+    opacity_parent: Option<Box<opacity::Capture>>,
 
     #[cfg(any(feature = "svg", feature = "image"))]
     image: image::State,
@@ -155,6 +158,8 @@ impl Renderer {
             text_viewport: engine.text_pipeline.create_viewport(&engine.device),
             raster_cache: raster_cache::State::default(),
             composition: composition::State::default(),
+            opacity: opacity::State::default(),
+            opacity_parent: None,
 
             #[cfg(any(feature = "svg", feature = "image"))]
             image: image::State::new(),
@@ -241,7 +246,8 @@ impl Renderer {
                     label: Some("iced_wgpu encoder"),
                 });
 
-        let retained_ready = self.raster_cache.prepare(&mut encoder);
+        let opacity_ready = self.opacity.prepare(&mut encoder);
+        let retained_ready = self.raster_cache.prepare(&mut encoder) && opacity_ready;
         self.layers.merge();
         let texture = target.texture();
         let eligible = texture.width() == viewport.physical_width()
@@ -294,7 +300,8 @@ impl Renderer {
         target: &wgpu::TextureView,
         viewport: &Viewport,
     ) -> bool {
-        let retained_ready = self.raster_cache.prepare(encoder);
+        let opacity_ready = self.opacity.prepare(encoder);
+        let retained_ready = self.raster_cache.prepare(encoder) && opacity_ready;
         // Accumulate omitted images across every layer. Later worker completion
         // must not make an earlier incomplete paint eligible for reuse.
         let assets_ready = self.prepare(encoder, viewport, None);
@@ -969,11 +976,20 @@ impl Renderer {
                     scissor_rect.height,
                 );
                 for instance in &layer.rasters {
-                    self.engine.raster_pipeline().draw(
-                        &instance.target,
-                        instance.bounds * scale_factor,
-                        &mut render_pass,
-                    );
+                    if let Some(opacity) = &instance.opacity {
+                        self.engine.raster_pipeline().draw_with_opacity(
+                            &instance.target,
+                            instance.bounds * scale_factor,
+                            opacity,
+                            &mut render_pass,
+                        );
+                    } else {
+                        self.engine.raster_pipeline().draw(
+                            &instance.target,
+                            instance.bounds * scale_factor,
+                            &mut render_pass,
+                        );
+                    }
                 }
                 render_pass.set_viewport(
                     0.0,
@@ -1061,6 +1077,7 @@ impl Renderer {
     /// of [`Renderer::draw`] to a [`wgpu::Queue`].
     pub fn finish(&mut self) {
         self.staging_belt.finish();
+        self.opacity.finish();
         for entry in self.raster_cache.entries.values_mut() {
             entry.child.finish();
         }
@@ -1075,6 +1092,7 @@ impl Renderer {
     /// of [`Renderer::draw`] to a [`wgpu::Queue`].
     pub fn recall(&mut self) {
         self.staging_belt.recall();
+        self.opacity.recall();
         for entry in self.raster_cache.entries.values_mut() {
             entry.child.recall();
         }
@@ -1082,6 +1100,14 @@ impl Renderer {
 }
 
 impl core::Renderer for Renderer {
+    fn start_opacity_layer(&mut self, bounds: Rectangle, opacity: f32) {
+        opacity::State::begin(self, bounds, opacity);
+    }
+
+    fn end_opacity_layer(&mut self) {
+        opacity::State::end(self);
+    }
+
     fn start_cached_layer(&mut self, cache: &renderer::Cache, key: u64, bounds: Rectangle) -> bool {
         let mut state = std::mem::take(&mut self.raster_cache);
         let record = state.begin(self, cache, key, bounds);
@@ -1144,8 +1170,10 @@ impl core::Renderer for Renderer {
     }
 
     fn reset(&mut self, new_bounds: Rectangle) {
+        assert!(self.opacity_parent.is_none(), "unbalanced opacity layer");
         self.layers.reset(new_bounds);
         self.raster_cache.reset();
+        self.opacity.reset();
     }
 }
 

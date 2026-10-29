@@ -10,6 +10,10 @@ impl Renderer for () {
 
     fn end_layer(&mut self) {}
 
+    fn start_opacity_layer(&mut self, _bounds: Rectangle, _opacity: f32) {}
+
+    fn end_opacity_layer(&mut self) {}
+
     fn start_transformation(&mut self, _transformation: Transformation) {}
 
     fn end_transformation(&mut self) {}

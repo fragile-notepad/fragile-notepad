@@ -528,15 +528,11 @@ where
         );
 
         let Self {
-            overlay,
+            overlay: overlay_state,
             root,
             base,
             ..
         } = self;
-
-        let Some(Overlay { layout, .. }) = overlay.as_ref() else {
-            return;
-        };
 
         let overlay = root
             .as_widget_mut()
@@ -550,7 +546,17 @@ where
             .map(overlay::Nested::new);
 
         if let Some(mut overlay) = overlay {
-            overlay.draw(renderer, theme, style, Layout::new(layout), cursor);
+            // A fresh interface, or a captured base event, has no saved overlay
+            // layout. Build it from the current widgets before painting.
+            let state = overlay_state.get_or_insert_with(|| {
+                let layout = overlay.layout(renderer, self.bounds);
+                let interaction = overlay.mouse_interaction(Layout::new(&layout), cursor, renderer);
+                Overlay {
+                    layout,
+                    interaction,
+                }
+            });
+            overlay.draw(renderer, theme, style, Layout::new(&state.layout), cursor);
         }
     }
 

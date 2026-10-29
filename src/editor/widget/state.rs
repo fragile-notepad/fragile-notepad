@@ -32,7 +32,9 @@ pub struct AdvancedEditorState<Paragraph> {
     pub preedit: Option<input_method::Preedit>,
     pub(super) scroll_fast_until: Cell<Option<Instant>>,
     pub(super) render_frame: Cell<u64>,
-    pub(super) rich_paragraphs: RefCell<RichParagraphCache<Paragraph>>,
+    // Rich paragraphs contain span colors. Keep each color mode's shaped text
+    // while a transition paints both modes from this shared input state.
+    pub(super) rich_paragraphs: [RefCell<RichParagraphCache<Paragraph>>; 2],
     pub(super) line_geometries: RefCell<LineGeometryCache<Paragraph>>,
 }
 
@@ -62,7 +64,7 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             preedit: None,
             scroll_fast_until: Cell::new(None),
             render_frame: Cell::new(0),
-            rich_paragraphs: RefCell::new(RichParagraphCache::default()),
+            rich_paragraphs: std::array::from_fn(|_| RefCell::new(RichParagraphCache::default())),
             line_geometries: RefCell::new(LineGeometryCache::default()),
         }
     }

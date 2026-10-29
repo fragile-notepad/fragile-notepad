@@ -1189,6 +1189,8 @@ impl Document {
             .is_current(&settings, self.buffer.line_count())
         {
             *self.syntax_cache.borrow_mut() = SyntaxLineCache::rebuild(&self.buffer, &settings);
+        } else {
+            self.syntax_cache.borrow_mut().configure(&settings);
         }
     }
 

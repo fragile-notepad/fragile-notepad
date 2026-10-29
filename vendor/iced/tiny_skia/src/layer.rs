@@ -20,6 +20,14 @@ pub struct Layer {
     pub primitives: Vec<Item<Primitive>>,
     pub images: Vec<Image>,
     pub text: Vec<Item<Text>>,
+    pub(crate) opacity: Option<OpacityGroup>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OpacityGroup {
+    pub layers: Arc<[Layer]>,
+    pub bounds: Rectangle,
+    pub opacity: f32,
 }
 
 impl Layer {
@@ -223,6 +231,12 @@ impl Layer {
         current: &Self,
         scroll: Option<Scroll>,
     ) -> (Vec<Rectangle>, DamageSummary) {
+        if previous.opacity.is_some() || current.opacity.is_some() {
+            return (
+                vec![previous.bounds, current.bounds],
+                DamageSummary::default(),
+            );
+        }
         if previous.bounds != current.bounds {
             return (
                 vec![previous.bounds, current.bounds],
@@ -334,6 +348,9 @@ impl Layer {
     }
 
     pub(crate) fn scroll(previous: &Self, current: &Self) -> Option<Scroll> {
+        if previous.opacity.is_some() || current.opacity.is_some() {
+            return None;
+        }
         if previous.bounds != current.bounds {
             return None;
         }
@@ -467,6 +484,7 @@ impl Default for Layer {
             primitives: Vec::new(),
             text: Vec::new(),
             images: Vec::new(),
+            opacity: None,
         }
     }
 }
@@ -496,9 +514,13 @@ impl graphics::Layer for Layer {
         self.primitives.clear();
         self.text.clear();
         self.images.clear();
+        self.opacity = None;
     }
 
     fn start(&self) -> usize {
+        if self.opacity.is_some() {
+            return 0;
+        }
         if !self.quads.is_empty() {
             return 1;
         }
@@ -519,6 +541,9 @@ impl graphics::Layer for Layer {
     }
 
     fn end(&self) -> usize {
+        if self.opacity.is_some() {
+            return usize::MAX;
+        }
         if !self.text.is_empty() {
             return 4;
         }

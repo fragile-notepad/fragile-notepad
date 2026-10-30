@@ -119,9 +119,18 @@ impl App {
     }
 
     pub(super) fn update_settings(&mut self, message: SettingsMessage) -> Task<Message> {
+        let previous_frame_settings = (self.settings.max_fps, self.settings.vsync);
         let task = self.dispatch_settings(message);
         self.settings_dialog.sync_shortcut_notice_animation();
-        task
+        if previous_frame_settings != (self.settings.max_fps, self.settings.vsync) {
+            Task::batch([
+                task,
+                iced::window::set_frame_settings(self.settings.max_fps, self.settings.vsync)
+                    .discard(),
+            ])
+        } else {
+            task
+        }
     }
 
     fn dispatch_settings(&mut self, message: SettingsMessage) -> Task<Message> {
@@ -236,6 +245,19 @@ impl App {
             }
             SettingsMessage::DraftHardwareAccelerationSelected(mode) => {
                 self.settings_dialog.draft.set_hardware_acceleration(mode);
+                Task::none()
+            }
+            SettingsMessage::DraftMaxFpsChanged(value) => {
+                if let Ok(max_fps) = value.parse::<u32>()
+                    && (EditorSettings::MIN_FPS..=EditorSettings::MAX_FPS).contains(&max_fps)
+                {
+                    self.settings_dialog.draft.max_fps = max_fps;
+                }
+                self.settings_dialog.max_fps_input = value;
+                Task::none()
+            }
+            SettingsMessage::DraftVsyncToggled(vsync) => {
+                self.settings_dialog.draft.vsync = vsync;
                 Task::none()
             }
             SettingsMessage::DraftIndentationSelected(indentation) => {
@@ -675,6 +697,8 @@ pub(super) fn merge_initial_settings(
         indentation,
         appearance,
         hardware_acceleration,
+        max_fps,
+        vsync,
         syntax_theme,
         shortcuts,
         search_results

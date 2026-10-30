@@ -110,6 +110,10 @@ pub struct EditorSettings {
     pub indentation: IndentationMode,
     pub appearance: AppearanceMode,
     pub hardware_acceleration: HardwareAccelerationMode,
+    /// Maximum frames per second while a window changes.
+    pub max_fps: u32,
+    /// Synchronizes presentation with the display's refresh rate.
+    pub vsync: bool,
     pub syntax_theme: highlighter::Theme,
     pub decorations: DecorationSettings,
     pub shortcuts: ShortcutMap,
@@ -137,6 +141,13 @@ impl EditorSettings {
     pub const DEFAULT_WRAP_COLUMN: usize = 100;
     pub const MIN_WRAP_COLUMN: usize = 1;
     pub const MAX_WRAP_COLUMN: usize = 1000;
+    pub const DEFAULT_MAX_FPS: u32 = 120;
+    pub const MIN_FPS: u32 = 1;
+    pub const MAX_FPS: u32 = 1000;
+
+    pub fn set_max_fps(&mut self, max_fps: u32) {
+        self.max_fps = max_fps.clamp(Self::MIN_FPS, Self::MAX_FPS);
+    }
 
     pub fn valid_wrap_column(columns: usize) -> bool {
         (Self::MIN_WRAP_COLUMN..=Self::MAX_WRAP_COLUMN).contains(&columns)
@@ -313,6 +324,8 @@ impl EditorSettings {
                         "hardware-acceleration",
                         hardware_acceleration_key(self.hardware_acceleration),
                     )
+                    .attribute("max-fps", self.max_fps.clamp(Self::MIN_FPS, Self::MAX_FPS))
+                    .attribute("vsync", self.vsync)
                     .attribute("auto-save", self.auto_save)
                     .attribute("exit-on-last-window-close", self.exit_on_last_window_close)
                     .attribute("syntax-theme", self.syntax_theme.to_string()),
@@ -392,6 +405,15 @@ impl EditorSettings {
             }
             if let Some(auto_save) = general.attribute("auto-save").and_then(parse_bool) {
                 settings.auto_save = auto_save;
+            }
+            if let Some(max_fps) = general
+                .attribute("max-fps")
+                .and_then(|value| value.parse::<u32>().ok())
+            {
+                settings.set_max_fps(max_fps);
+            }
+            if let Some(vsync) = general.attribute("vsync").and_then(parse_bool) {
+                settings.vsync = vsync;
             }
             if let Some(exit) = general
                 .attribute("exit-on-last-window-close")
@@ -558,6 +580,8 @@ impl Default for EditorSettings {
             indentation: IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH),
             appearance: AppearanceMode::System,
             hardware_acceleration: HardwareAccelerationMode::Lazy,
+            max_fps: Self::DEFAULT_MAX_FPS,
+            vsync: true,
             syntax_theme: highlighter::Theme::VSCodeDark,
             decorations: DecorationSettings {
                 indent_width: IndentationMode::DEFAULT_SPACE_WIDTH as usize,

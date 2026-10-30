@@ -134,6 +134,12 @@ where
     {
         scroll.set_text_height(editor_layout.height);
     }
+    if !context.smooth_scrolling
+        && let Some(scroll) = state.smooth_scroll.as_mut()
+        && scroll.finish_precise()
+    {
+        shell.request_redraw();
+    }
     if state.smooth_scroll.as_mut().is_some_and(|scroll| {
         !scroll.observe_document_scroll(editor_layout.scroll)
             || (!context.smooth_scrolling && scroll.animating(context.now))
@@ -187,7 +193,7 @@ where
         .smooth_scroll
         .is_some_and(|scroll| scroll.animating(context.now))
     {
-        shell.request_redraw_at(context.now + Duration::from_millis(16));
+        shell.request_redraw();
     }
 
     match event {
@@ -599,6 +605,18 @@ where
                 state
                     .wheel_input
                     .should_animate_with_phase(*delta, *phase, context.now);
+            let ended = matches!(
+                phase,
+                mouse::ScrollPhase::ContactEnded
+                    | mouse::ScrollPhase::Ended
+                    | mouse::ScrollPhase::Cancelled
+            );
+            if ended
+                && let Some(scroll) = state.smooth_scroll.as_mut()
+                && scroll.finish_precise()
+            {
+                shell.request_redraw();
+            }
             if !cursor.is_over(bounds) || *phase == mouse::ScrollPhase::Cancelled {
                 return outcome;
             }
@@ -639,6 +657,8 @@ where
                 let previous_horizontal = scroll.target_horizontal_milli();
                 if animate_wheel {
                     scroll.scroll_by(lines, horizontal_px, max_horizontal_px, context.now);
+                } else if context.smooth_scrolling && !ended {
+                    scroll.scroll_precise(lines, horizontal_px, max_horizontal_px, context.now);
                 } else {
                     scroll.scroll_direct(lines, horizontal_px, max_horizontal_px, context.now);
                 }
@@ -1392,6 +1412,15 @@ mod tests {
             )
         }
 
+        fn settle_precise(&mut self) {
+            self.dispatch(
+                Event::Window(window::Event::RedrawRequested(
+                    self.now + Duration::from_millis(64),
+                )),
+                mouse::Cursor::Unavailable,
+            );
+        }
+
         fn drag_to(&mut self, point: Point) -> Vec<EditorAction> {
             self.dispatch(
                 Event::Mouse(mouse::Event::CursorMoved { position: point }),
@@ -1419,14 +1448,18 @@ mod tests {
                 assert_eq!(editor.layout.scroll, ScrollOffset::ZERO);
             }
 
-            let displayed = editor.displayed_layout();
+            let displayed = editor
+                .state
+                .smooth_scroll
+                .unwrap()
+                .display_layout(editor.now + Duration::from_millis(64));
             assert_eq!(displayed.scroll.horizontal_px, 24.0);
             assert_eq!(displayed.scroll.first_visible_row, 1);
             assert!((displayed.vertical_offset_px - 6.0).abs() < 0.001);
             editor.apply_messages(&messages);
             editor.dispatch(
                 Event::Window(window::Event::RedrawRequested(
-                    editor.now + Duration::from_millis(16),
+                    editor.now + Duration::from_millis(64),
                 )),
                 mouse::Cursor::Unavailable,
             );
@@ -1490,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn precise_pixel_scroll_follows_input_at_every_zoom_without_a_tail() {
+    fn precise_pixel_scroll_keeps_exact_distances_at_every_zoom() {
         for zoom in [0.5, 1.0, 2.0] {
             for smooth in [false, true] {
                 for speed in [1.0, 1.5] {
@@ -1502,6 +1535,13 @@ mod tests {
                     editor.scroll_speed = speed;
                     for packet in 1..=12 {
                         editor.wheel(mouse::ScrollDelta::Pixels { x: -8.0, y: -8.0 });
+                        assert_eq!(
+                            editor.state.smooth_scroll.unwrap().animating(editor.now),
+                            smooth
+                        );
+                        if smooth {
+                            editor.settle_precise();
+                        }
                         let displayed = editor.displayed_layout();
                         let expected = packet as f32 * 8.0;
                         let y = displayed.scroll.first_visible_row as f32
@@ -1543,6 +1583,13 @@ mod tests {
 
         editor.wheel(mouse::ScrollDelta::Pixels { x: -8.0, y: -8.0 });
 
+        let initial = editor.displayed_layout();
+        assert!((initial.scroll.horizontal_px - before.scroll.horizontal_px).abs() < 0.001);
+        let initial_y = initial.scroll.first_visible_row as f32 * initial.metrics.line_height
+            + initial.vertical_offset_px;
+        assert!((initial_y - before_y).abs() < 0.001);
+        assert!(editor.state.smooth_scroll.unwrap().animating(editor.now));
+        editor.settle_precise();
         let after = editor.displayed_layout();
         let after_y = after.scroll.first_visible_row as f32 * after.metrics.line_height
             + after.vertical_offset_px;
@@ -1552,12 +1599,14 @@ mod tests {
     }
 
     #[test]
-    fn fractional_line_input_preserves_both_axes_and_keeps_later_packets_direct() {
+    fn fractional_line_input_preserves_both_axes_and_interpolates_later_packets() {
         let mut editor = TestEditor::new(&format!("{}\n", "abcdefgh".repeat(50)).repeat(100));
         editor.max_horizontal_px = 10_000.0;
         editor.smooth_scrolling = true;
 
         editor.wheel(mouse::ScrollDelta::Lines { x: -0.25, y: -1.0 });
+        assert!(editor.state.smooth_scroll.unwrap().animating(editor.now));
+        editor.settle_precise();
 
         let displayed = editor.displayed_layout();
         assert_eq!(displayed.scroll.horizontal_px, 6.75);
@@ -1566,6 +1615,8 @@ mod tests {
         assert!(!editor.state.smooth_scroll.unwrap().animating(editor.now));
 
         editor.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 });
+        assert!(editor.state.smooth_scroll.unwrap().animating(editor.now));
+        editor.settle_precise();
 
         let displayed = editor.displayed_layout();
         assert_eq!(displayed.scroll.horizontal_px, 6.75);
@@ -1597,6 +1648,36 @@ mod tests {
         assert_eq!(editor.displayed_layout(), before);
         editor.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 });
         assert!(editor.state.smooth_scroll.unwrap().animating(editor.now));
+    }
+
+    #[test]
+    fn precise_gesture_end_finishes_the_received_distance_without_a_coast() {
+        for phase in [
+            mouse::ScrollPhase::ContactEnded,
+            mouse::ScrollPhase::Ended,
+            mouse::ScrollPhase::Cancelled,
+        ] {
+            let mut editor = TestEditor::new(&format!("{}\n", "abcdefgh".repeat(30)).repeat(100));
+            editor.max_horizontal_px = 1000.0;
+            editor.smooth_scrolling = true;
+            editor.wheel(mouse::ScrollDelta::Pixels { x: -8.0, y: -24.0 });
+            assert!(editor.state.smooth_scroll.unwrap().animating(editor.now));
+            editor.dispatch(
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 0.0 },
+                    phase,
+                }),
+                mouse::Cursor::Unavailable,
+            );
+            let ended = editor.displayed_layout();
+            assert_eq!(ended.scroll.horizontal_px, 8.0);
+            assert_eq!(ended.scroll.first_visible_row, 1);
+            assert!((ended.vertical_offset_px - 6.0).abs() < 0.001);
+            assert!(!editor.state.smooth_scroll.unwrap().animating(editor.now));
+            editor.settle_precise();
+            assert_eq!(editor.displayed_layout(), ended);
+            assert_ne!(editor.last_redraw, window::RedrawRequest::NextFrame);
+        }
     }
 
     #[test]
@@ -1910,7 +1991,7 @@ mod tests {
         assert_eq!(finished.scroll.first_visible_row, 0);
         assert!((finished.vertical_offset_px - 4.0).abs() < 0.001);
         assert_eq!(finished.scroll.horizontal_px, 4.0);
-        assert!(!horizontal.animating(editor.now));
+        assert!(horizontal.animating(editor.now));
 
         let next_at = editor.now + Duration::from_millis(16);
         let before_vertical = horizontal.display_layout(next_at);
@@ -1925,7 +2006,7 @@ mod tests {
         let finished = vertical.display_layout(editor.now + super::super::scroll::SCROLL_DURATION);
         assert_eq!(finished.scroll.horizontal_px, 4.0);
         assert!((finished.vertical_offset_px - 12.0).abs() < 0.001);
-        assert!(!vertical.animating(editor.now));
+        assert!(vertical.animating(editor.now));
     }
 
     #[test]
@@ -1940,7 +2021,7 @@ mod tests {
         let scroll = editor.state.smooth_scroll.expect("wheel starts motion");
         assert_eq!(scroll.display_layout(started).scroll.first_visible_row, 0);
 
-        let frame = started + Duration::from_millis(16);
+        let frame = started + window::frame_interval();
         editor.dispatch(
             Event::Window(window::Event::RedrawRequested(frame)),
             mouse::Cursor::Unavailable,
@@ -1948,10 +2029,7 @@ mod tests {
         let displayed = editor.state.smooth_scroll.unwrap().display_layout(frame);
         assert!(displayed.scroll.first_visible_row < 6);
         assert!(displayed.vertical_offset_px > 0.0);
-        assert_eq!(
-            editor.last_redraw,
-            window::RedrawRequest::At(frame + Duration::from_millis(16)),
-        );
+        assert_eq!(editor.last_redraw, window::RedrawRequest::NextFrame);
 
         let finished = started + super::super::scroll::SCROLL_DURATION;
         editor.dispatch(

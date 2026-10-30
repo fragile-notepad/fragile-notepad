@@ -6,6 +6,144 @@ use crate::core::{
 use iced::widget::text_editor::LineEnding;
 
 #[test]
+fn frame_settings_apply_save_and_cancel_with_the_settings_dialog() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::ToggleSettingsPanel);
+    let _ = app.update(Message::DraftMaxFpsChanged("144".into()));
+    let _ = app.update(Message::DraftVsyncToggled(false));
+    assert_eq!(app.settings.max_fps, 120);
+    assert!(app.settings.vsync);
+
+    let _ = app.update(Message::ApplySettings);
+    assert_eq!(app.settings.max_fps, 144);
+    assert!(!app.settings.vsync);
+
+    let _ = app.update(Message::DraftMaxFpsChanged("240".into()));
+    let _ = app.update(Message::DraftVsyncToggled(true));
+    let _ = app.update(Message::CancelSettings);
+    assert_eq!(app.settings.max_fps, 144);
+    assert!(!app.settings.vsync);
+    assert_eq!(app.settings_dialog.max_fps_input, "144");
+    assert!(!app.settings_dialog.draft.vsync);
+
+    let _ = app.update(Message::DraftMaxFpsChanged("240".into()));
+    let _ = app.update(Message::DraftVsyncToggled(true));
+    let _ = app.update(Message::SaveSettings);
+    assert_eq!(app.settings.max_fps, 240);
+    assert!(app.settings.vsync);
+    assert!(app.settings_persistence.flush_scheduled());
+}
+
+#[test]
+fn invalid_frame_rate_blocks_apply_and_save_until_corrected() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::DraftMaxFpsChanged("144".into()));
+    let _ = app.update(Message::DraftVsyncToggled(false));
+    for invalid in ["", "0", "1001", "-1", "NaN"] {
+        let _ = app.update(Message::DraftMaxFpsChanged(invalid.into()));
+        assert_eq!(app.settings_dialog.draft.max_fps, 144);
+        assert!(app.settings_dialog.validation_error().is_some());
+        let _ = app.update(Message::ApplySettings);
+        let _ = app.update(Message::SaveSettings);
+        assert_eq!(app.settings.max_fps, 120);
+        assert!(app.settings.vsync);
+        assert!(!app.settings_persistence.flush_scheduled());
+    }
+
+    let _ = app.update(Message::DraftMaxFpsChanged("144".into()));
+    assert!(app.settings_dialog.validation_error().is_none());
+    let _ = app.update(Message::ApplySettings);
+    assert_eq!(app.settings.max_fps, 144);
+    assert!(!app.settings.vsync);
+}
+
+#[test]
+fn applying_frame_settings_updates_the_runtime_only_when_the_values_change() {
+    use crate::message::SettingsMessage;
+    use futures::StreamExt;
+
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    for message in [
+        SettingsMessage::DraftMaxFpsChanged("144".into()),
+        SettingsMessage::DraftVsyncToggled(false),
+    ] {
+        assert!(iced_runtime::task::into_stream(app.update_settings(message)).is_none());
+    }
+
+    let task = app.update_settings(SettingsMessage::ApplySettings);
+    let mut stream = iced_runtime::task::into_stream(task).unwrap();
+    assert!(matches!(
+        futures::executor::block_on(stream.next()),
+        Some(iced_runtime::Action::Window(
+            iced_runtime::window::Action::SetFrameSettings {
+                max_fps: 144,
+                vsync: false,
+            }
+        ))
+    ));
+    assert!(futures::executor::block_on(stream.next()).is_none());
+    if let Some(mut stream) =
+        iced_runtime::task::into_stream(app.update_settings(SettingsMessage::ApplySettings))
+    {
+        while let Some(action) = futures::executor::block_on(stream.next()) {
+            assert!(!matches!(
+                action,
+                iced_runtime::Action::Window(iced_runtime::window::Action::SetFrameSettings { .. })
+            ));
+        }
+    }
+}
+
+#[test]
+fn loading_frame_settings_respects_an_early_apply_and_updates_the_runtime() {
+    use crate::message::SettingsMessage;
+    use futures::StreamExt;
+
+    for applied_before_load in [false, true] {
+        let (mut app, _) = App::new();
+        if applied_before_load {
+            let _ = app.update(Message::ApplySettings);
+        }
+        let saved = EditorSettings {
+            max_fps: 60,
+            vsync: false,
+            ..EditorSettings::default()
+        };
+        let task = app.update_settings(SettingsMessage::SettingsLoaded(Ok(Some(saved))));
+        let mut updates = Vec::new();
+        if let Some(mut stream) = iced_runtime::task::into_stream(task) {
+            while let Some(action) = futures::executor::block_on(stream.next()) {
+                if let iced_runtime::Action::Window(
+                    iced_runtime::window::Action::SetFrameSettings { max_fps, vsync },
+                ) = action
+                {
+                    updates.push((max_fps, vsync));
+                }
+            }
+        }
+        let expected = if applied_before_load {
+            (120, true)
+        } else {
+            (60, false)
+        };
+        assert_eq!((app.settings.max_fps, app.settings.vsync), expected);
+        assert_eq!(app.settings_dialog.max_fps_input, expected.0.to_string());
+        assert_eq!(app.settings_dialog.draft.vsync, expected.1);
+        assert_eq!(
+            updates,
+            if applied_before_load {
+                vec![]
+            } else {
+                vec![expected]
+            }
+        );
+    }
+}
+
+#[test]
 fn smooth_scrolling_changes_apply_save_and_cancel_with_the_settings_dialog() {
     let (mut app, _) = App::new();
     let _ = app.update(Message::SettingsLoaded(Ok(None)));

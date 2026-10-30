@@ -92,6 +92,7 @@ where
                 renderer,
                 mouse_interaction: mouse::Interaction::None,
                 redraw_at: None,
+                frame_clock: FrameClock::default(),
                 preedit: None,
                 ime_state: None,
             },
@@ -118,7 +119,7 @@ where
         let drag_tick = self
             .tab_drag
             .is_active()
-            .then(|| Instant::now() + std::time::Duration::from_millis(16));
+            .then(|| Instant::now() + core::window::frame_interval());
         self.entries
             .values()
             .filter(|window| window.raw.is_visible() != Some(false))
@@ -233,6 +234,7 @@ where
     pub surface_error_at: Option<Instant>,
     pub renderer: P::Renderer,
     pub redraw_at: Option<Instant>,
+    pub frame_clock: FrameClock,
     preedit: Option<Preedit<P::Renderer>>,
     ime_state: Option<(Rectangle, input_method::Purpose)>,
 }
@@ -246,6 +248,48 @@ where
     pub surface: C::Surface,
     pub surface_version: u64,
     pub renderer: P::Renderer,
+}
+
+/// Keeps redraw deadlines on a fixed cadence across late timer and display wakeups.
+#[derive(Default)]
+pub struct FrameClock {
+    last_frame: Option<Instant>,
+    next_frame: Option<Instant>,
+    interval: core::time::Duration,
+}
+
+impl FrameClock {
+    fn scheduled_frame(&self, interval: core::time::Duration) -> Option<Instant> {
+        if self.interval == interval {
+            self.next_frame
+        } else {
+            self.last_frame.map(|last| last + interval)
+        }
+    }
+
+    fn deadline(&self, now: Instant, interval: core::time::Duration) -> Option<Instant> {
+        self.scheduled_frame(interval)
+            .filter(|deadline| *deadline > now)
+    }
+
+    /// Starts an allowed frame, or returns its unchanged future deadline.
+    pub fn start(&mut self, now: Instant, interval: core::time::Duration) -> Option<Instant> {
+        if let Some(deadline) = self.deadline(now, interval) {
+            Some(deadline)
+        } else {
+            // Keep small wakeup delays from accumulating. A display whose refresh
+            // rate differs from the target may need alternating short/long gaps.
+            // After a full missed interval, start fresh instead of drawing a burst.
+            self.next_frame = Some(
+                self.scheduled_frame(interval)
+                    .filter(|deadline| now.saturating_duration_since(*deadline) < interval)
+                    .map_or(now + interval, |deadline| deadline + interval),
+            );
+            self.last_frame = Some(now);
+            self.interval = interval;
+            None
+        }
+    }
 }
 
 impl<P, C> Window<P, C>
@@ -270,6 +314,7 @@ where
             surface_error_at: _,
             renderer,
             redraw_at,
+            frame_clock,
             preedit,
             ime_state,
         } = self;
@@ -293,6 +338,7 @@ where
                 surface_error_at: None,
                 renderer: rendering_state.renderer,
                 redraw_at,
+                frame_clock,
                 preedit,
                 ime_state,
             },
@@ -314,11 +360,19 @@ where
     pub fn request_redraw(&mut self, redraw_request: RedrawRequest) {
         match redraw_request {
             RedrawRequest::NextFrame => {
-                self.raw.request_redraw();
-                self.redraw_at = None;
+                let now = Instant::now();
+                if let Some(deadline) = self
+                    .frame_clock
+                    .deadline(now, core::window::frame_interval())
+                {
+                    self.redraw_at = Some(self.redraw_at.map_or(deadline, |at| at.min(deadline)));
+                } else {
+                    self.raw.request_redraw();
+                    self.redraw_at = None;
+                }
             }
             RedrawRequest::At(at) => {
-                self.redraw_at = Some(at);
+                self.redraw_at = Some(self.redraw_at.map_or(at, |pending| pending.min(at)));
             }
             RedrawRequest::Wait => {}
         }
@@ -546,5 +600,119 @@ where
                 );
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod frame_clock_tests {
+    use super::FrameClock;
+    use crate::core::time::{Duration, Instant};
+
+    #[test]
+    fn first_frame_and_frames_after_idle_start_immediately() {
+        let mut clock = FrameClock::default();
+        let now = Instant::now();
+        let interval = Duration::from_nanos(8_333_333);
+
+        assert_eq!(clock.start(now, interval), None);
+        assert_eq!(clock.start(now + Duration::from_secs(10), interval), None);
+        assert_eq!(
+            clock.deadline(now + Duration::from_secs(11), interval),
+            None
+        );
+    }
+
+    #[test]
+    fn repeated_early_input_keeps_the_original_deadline() {
+        let mut clock = FrameClock::default();
+        let now = Instant::now();
+        let interval = Duration::from_millis(10);
+
+        assert_eq!(clock.start(now, interval), None);
+        for milliseconds in 1..10 {
+            assert_eq!(
+                clock.start(now + Duration::from_millis(milliseconds), interval),
+                Some(now + interval),
+            );
+        }
+        assert_eq!(clock.start(now + interval, interval), None);
+    }
+
+    #[test]
+    fn changed_frame_interval_applies_to_the_pending_frame() {
+        let mut clock = FrameClock::default();
+        let now = Instant::now();
+        let slow = Duration::from_millis(20);
+        let fast = Duration::from_millis(5);
+
+        assert_eq!(clock.start(now, slow), None);
+        assert_eq!(clock.start(now + fast, slow), Some(now + slow));
+        assert_eq!(clock.start(now + fast, fast), None);
+        assert_eq!(clock.start(now + fast * 2, slow), Some(now + fast + slow));
+    }
+
+    #[test]
+    fn a_120_fps_target_uses_120_of_165_display_opportunities() {
+        let mut clock = FrameClock::default();
+        let started = Instant::now();
+        let interval = Duration::from_nanos(1_000_000_000 / 120);
+        let mut frames = 0;
+        let mut previous = None;
+        let mut has_short_gap = false;
+        let mut has_long_gap = false;
+
+        for refresh in 0..165 {
+            let now = started + Duration::from_nanos(refresh * 1_000_000_000 / 165);
+            if clock.start(now, interval).is_none() {
+                if let Some(previous) = previous {
+                    let elapsed = now - previous;
+                    has_short_gap |= elapsed < interval;
+                    has_long_gap |= elapsed > interval;
+                }
+                previous = Some(now);
+                frames += 1;
+            }
+        }
+
+        assert_eq!(frames, 120);
+        assert!(has_short_gap && has_long_gap);
+    }
+
+    #[test]
+    fn repeated_late_timer_wakeups_do_not_shift_the_cadence() {
+        let mut clock = FrameClock::default();
+        let started = Instant::now();
+        let interval = Duration::from_nanos(1_000_000_000 / 120);
+        let lateness = Duration::from_micros(200);
+
+        assert_eq!(clock.start(started, interval), None);
+        let mut now = started;
+        for frame in 1..120 {
+            let expected = started + interval * frame;
+            assert_eq!(clock.deadline(now, interval), Some(expected));
+            now = expected + lateness;
+            assert_eq!(clock.start(now, interval), None);
+        }
+        assert_eq!(
+            clock.deadline(now, interval),
+            Some(started + interval * 120)
+        );
+    }
+
+    #[test]
+    fn presentation_time_counts_toward_the_interval() {
+        let mut clock = FrameClock::default();
+        let now = Instant::now();
+        let interval = Duration::from_millis(8);
+
+        assert_eq!(clock.start(now, interval), None);
+        // A frame that spent the interval presenting needs no additional wait.
+        assert_eq!(clock.start(now + interval, interval), None);
+        // A slow frame starts once; it does not allow a catch-up burst.
+        assert_eq!(clock.start(now + interval * 4, interval), None);
+        assert_eq!(
+            clock.start(now + interval * 4, interval),
+            Some(now + interval * 5)
+        );
     }
 }

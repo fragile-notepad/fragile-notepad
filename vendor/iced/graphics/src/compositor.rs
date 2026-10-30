@@ -47,6 +47,13 @@ pub trait Compositor: Sized {
     /// [`Surface`]: Self::Surface
     fn configure_surface(&mut self, surface: &mut Self::Surface, width: u32, height: u32);
 
+    /// Changes synchronization for subsequently configured window surfaces.
+    /// Returns whether existing surfaces need to be configured again.
+    /// Backends without a synchronization setting keep their native behavior.
+    fn set_vsync(&mut self, _vsync: bool) -> bool {
+        false
+    }
+
     /// Returns [`Information`] used by this [`Compositor`].
     fn information(&self) -> Information;
 

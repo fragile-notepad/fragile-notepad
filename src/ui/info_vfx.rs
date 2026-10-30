@@ -14,7 +14,6 @@ use crate::message::Message;
 #[cfg(feature = "hybrid-rendering")]
 mod gpu;
 
-const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 pub(super) const HEADER_HEIGHT: f32 = 96.0;
 pub(super) const LOGO_SIZE: f32 = 80.0;
 const TILE_SIZE: f32 = 64.0;
@@ -49,6 +48,7 @@ struct State {
     elapsed: f64,
     last_tick: Option<Instant>,
     next_tick: Option<Instant>,
+    frame_interval: Duration,
     image: RefCell<Option<CachedField>>,
 }
 
@@ -69,6 +69,29 @@ impl State {
     fn pause(&mut self) {
         self.last_tick = None;
         self.next_tick = None;
+    }
+
+    fn advance(&mut self, now: Instant) {
+        if self.next_tick.is_some_and(|deadline| now < deadline) {
+            return;
+        }
+        let frame_interval = self.frame_interval;
+        if let Some(previous) = self.last_tick {
+            // Allow ordinary display frames even when the selected FPS is higher.
+            // A long presentation stall still pauses the field's motion.
+            let max_elapsed = (frame_interval * 2).max(Duration::from_nanos(33_333_334));
+            self.elapsed += now
+                .saturating_duration_since(previous)
+                .min(max_elapsed)
+                .as_secs_f64();
+        }
+        self.last_tick = Some(now);
+        // Keep the requested cadence when a display presents late,
+        // without catch-up bursts.
+        let deadline = self.next_tick.unwrap_or(now);
+        let remainder =
+            now.saturating_duration_since(deadline).as_nanos() % frame_interval.as_nanos();
+        self.next_tick = Some(now + frame_interval - Duration::from_nanos(remainder as u64));
     }
 }
 
@@ -230,6 +253,7 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             elapsed: 0.0,
             last_tick: None,
             next_tick: None,
+            frame_interval: window::frame_interval(),
             image: RefCell::new(None),
         })
     }
@@ -289,26 +313,15 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             Event::Window(window::Event::RedrawRequested(now)) => *now,
             _ => Instant::now(),
         };
-        if let Event::Window(window::Event::RedrawRequested(_)) = event
-            && state.next_tick.is_none_or(|deadline| now >= deadline)
-        {
-            if let Some(previous) = state.last_tick {
-                // If presentation stalls without a focus/resize event,
-                // do not jump the light field forward on its return.
-                state.elapsed += now
-                    .saturating_duration_since(previous)
-                    .min(FRAME_INTERVAL * 2)
-                    .as_secs_f64();
-            }
-            state.last_tick = Some(now);
-            // Keep the 60 Hz cadence anchored when a display presents late,
-            // without catch-up bursts.
-            let deadline = state.next_tick.unwrap_or(now);
-            let remainder =
-                now.saturating_duration_since(deadline).as_nanos() % FRAME_INTERVAL.as_nanos();
-            state.next_tick = Some(now + FRAME_INTERVAL - Duration::from_nanos(remainder as u64));
+        let frame_interval = window::frame_interval();
+        if state.frame_interval != frame_interval {
+            state.frame_interval = frame_interval;
+            state.next_tick = state.last_tick.map(|previous| previous + frame_interval);
         }
-        let deadline = *state.next_tick.get_or_insert(now + FRAME_INTERVAL);
+        if let Event::Window(window::Event::RedrawRequested(_)) = event {
+            state.advance(now);
+        }
+        let deadline = *state.next_tick.get_or_insert(now + frame_interval);
         shell.request_redraw_at(deadline);
     }
 }
@@ -531,6 +544,7 @@ mod tests {
         let renderer = renderer();
         let (mut widget, mut tree, node) = mount(&renderer);
         let start = Instant::now();
+        let frame_interval = window::frame_interval();
         let tick = |at| Event::Window(window::Event::RedrawRequested(at));
         assert_eq!(
             update(
@@ -541,7 +555,7 @@ mod tests {
                 tick(start),
                 BOUNDS
             ),
-            window::RedrawRequest::At(start + FRAME_INTERVAL)
+            window::RedrawRequest::At(start + frame_interval)
         );
         assert_eq!(
             update(
@@ -549,10 +563,10 @@ mod tests {
                 &mut tree,
                 &node,
                 &renderer,
-                tick(start + FRAME_INTERVAL / 2),
+                tick(start + frame_interval / 2),
                 BOUNDS
             ),
-            window::RedrawRequest::At(start + FRAME_INTERVAL)
+            window::RedrawRequest::At(start + frame_interval)
         );
         assert_eq!(tree.state.downcast_ref::<State>().elapsed, 0.0);
         update(
@@ -560,31 +574,32 @@ mod tests {
             &mut tree,
             &node,
             &renderer,
-            tick(start + FRAME_INTERVAL),
+            tick(start + frame_interval),
             BOUNDS,
         );
         let elapsed = tree.state.downcast_ref::<State>().elapsed;
-        assert!((elapsed - FRAME_INTERVAL.as_secs_f64()).abs() < 1e-9);
+        assert!((elapsed - frame_interval.as_secs_f64()).abs() < 1e-9);
         assert_eq!(
             update(
                 &mut widget,
                 &mut tree,
                 &node,
                 &renderer,
-                tick(start + FRAME_INTERVAL),
+                tick(start + frame_interval),
                 BOUNDS
             ),
-            window::RedrawRequest::At(start + FRAME_INTERVAL * 2)
+            window::RedrawRequest::At(start + frame_interval * 2)
         );
         assert_eq!(tree.state.downcast_ref::<State>().elapsed, elapsed);
         assert_eq!(node.bounds(), BOUNDS);
     }
 
     #[test]
-    fn floating_motion_advances_on_each_sixty_hz_display_frame() {
+    fn floating_motion_advances_on_each_requested_frame() {
         let renderer = renderer();
         let (mut widget, mut tree, node) = mount(&renderer);
         let start = Instant::now();
+        let frame_interval = window::frame_interval();
         let mut changes = 0;
         for frame in 0..=120 {
             let before = tree.state.downcast_ref::<State>().elapsed;
@@ -594,7 +609,7 @@ mod tests {
                 &node,
                 &renderer,
                 Event::Window(window::Event::RedrawRequested(
-                    start + Duration::from_nanos(16_666_667) * frame,
+                    start + frame_interval * frame,
                 )),
                 BOUNDS,
             );
@@ -602,8 +617,56 @@ mod tests {
         }
         assert_eq!(
             changes, 120,
-            "floating artwork must advance on every 60 Hz display frame"
+            "floating artwork must advance on every requested frame"
         );
+    }
+
+    #[test]
+    fn changed_frame_interval_reschedules_the_pending_tick() {
+        let renderer = renderer();
+        let frame_interval = window::frame_interval();
+        for previous_interval in [frame_interval / 2, frame_interval * 2] {
+            let (mut widget, mut tree, node) = mount(&renderer);
+            let start = Instant::now();
+            let state = tree.state.downcast_mut::<State>();
+            state.last_tick = Some(start);
+            state.next_tick = Some(start + previous_interval);
+            state.frame_interval = previous_interval;
+
+            let redraw = update(
+                &mut widget,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(start + frame_interval)),
+                BOUNDS,
+            );
+            assert_eq!(
+                redraw,
+                window::RedrawRequest::At(start + frame_interval * 2)
+            );
+            assert!(
+                (tree.state.downcast_ref::<State>().elapsed - frame_interval.as_secs_f64()).abs()
+                    < 1e-9
+            );
+        }
+    }
+
+    #[test]
+    fn motion_keeps_elapsed_time_when_display_frames_arrive_below_the_fps_limit() {
+        let renderer = renderer();
+        for (frame_interval, display_interval) in [
+            (Duration::from_nanos(2_777_777), Duration::from_millis(33)),
+            (Duration::from_secs(1), Duration::from_secs(1)),
+        ] {
+            let (_, mut tree, _) = mount(&renderer);
+            let state = tree.state.downcast_mut::<State>();
+            state.frame_interval = frame_interval;
+            let start = Instant::now();
+            state.advance(start);
+            state.advance(start + display_interval);
+            assert!((state.elapsed - display_interval.as_secs_f64()).abs() < 1e-9);
+        }
     }
 
     #[test]
@@ -611,6 +674,7 @@ mod tests {
         let renderer = renderer();
         let (mut widget, mut tree, node) = mount(&renderer);
         let start = Instant::now();
+        let frame_interval = window::frame_interval();
         let tick = |at| Event::Window(window::Event::RedrawRequested(at));
         update(
             &mut widget,
@@ -625,7 +689,7 @@ mod tests {
             &mut tree,
             &node,
             &renderer,
-            tick(start + FRAME_INTERVAL),
+            tick(start + frame_interval),
             BOUNDS,
         );
         let elapsed = tree.state.downcast_ref::<State>().elapsed;
@@ -830,7 +894,7 @@ mod tests {
                     &mut renderer,
                     &Theme::Light,
                     1.0,
-                    frame as f64 / 60.0,
+                    frame as f64 * window::frame_interval().as_secs_f64(),
                     scale,
                 );
                 // Isolate the logo from the independently animated quill trail.

@@ -4,7 +4,7 @@ use crate::editor::layout::{EditorLayout, ScrollOffset};
 
 pub(super) const SCROLL_DURATION: Duration = Duration::from_millis(140);
 
-/// Keeps wheel motion in the widget; the document stores the destination offsets.
+/// Keeps wheel and touchpad motion in the widget; the document stores destination offsets.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScrollAnimation {
     layout: EditorLayout,
@@ -17,6 +17,12 @@ pub(super) struct ScrollAnimation {
     target_rows: f64,
     from_horizontal_px: f64,
     started: Instant,
+    duration: Duration,
+    precise: bool,
+    // Velocities are measured in rows/second and pixels/second.
+    velocity_rows: f64,
+    velocity_horizontal: f64,
+    last_precise_input: Option<Instant>,
 }
 
 impl ScrollAnimation {
@@ -39,6 +45,11 @@ impl ScrollAnimation {
             target_rows: layout.scroll.first_visible_row as f64,
             from_horizontal_px: f64::from(layout.scroll.horizontal_px),
             started: now,
+            duration: SCROLL_DURATION,
+            precise: false,
+            velocity_rows: 0.0,
+            velocity_horizontal: 0.0,
+            last_precise_input: None,
         }
     }
 
@@ -128,6 +139,9 @@ impl ScrollAnimation {
         self.target_rows = target;
         self.from_horizontal_px = current_horizontal;
         self.started = now;
+        self.duration = SCROLL_DURATION;
+        self.precise = false;
+        self.last_precise_input = None;
         self.layout.scroll.first_visible_row = target.floor() as usize;
         self.layout.scroll.horizontal_px = target_horizontal;
     }
@@ -150,6 +164,68 @@ impl ScrollAnimation {
         self.from_horizontal_px = f64::from(self.layout.scroll.horizontal_px);
     }
 
+    /// Spreads precise packets across a short interval while keeping their sum.
+    /// Native momentum is already included in the packets; this adds none.
+    pub(super) fn scroll_precise(
+        &mut self,
+        lines: f32,
+        horizontal_px: f32,
+        max_horizontal_px: f32,
+        now: Instant,
+    ) {
+        let ((current, current_horizontal), (velocity_rows, velocity_horizontal)) =
+            self.position_and_velocity(now);
+        let (previous_rows, previous_horizontal) = if self.precise {
+            (
+                self.target_rows,
+                f64::from(self.layout.scroll.horizontal_px),
+            )
+        } else {
+            (current, current_horizontal)
+        };
+        let max_row = self
+            .row_count
+            .saturating_sub(self.layout.complete_visible_row_capacity().max(1));
+        self.from_rows = current;
+        self.from_horizontal_px = current_horizontal;
+        self.target_rows = (previous_rows + f64::from(lines)).clamp(0.0, max_row as f64);
+        self.layout.scroll.first_visible_row = self.target_rows.floor() as usize;
+        let horizontal = (previous_horizontal + f64::from(horizontal_px))
+            .clamp(0.0, f64::from(max_horizontal_px));
+        self.layout.scroll.horizontal_px =
+            horizontal_offset_milli(horizontal as f32) as f32 / 1000.0;
+        self.duration = self
+            .last_precise_input
+            .map(|previous| now.saturating_duration_since(previous))
+            .unwrap_or(Duration::from_millis(16))
+            .clamp(Duration::from_millis(8), Duration::from_millis(24))
+            * 2;
+        let omega = 8.0 / self.duration.as_secs_f64();
+        let forward_velocity = |velocity: f64, distance: f64| {
+            distance.signum() * (velocity * distance.signum()).clamp(0.0, omega * distance.abs())
+        };
+        self.velocity_rows = forward_velocity(velocity_rows, self.target_rows - current);
+        self.velocity_horizontal = forward_velocity(
+            velocity_horizontal,
+            f64::from(self.layout.scroll.horizontal_px) - current_horizontal,
+        );
+        self.started = now;
+        self.last_precise_input = Some(now);
+        self.precise = true;
+    }
+
+    /// Ends interpolation at the exact native destination on release or cancel.
+    pub(super) fn finish_precise(&mut self) -> bool {
+        if !self.precise {
+            return false;
+        }
+        self.from_rows = self.target_rows;
+        self.from_horizontal_px = f64::from(self.layout.scroll.horizontal_px);
+        self.precise = false;
+        self.last_precise_input = None;
+        true
+    }
+
     pub(super) fn target_horizontal_milli(self) -> u64 {
         horizontal_offset_milli(self.layout.scroll.horizontal_px)
     }
@@ -162,18 +238,44 @@ impl ScrollAnimation {
     pub(super) fn animating(self, now: Instant) -> bool {
         (self.from_rows != self.target_rows
             || self.from_horizontal_px != f64::from(self.layout.scroll.horizontal_px))
-            && now.saturating_duration_since(self.started) < SCROLL_DURATION
+            && now.saturating_duration_since(self.started) < self.duration
     }
 
     fn position(self, now: Instant) -> (f64, f64) {
-        let progress = (now.saturating_duration_since(self.started).as_secs_f64()
-            / SCROLL_DURATION.as_secs_f64())
-        .min(1.0);
+        self.position_and_velocity(now).0
+    }
+
+    /// Returns the row/pixel position and its velocity per second.
+    fn position_and_velocity(self, now: Instant) -> ((f64, f64), (f64, f64)) {
+        let elapsed = now.saturating_duration_since(self.started);
+        if self.precise {
+            let (rows, velocity_rows) = precise_axis(
+                self.from_rows,
+                self.target_rows,
+                self.velocity_rows,
+                elapsed,
+                self.duration,
+            );
+            let (horizontal, velocity_horizontal) = precise_axis(
+                self.from_horizontal_px,
+                f64::from(self.layout.scroll.horizontal_px),
+                self.velocity_horizontal,
+                elapsed,
+                self.duration,
+            );
+            return ((rows, horizontal), (velocity_rows, velocity_horizontal));
+        }
+        let progress = (elapsed.as_secs_f64() / self.duration.as_secs_f64()).min(1.0);
         let eased = 1.0 - (1.0 - progress).powi(3);
+        let slope = 3.0 * (1.0 - progress).powi(2) / self.duration.as_secs_f64();
+        let rows = self.target_rows - self.from_rows;
+        let horizontal = f64::from(self.layout.scroll.horizontal_px) - self.from_horizontal_px;
         (
-            self.from_rows + (self.target_rows - self.from_rows) * eased,
-            self.from_horizontal_px
-                + (f64::from(self.layout.scroll.horizontal_px) - self.from_horizontal_px) * eased,
+            (
+                self.from_rows + rows * eased,
+                self.from_horizontal_px + horizontal * eased,
+            ),
+            (rows * slope, horizontal * slope),
         )
     }
 
@@ -196,9 +298,132 @@ impl ScrollAnimation {
         self.layout.scroll.horizontal_px =
             horizontal_offset_milli(horizontal_px as f32) as f32 / 1000.0;
         self.from_horizontal_px = f64::from(self.layout.scroll.horizontal_px);
+        self.precise = false;
+        self.last_precise_input = None;
     }
+}
+
+/// Evaluates a critically damped approach and finishes at the received target.
+fn precise_axis(
+    from: f64,
+    target: f64,
+    velocity: f64,
+    elapsed: Duration,
+    duration: Duration,
+) -> (f64, f64) {
+    if elapsed >= duration {
+        return (target, 0.0);
+    }
+    let seconds = elapsed.as_secs_f64();
+    let omega = 8.0 / duration.as_secs_f64();
+    let offset = from - target;
+    let coefficient = velocity + omega * offset;
+    let decay = (-omega * seconds).exp();
+    (
+        target + (offset + coefficient * seconds) * decay,
+        (velocity - omega * coefficient * seconds) * decay,
+    )
 }
 
 pub(super) fn horizontal_offset_milli(offset_px: f32) -> u64 {
     (f64::from(offset_px.max(0.0)) * 1000.0).round() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::layout::EditorMetrics;
+
+    fn scroll(now: Instant) -> ScrollAnimation {
+        let layout = EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 400.0, 94.0);
+        ScrollAnimation::new(layout, 1, 1000, None, 94.0, now)
+    }
+
+    #[test]
+    fn precise_motion_advances_between_packets_and_keeps_their_total() {
+        let started = Instant::now();
+        let mut scroll = scroll(started);
+        let packet_interval = Duration::from_nanos(1_000_000_000 / 60);
+        for packet in 0..6 {
+            let now = started + packet_interval * packet;
+            scroll.scroll_precise(1.0, 8.0, 1000.0, now);
+            let first = scroll.position(now);
+            let middle = scroll.position(now + packet_interval / 2);
+            let last = scroll.position(now + packet_interval);
+            assert!(first.0 < middle.0 && middle.0 < last.0);
+            assert!(first.1 < middle.1 && middle.1 < last.1);
+            assert!(last.0 <= f64::from(packet + 1));
+            assert!(last.1 <= f64::from(packet + 1) * 8.0);
+        }
+        let settled = started + packet_interval * 6 + Duration::from_millis(48);
+        assert_eq!(scroll.position(settled), (6.0, 48.0));
+        assert!(!scroll.animating(settled));
+    }
+
+    #[test]
+    fn precise_retargets_preserve_velocity_and_reverse_without_crossing_the_target() {
+        let started = Instant::now();
+        let mut scroll = scroll(started);
+        scroll.scroll_precise(1.0, 8.0, 1000.0, started);
+        let next = started + Duration::from_millis(8);
+        let (position, velocity) = scroll.position_and_velocity(next);
+        scroll.scroll_precise(1.0, 8.0, 1000.0, next);
+        let retargeted = scroll.position(next);
+        assert!((retargeted.0 - position.0).abs() < 1e-12);
+        assert!((retargeted.1 - position.1).abs() < 1e-12);
+        assert_eq!(scroll.position_and_velocity(next).1, velocity);
+        assert_eq!(
+            scroll.position(next + Duration::from_millis(48)),
+            (2.0, 16.0)
+        );
+
+        let reversed = next + Duration::from_millis(4);
+        let position = scroll.position(reversed);
+        scroll.scroll_precise(-3.0, -20.0, 1000.0, reversed);
+        assert_eq!(scroll.position_and_velocity(reversed).1, (0.0, 0.0));
+        for millis in 0..=48 {
+            let current = scroll.position(reversed + Duration::from_millis(millis));
+            assert!(current.0 >= 0.0 && current.0 <= position.0 + 1e-12);
+            assert!(current.1 >= 0.0 && current.1 <= position.1 + 1e-12);
+        }
+        assert_eq!(
+            scroll.position(reversed + Duration::from_millis(48)),
+            (0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn precise_packets_in_one_batch_accumulate_and_respect_scroll_limits() {
+        let started = Instant::now();
+        let mut scroll = scroll(started);
+        scroll.scroll_precise(1.0, 8.0, 10.0, started);
+        scroll.scroll_precise(1.0, 8.0, 10.0, started);
+        assert_eq!(
+            scroll.position(started + Duration::from_millis(48)),
+            (2.0, 10.0)
+        );
+        scroll.scroll_precise(2000.0, 2000.0, 10.0, started);
+        assert_eq!(
+            scroll.target_row(),
+            1000 - scroll.layout.complete_visible_row_capacity()
+        );
+        assert_eq!(scroll.target_horizontal_milli(), 10_000);
+        assert!(scroll.finish_precise());
+        assert!(!scroll.animating(started));
+        assert_eq!(scroll.position(started).1, 10.0);
+    }
+
+    #[test]
+    fn stopping_precise_motion_keeps_the_displayed_position() {
+        let started = Instant::now();
+        let mut scroll = scroll(started);
+        scroll.scroll_precise(2.0, 20.0, 1000.0, started);
+        let clicked = started + Duration::from_millis(8);
+        let displayed = scroll.position(clicked);
+        scroll.stop(clicked);
+        let stopped = scroll.position(clicked + Duration::from_millis(100));
+        assert!((stopped.0 - displayed.0).abs() < 1e-12);
+        assert!((stopped.1 - displayed.1).abs() < 0.001);
+        assert!(!scroll.animating(clicked));
+    }
 }

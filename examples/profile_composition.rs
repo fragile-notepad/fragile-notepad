@@ -1,4 +1,4 @@
-//! cargo run --locked -j 1 --example profile_composition -- --frames 32
+//! cargo run --release --locked -j 1 --example profile_composition -- --frames 32
 //! Add --uncached for the same scenes with retained composition disabled.
 //! --compare measures each uncached/cached pair consecutively on one device.
 //! --antialiasing off|msaa4 selects mesh antialiasing [msaa4, matching the app].
@@ -7,7 +7,7 @@
 //!
 //! Uses the runtime UserInterface: Element, Tree, and layout persist across
 //! redraws; only messages or widget invalidation cause a rebuild. Redraws are
-//! forced at at most 60 Hz, with real timestamps so child deadlines still fire.
+//! paced by --fps [120], with real timestamps so child deadlines still fire.
 //! GPU timestamps include cached-surface preparation, the low-resolution trail,
 //! and main-pass composition. They exclude queued uploads, presentation, and
 //! desktop composition. CPU timing includes update, recording, and submission,
@@ -16,8 +16,9 @@
 //! reduced-resolution trail, and editor optimizations remain enabled.
 //! --case app-scroll-reversal sends eight wheel lines/frame, reversing every six.
 //! --case app-fade deterministically closes/opens About every ten measured frames.
-//! Widget and transition clocks use real redraw timestamps, paced at most 60 Hz;
+//! Widget and transition clocks use real redraw timestamps at the selected FPS;
 //! opacity progress can differ between runs when frame intervals differ.
+//! Background application tasks are dropped; worker completions are not measured.
 
 #[cfg(not(feature = "hybrid-rendering"))]
 fn main() -> std::process::ExitCode {
@@ -42,6 +43,7 @@ mod profile {
     use fragile_notepad::core::{
         AppearanceMode, DecodedText, EditorSettings, FileRevision, TextEncoding,
     };
+    use fragile_notepad::editor::EditorAction;
     use fragile_notepad::message::Message;
     use fragile_notepad::services::types::OpenedFile;
     use fragile_notepad::ui;
@@ -59,7 +61,6 @@ mod profile {
     use std::time::{Duration, Instant};
 
     type Result<T> = std::result::Result<T, Box<dyn Error>>;
-    const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
     const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
     const HELP: &str = "Usage: profile_composition [OPTIONS]
   --case CASE      app-repeat, app-about, vfx, app-scroll-reversal, app-fade,
@@ -71,6 +72,7 @@ mod profile {
   --antialiasing AA Mesh antialiasing: off or msaa4 [msaa4]
   --frames N       Measured frames per case, 1..240 [32]
   --warmup N       Unmeasured frames per case, 1..32 [8]
+  --fps N          Maximum redraws per second, 1..1000 [120]
   --uncached       Set both raster and final-frame cache budgets to zero
   --compare        Measure uncached, then cached for each selected case
   -h, --help       Print this help";
@@ -113,6 +115,7 @@ mod profile {
         antialiasing: Option<Antialiasing>,
         frames: u32,
         warmup: u32,
+        fps: u32,
         uncached: bool,
         compare: bool,
     }
@@ -128,6 +131,7 @@ mod profile {
                 antialiasing: Some(Antialiasing::MSAAx4),
                 frames: 32,
                 warmup: 8,
+                fps: EditorSettings::DEFAULT_MAX_FPS,
                 uncached: false,
                 compare: false,
             };
@@ -162,6 +166,7 @@ mod profile {
                     }
                     "--frames" => options.frames = number(&mut args, &flag)?,
                     "--warmup" => options.warmup = number(&mut args, &flag)?,
+                    "--fps" => options.fps = number(&mut args, &flag)?,
                     "--uncached" => options.uncached = true,
                     "--compare" => options.compare = true,
                     "--help" | "-h" => {
@@ -182,6 +187,9 @@ mod profile {
             }
             if !(1..=240).contains(&options.frames) || !(1..=32).contains(&options.warmup) {
                 return Err("frames must be 1..240 and warmup must be 1..32".into());
+            }
+            if !(EditorSettings::MIN_FPS..=EditorSettings::MAX_FPS).contains(&options.fps) {
+                return Err("fps must be 1..1000".into());
             }
             Ok(Some(options))
         }
@@ -239,6 +247,7 @@ mod profile {
             drop(startup);
             let mut settings = EditorSettings::default();
             settings.set_appearance(AppearanceMode::Light);
+            settings.set_max_fps(options.fps);
             let _ = app.update(Message::SettingsLoaded(Ok(Some(settings))));
             let _ = app.update(Message::FileOpened(Ok(OpenedFile {
                 path: options.fixture_path().to_owned(),
@@ -442,7 +451,8 @@ mod profile {
             &self,
             backend: &mut iced_wgpu::Renderer,
             started: Instant,
-        ) -> Result<(f64, f64)> {
+        ) -> Result<(f64, f64, f64)> {
+            let render_started = Instant::now();
             let mut begin = self.device.create_command_encoder(&Default::default());
             begin.write_timestamp(&self.queries, 0);
             let mut draw = backend.draw(Some(Color::BLACK), &self.view, &self.viewport);
@@ -452,6 +462,7 @@ mod profile {
             backend.finish();
             let submission = self.queue.submit([begin.finish(), draw.finish()]);
             backend.recall();
+            let render_submit_us = render_started.elapsed().as_secs_f64() * 1e6;
             let cpu_us = started.elapsed().as_secs_f64() * 1e6;
 
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -473,7 +484,7 @@ mod profile {
                 / 1000.0;
             drop(mapped);
             self.readback.unmap();
-            Ok((gpu_us, cpu_us))
+            Ok((gpu_us, cpu_us, render_submit_us))
         }
     }
 
@@ -484,6 +495,8 @@ mod profile {
         messages: u64,
         deadline_requested_frames: u64,
         scroll_inputs: u64,
+        captured_scroll_inputs: u64,
+        scroll_messages: u64,
         fade_frames: u64,
         fade_toggles: u64,
         fade_close_messages: u64,
@@ -501,7 +514,7 @@ mod profile {
     fn summarize(samples: &mut [f64]) -> (f64, f64) {
         samples.sort_by(f64::total_cmp);
         let middle = samples.len() / 2;
-        let median = if samples.len() % 2 == 0 {
+        let median = if samples.len().is_multiple_of(2) {
             (samples[middle - 1] + samples[middle]) * 0.5
         } else {
             samples[middle]
@@ -555,14 +568,21 @@ mod profile {
         let mut warm_composition = backend(&mut renderer).composition_cache_statistics();
         let mut gpu_samples = Vec::with_capacity(options.frames as usize);
         let mut cpu_samples = Vec::with_capacity(options.frames as usize);
+        let mut update_samples = Vec::with_capacity(options.frames as usize);
+        let mut draw_samples = Vec::with_capacity(options.frames as usize);
+        let mut render_submit_samples = Vec::with_capacity(options.frames as usize);
+        let mut frame_interval_samples = Vec::with_capacity(options.frames as usize);
         let mut next_frame = Instant::now();
+        let mut previous_frame = next_frame;
+        let frame_interval = window::frame_interval();
 
         match case {
             Case::ScrollReversal => println!(
-                "case=app-scroll-reversal input=widget_wheel wheel_lines_per_frame=8 reversal_frames=6 warmup=static"
+                "case=app-scroll-reversal input=widget_wheel wheel_lines_per_frame=8 reversal_frames=6 warmup=scrolling"
             ),
             Case::Fade => println!(
-                "case=app-fade transition=about_close_open transition_frames=10 scheduled_redraw_hz=60 transition_clock=real widget_clock=real warmup=fully_open"
+                "case=app-fade transition=about_close_open transition_frames=10 scheduled_redraw_hz={} transition_clock=real widget_clock=real warmup=fully_open",
+                options.fps
             ),
             _ => {}
         }
@@ -570,47 +590,48 @@ mod profile {
         for frame in 0..options.warmup + options.frames {
             std::thread::sleep(next_frame.saturating_duration_since(Instant::now()));
             let started = Instant::now();
-            next_frame = started + FRAME_INTERVAL;
+            next_frame += frame_interval;
+            if next_frame <= started {
+                next_frame = started + frame_interval;
+            }
+            let interval_us = started.duration_since(previous_frame).as_secs_f64() * 1e6;
+            previous_frame = started;
             events.clear();
             let measured_frame = frame.checked_sub(options.warmup);
-            let scroll_input = case == Case::ScrollReversal && measured_frame.is_some();
-            if let Some(measured_frame) = measured_frame {
-                match case {
-                    Case::ScrollReversal => {
-                        let direction = if (measured_frame / 6) % 2 == 0 {
-                            -8.0
-                        } else {
-                            8.0
-                        };
-                        events.push(Event::Mouse(mouse::Event::WheelScrolled {
-                            phase: mouse::ScrollPhase::Moved,
-                            delta: mouse::ScrollDelta::Lines {
-                                x: 0.0,
-                                y: direction,
-                            },
-                        }));
-                        counters.scroll_inputs += 1;
-                    }
-                    Case::Fade => {
-                        if measured_frame % 10 == 0 {
-                            messages.push(if (measured_frame / 10) % 2 == 0 {
-                                Message::AboutClosed
-                            } else {
-                                Message::AboutOpened
-                            });
-                            counters.fade_toggles += 1;
-                        }
-                        // The toggle schedule is deterministic by frame index.
-                        // Like the runtime subscription, transition progress
-                        // uses actual elapsed time and may vary between runs.
-                        messages.push(Message::ChromeAnimationFrame(started));
-                        counters.fade_frames += 1;
-                    }
-                    _ => {}
+            let scroll_input = case == Case::ScrollReversal;
+            if scroll_input {
+                let direction = if (frame / 6) % 2 == 0 { -8.0 } else { 8.0 };
+                events.push(Event::Mouse(mouse::Event::WheelScrolled {
+                    phase: if frame == 0 {
+                        mouse::ScrollPhase::Started
+                    } else {
+                        mouse::ScrollPhase::Moved
+                    },
+                    delta: mouse::ScrollDelta::Lines {
+                        x: 0.0,
+                        y: direction,
+                    },
+                }));
+                counters.scroll_inputs += 1;
+            }
+            if case == Case::Fade
+                && let Some(measured_frame) = measured_frame
+            {
+                if measured_frame % 10 == 0 {
+                    messages.push(if (measured_frame / 10) % 2 == 0 {
+                        Message::AboutClosed
+                    } else {
+                        Message::AboutOpened
+                    });
+                    counters.fade_toggles += 1;
                 }
+                // The toggle schedule is fixed by frame index. Like the runtime
+                // subscription, transition progress uses actual elapsed time.
+                messages.push(Message::ChromeAnimationFrame(started));
+                counters.fade_frames += 1;
             }
             events.push(Event::Window(window::Event::RedrawRequested(started)));
-            let (state, _) = interface.update(
+            let (state, statuses) = interface.update(
                 &window::Headless,
                 &waker,
                 &events,
@@ -618,20 +639,13 @@ mod profile {
                 &mut renderer,
                 &mut messages,
             );
-            if scroll_input
-                && !messages.iter().any(|message| {
-                    matches!(
-                        unscoped(message),
-                        Message::EditorAction(
-                            _,
-                            fragile_notepad::editor::EditorAction::ScrollLines(_)
-                        )
-                    )
-                })
-            {
-                return Err(
-                    "scroll event did not reach the editor; increase --width/--height".into(),
-                );
+            if scroll_input {
+                if statuses.first() != Some(&iced::event::Status::Captured) {
+                    return Err(
+                        "scroll event did not reach the editor; increase --width/--height".into(),
+                    );
+                }
+                counters.captured_scroll_inputs += 1;
             }
             if let user_interface::State::Updated {
                 has_layout_changed,
@@ -650,6 +664,15 @@ mod profile {
                 let cache = interface.into_cache();
                 counters.messages += messages.len() as u64;
                 for message in messages.drain(..) {
+                    if matches!(
+                        unscoped(&message),
+                        Message::EditorAction(
+                            _,
+                            EditorAction::ScrollLines(_) | EditorAction::ScrollToRow(_)
+                        )
+                    ) {
+                        counters.scroll_messages += 1;
+                    }
                     if case == Case::Fade
                         && let Some(measured_frame) = measured_frame
                     {
@@ -670,6 +693,8 @@ mod profile {
                 interface = UserInterface::build(scene.view(window_id), size, cache, &mut renderer);
                 counters.rebuilds += 1;
             }
+            let update_us = started.elapsed().as_secs_f64() * 1e6;
+            let draw_started = Instant::now();
             let theme = scene.theme(window_id);
             interface.draw(
                 &mut renderer,
@@ -679,7 +704,8 @@ mod profile {
                 },
                 cursor,
             );
-            let (gpu_us, cpu_us) = gpu.sample(backend(&mut renderer), started)?;
+            let draw_us = draw_started.elapsed().as_secs_f64() * 1e6;
+            let (gpu_us, cpu_us, render_submit_us) = gpu.sample(backend(&mut renderer), started)?;
             if frame + 1 == options.warmup {
                 warm_cache = backend(&mut renderer).raster_cache_statistics();
                 warm_composition = backend(&mut renderer).composition_cache_statistics();
@@ -687,15 +713,33 @@ mod profile {
             } else if frame >= options.warmup {
                 gpu_samples.push(gpu_us);
                 cpu_samples.push(cpu_us);
+                update_samples.push(update_us);
+                draw_samples.push(draw_us);
+                render_submit_samples.push(render_submit_us);
+                frame_interval_samples.push(interval_us);
             }
+        }
+
+        if case == Case::ScrollReversal && counters.scroll_messages == warm_counters.scroll_messages
+        {
+            return Err(
+                "fixture did not scroll; use --fixture with more lines or reduce --height".into(),
+            );
         }
 
         let (gpu_median, gpu_p95) = summarize(&mut gpu_samples);
         let (cpu_median, cpu_p95) = summarize(&mut cpu_samples);
+        let (update_median, update_p95) = summarize(&mut update_samples);
+        let (draw_median, draw_p95) = summarize(&mut draw_samples);
+        let (render_submit_median, render_submit_p95) = summarize(&mut render_submit_samples);
+        let (interval_median, interval_p95) = summarize(&mut frame_interval_samples);
         let after = backend(&mut renderer).raster_cache_statistics();
         let name = case.name();
         println!(
             "case={name} gpu_median_us={gpu_median:.1} gpu_p95_us={gpu_p95:.1} cpu_median_us={cpu_median:.1} cpu_p95_us={cpu_p95:.1}"
+        );
+        println!(
+            "case={name} ui_update_median_us={update_median:.1} ui_update_p95_us={update_p95:.1} ui_draw_median_us={draw_median:.1} ui_draw_p95_us={draw_p95:.1} render_submit_median_us={render_submit_median:.1} render_submit_p95_us={render_submit_p95:.1} frame_interval_median_us={interval_median:.1} frame_interval_p95_us={interval_p95:.1}"
         );
         println!(
             "case={name} raster_cache_hits={} raster_cache_misses={} raster_cache_rasterizations={} raster_cache_live_fallbacks={} raster_cache_volatile_fallbacks={} raster_cache_bytes={} raster_cache_entries={} ui_rebuilds={} layout_changed_frames={} messages={} deadline_requested_frames={}",
@@ -748,8 +792,10 @@ mod profile {
                 },
             );
             println!(
-                "case={name} scroll_inputs={} fade_frames={} fade_toggles={} fade_close_messages={} fade_open_messages={} last_toggle_frame={last_toggle_frame} last_toggle_message={last_toggle_message}",
+                "case={name} scroll_inputs={} captured_scroll_inputs={} scroll_messages={} fade_frames={} fade_toggles={} fade_close_messages={} fade_open_messages={} last_toggle_frame={last_toggle_frame} last_toggle_message={last_toggle_message}",
                 counters.scroll_inputs - warm_counters.scroll_inputs,
+                counters.captured_scroll_inputs - warm_counters.captured_scroll_inputs,
+                counters.scroll_messages - warm_counters.scroll_messages,
                 counters.fade_frames - warm_counters.fade_frames,
                 counters.fade_toggles - warm_counters.fade_toggles,
                 counters.fade_close_messages - warm_counters.fade_close_messages,
@@ -763,6 +809,7 @@ mod profile {
         let Some(mut options) = Options::parse()? else {
             return Ok(());
         };
+        iced::advanced::graphics::core::window::update_frame_settings(options.fps, true);
         let source = if options.case == Some(Case::Vfx) {
             String::new()
         } else if let Some(path) = &options.fixture {
@@ -774,7 +821,7 @@ mod profile {
             include_str!("../src/app.rs").to_owned()
         };
         println!(
-            "physical={}x{} scale={} antialiasing={} frames={} warmup={} cache={} debug_assertions={} forced_redraw_hz=60 theme=light",
+            "physical={}x{} scale={} antialiasing={} frames={} warmup={} cache={} debug_assertions={} forced_redraw_hz={} theme=light",
             options.width,
             options.height,
             options.scale,
@@ -793,6 +840,7 @@ mod profile {
                 "enabled"
             },
             cfg!(debug_assertions),
+            options.fps,
         );
         if options.case != Some(Case::Vfx) {
             println!(
@@ -809,7 +857,7 @@ mod profile {
             );
         }
         println!(
-            "timing=offscreen_gpu_execution cpu=update_record_submit gpu_wait_and_pacing_excluded=true queued_uploads_and_presentation_excluded=true"
+            "timing=offscreen_gpu_execution cpu=update_record_submit gpu_wait_and_pacing_excluded=true queued_uploads_and_presentation_excluded=true background_tasks=discarded"
         );
         let gpu = Gpu::new(&options)?;
         let selected = options.case;

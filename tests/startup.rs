@@ -10,7 +10,8 @@ fn startup_settings_keep_first_paint_on_software_rendering() {
 
     assert_eq!(settings.backend, Backend::Software);
     assert!(!settings.antialiasing);
-    assert!(!settings.vsync);
+    assert!(settings.vsync);
+    assert_eq!(settings.max_fps, 120);
 }
 
 #[test]

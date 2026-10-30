@@ -131,9 +131,9 @@ fn context_menu_entry_animates_pixels_and_bounds_and_submenus_enter_independentl
         0
     );
     let now = std::time::Instant::now();
-    assert_ne!(
+    assert_eq!(
         redraw(&mut menu, &renderer, viewport, now),
-        iced::window::RedrawRequest::Wait
+        iced::window::RedrawRequest::NextFrame
     );
     redraw(
         &mut menu,

@@ -2,7 +2,9 @@ use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Layout, Shell, graphics::geometry, mouse, text};
-use iced::time::{Duration, Instant};
+#[cfg(test)]
+use iced::time::Duration;
+use iced::time::Instant;
 use iced::{Background, Element, Event, Font, Length, Rectangle, Size, Theme, highlighter};
 #[cfg(test)]
 use iced::{Color, Pixels, Point, alignment};
@@ -520,7 +522,7 @@ where
             shell.request_redraw();
         }
         if state.fold_fade.get().animating(now) {
-            shell.request_redraw_at(now + Duration::from_millis(16));
+            shell.request_redraw();
         }
         let (editor_layout, max_horizontal_px) = self.scroll_layout(state, bounds, renderer, now);
         let display_layout = self.display_layout(state, editor_layout, bounds.height, now);

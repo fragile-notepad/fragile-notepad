@@ -23,7 +23,6 @@ const SEPARATOR_HEIGHT: f32 = 9.0;
 const PADDING: f32 = 5.0;
 const EDGE: f32 = 8.0;
 const ENTRANCE_OFFSET: f32 = -5.0;
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const WHEEL_EASING_DURATION: Duration = Duration::from_millis(150);
 
 #[derive(Default, Clone, PartialEq)]
@@ -529,7 +528,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                     .iter()
                     .any(|transition| transition.needs_frames())
                 {
-                    shell.request_redraw_at(*now + FRAME_INTERVAL);
+                    shell.request_redraw();
                 }
                 if let Some(motion) = self.state.scroll_motion.clone() {
                     if motion.depth <= self.state.path.len() {
@@ -540,7 +539,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                         self.state.offsets[motion.depth] = motion.origin
                             + (motion.target - motion.origin) * (1.0 - (1.0 - progress).powi(3));
                         if progress < 1.0 {
-                            shell.request_redraw_at(*now + FRAME_INTERVAL);
+                            shell.request_redraw();
                         } else {
                             self.state.scroll_motion = None;
                         }

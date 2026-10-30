@@ -61,6 +61,19 @@ pub fn enabled() -> bool {
     trace().is_some()
 }
 
+/// Writes pending trace rows before a profiling process exits.
+pub fn flush() -> std::io::Result<()> {
+    let Some(trace) = trace() else {
+        return Ok(());
+    };
+    let mut trace = trace
+        .lock()
+        .map_err(|_| std::io::Error::other("performance trace lock was poisoned"))?;
+    trace.writer.flush()?;
+    trace.rows_since_flush = 0;
+    Ok(())
+}
+
 fn write_event(event: &str, elapsed_us: u128, detail: fmt::Arguments<'_>) {
     let Some(trace) = trace() else {
         return;

@@ -85,7 +85,7 @@ widget tree and layout, rebuilding after messages or widget invalidation. Prepar
 a Vulkan runtime and build dependencies, then run:
 
 ```sh
-cargo run --locked --offline -j 1 --example profile_composition -- --compare --frames 48
+cargo run --release --locked --offline -j 1 --example profile_composition -- --compare --frames 48
 ```
 
 The output includes CPU update, recording, and submission times; GPU median and

@@ -86,7 +86,8 @@ pub fn iced_settings() -> Settings {
     Settings {
         backend: Backend::Software,
         antialiasing: false,
-        vsync: false,
+        vsync: true,
+        max_fps: crate::core::EditorSettings::DEFAULT_MAX_FPS,
         ..Settings::default()
     }
 }

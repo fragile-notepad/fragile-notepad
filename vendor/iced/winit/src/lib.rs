@@ -82,6 +82,7 @@ where
 
     let boot_span = debug::boot();
     let settings = program.settings();
+    core::window::update_frame_settings(settings.max_fps, settings.vsync);
     let window_settings = program.window();
 
     let event_loop = EventLoop::with_user_event()
@@ -544,6 +545,23 @@ struct PreparingBackendHandoff<C: Compositor> {
     receiver: oneshot::Receiver<Result<C, backend::Error>>,
     sender: oneshot::Sender<backend::StrictHandoffOutcome>,
     warming: Option<WarmingBackendHandoff<C>>,
+    vsync: bool,
+}
+
+impl<C: Compositor> PreparingBackendHandoff<C> {
+    fn set_vsync(&mut self, vsync: bool) {
+        self.vsync = vsync;
+        if let Some(warming) = self.warming.as_mut() {
+            let _ = warming.compositor.set_vsync(vsync);
+        }
+    }
+
+    fn prepared_compositor(&self, result: Result<C, backend::Error>) -> Result<C, backend::Error> {
+        result.map(|mut compositor| {
+            let _ = compositor.set_vsync(self.vsync);
+            compositor
+        })
+    }
 }
 
 struct WarmingBackendHandoff<C: Compositor> {
@@ -1108,7 +1126,8 @@ async fn run_instance<P>(
                     runtime.block_on(create_compositor);
 
                     match compositor_receiver.await.expect("Wait for compositor") {
-                        Ok(new_compositor) => {
+                        Ok(mut new_compositor) => {
+                            let _ = new_compositor.set_vsync(core::window::vsync());
                             compositor = Some(new_compositor);
                         }
                         Err(error) => {
@@ -1348,6 +1367,15 @@ async fn run_instance<P>(
                             continue;
                         }
 
+                        let now = Instant::now();
+                        if let Some(deadline) = window
+                            .frame_clock
+                            .start(now, core::window::frame_interval())
+                        {
+                            window.request_redraw(window::RedrawRequest::At(deadline));
+                            continue;
+                        }
+                        window.redraw_at = None;
                         let redraw_started = StdInstant::now();
                         let redraw_delta_us = trace::frame_delta_us(id, redraw_started);
                         if trace::enabled() {
@@ -2246,7 +2274,7 @@ fn drive_preparing_backend_handoff<P, C>(
 
     log::info!("Warming backend handoff: {phase:?}");
 
-    let mut prepared_compositor = match result {
+    let mut prepared_compositor = match preparing.prepared_compositor(result) {
         Ok(compositor) => compositor,
         Err(error) => {
             if trace::enabled() {
@@ -2390,6 +2418,7 @@ fn drive_preparing_backend_handoff<P, C>(
     *preparing_backend_handoff = Some(PreparingBackendHandoff {
         receiver: preparing.receiver,
         sender: preparing.sender,
+        vsync: preparing.vsync,
         warming: Some(WarmingBackendHandoff {
             compositor: prepared_compositor,
             remaining: renderers.keys().copied().collect(),
@@ -2545,6 +2574,123 @@ fn poll_warm_renderers<R>(
 mod warm_handoff_tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct TestCompositor {
+        vsync: bool,
+    }
+
+    impl Compositor for TestCompositor {
+        type Renderer = ();
+        type Surface = ();
+
+        async fn new(
+            _settings: backend::Settings,
+            _display: impl compositor::Display + Clone,
+            _window: impl compositor::Window + Clone,
+            _shell: Shell,
+        ) -> Result<Self, backend::Error> {
+            unreachable!()
+        }
+
+        fn create_renderer(&self, _settings: renderer::Settings) {
+            unreachable!()
+        }
+
+        fn create_surface(
+            &mut self,
+            _window: impl compositor::Window + Clone,
+            _width: u32,
+            _height: u32,
+        ) {
+            unreachable!()
+        }
+
+        fn configure_surface(&mut self, _surface: &mut (), _width: u32, _height: u32) {
+            unreachable!()
+        }
+
+        fn set_vsync(&mut self, vsync: bool) -> bool {
+            let changed = self.vsync != vsync;
+            self.vsync = vsync;
+            changed
+        }
+
+        fn information(&self) -> compositor::Information {
+            unreachable!()
+        }
+
+        fn present(
+            &mut self,
+            _renderer: &mut (),
+            _surface: &mut (),
+            _viewport: &Viewport,
+            _background_color: core::Color,
+            _on_pre_present: impl FnOnce(),
+        ) -> Result<(), compositor::SurfaceError> {
+            unreachable!()
+        }
+
+        fn screenshot(
+            &mut self,
+            _renderer: &mut (),
+            _viewport: &Viewport,
+            _background_color: core::Color,
+        ) -> Vec<u8> {
+            unreachable!()
+        }
+
+        fn warm_up_offscreen(
+            &mut self,
+            _renderer: &mut (),
+            _viewport: &Viewport,
+            _background_color: core::Color,
+        ) -> Result<compositor::OffscreenWarmUpEvidence, compositor::OffscreenWarmUpError> {
+            unreachable!()
+        }
+    }
+
+    fn preparing(vsync: bool) -> PreparingBackendHandoff<TestCompositor> {
+        let (_, receiver) = oneshot::channel();
+        let (sender, _) = oneshot::channel();
+        PreparingBackendHandoff {
+            receiver,
+            sender,
+            warming: None,
+            vsync,
+        }
+    }
+
+    #[test]
+    fn backend_requested_vsync_survives_preparation() {
+        let requested = !core::window::vsync();
+        let preparing = preparing(requested);
+        let compositor = preparing
+            .prepared_compositor(Ok(TestCompositor { vsync: requested }))
+            .unwrap();
+
+        assert_eq!(compositor.vsync, requested);
+    }
+
+    #[test]
+    fn newer_frame_settings_update_preparing_and_warming_compositors() {
+        let mut preparing = preparing(false);
+        preparing.set_vsync(true);
+        let compositor = preparing
+            .prepared_compositor(Ok(TestCompositor { vsync: false }))
+            .unwrap();
+        assert!(compositor.vsync);
+
+        preparing.warming = Some(WarmingBackendHandoff {
+            compositor,
+            renderers: FxHashMap::default(),
+            remaining: Vec::new(),
+            started: StdInstant::now(),
+        });
+        preparing.set_vsync(false);
+        assert!(!preparing.vsync);
+        assert!(!preparing.warming.unwrap().compositor.vsync);
+    }
+
     fn evidence() -> compositor::OffscreenWarmUpEvidence {
         compositor::OffscreenWarmUpEvidence {
             renderer_family: backend::RendererFamily::Wgpu,
@@ -2684,7 +2830,12 @@ where
                 }
             });
 
-        let (window, _released_rendering_state) = window.replace_rendering_state(rendering_state);
+        let (mut window, _released_rendering_state) =
+            window.replace_rendering_state(rendering_state);
+        let size = window.state.physical_size();
+        if size.width > 0 && size.height > 0 {
+            retained_compositor.configure_surface(&mut window.surface, size.width, size.height);
+        }
         window
     });
 
@@ -3330,6 +3481,32 @@ fn run_action<'a, P, C>(
             }
         },
         Action::Window(action) => match action {
+            window::Action::SetFrameSettings { max_fps, vsync } => {
+                core::window::update_frame_settings(max_fps, vsync);
+                if let Some(preparing) = preparing_backend_handoff.as_mut() {
+                    preparing.set_vsync(vsync);
+                }
+                if let Some(pending) = pending_backend_handoff.as_mut() {
+                    let _ = pending.compositor.set_vsync(vsync);
+                }
+                if let Some(awaiting) = awaiting_first_present_backend_handoff.as_mut() {
+                    let _ = awaiting.retained.compositor.set_vsync(vsync);
+                }
+                if let Some(compositor) = compositor.as_mut() {
+                    let vsync_changed = compositor.set_vsync(vsync);
+                    for (_id, window) in window_manager.iter_mut() {
+                        let size = window.state.physical_size();
+                        if vsync_changed && size.width > 0 && size.height > 0 {
+                            compositor.configure_surface(
+                                &mut window.surface,
+                                size.width,
+                                size.height,
+                            );
+                        }
+                        window.request_redraw(core::window::RedrawRequest::NextFrame);
+                    }
+                }
+            }
             window::Action::Open(id, settings, channel) => {
                 let monitor = window_manager.last_monitor();
 
@@ -3925,6 +4102,7 @@ fn run_action<'a, P, C>(
                     receiver: prepared_receiver,
                     sender,
                     warming: None,
+                    vsync: settings.vsync,
                 });
 
                 runtime.run(

@@ -68,7 +68,7 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
         SettingsCategory::Display => display_pane(&dialog.draft),
         SettingsCategory::Search => search_pane(dialog),
         SettingsCategory::Shortcuts => shortcuts_pane(dialog),
-        SettingsCategory::Advanced => advanced_pane(&dialog.draft),
+        SettingsCategory::Advanced => advanced_pane(dialog),
     };
     let pane: Element<'_, Message> = if dialog.category == SettingsCategory::Shortcuts {
         pane
@@ -228,7 +228,8 @@ fn files_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
     .into()
 }
 
-fn advanced_pane(settings: &EditorSettings) -> Element<'_, Message> {
+fn advanced_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let settings = &dialog.draft;
     column![section(
         "Rendering",
         column![
@@ -247,6 +248,27 @@ fn advanced_pane(settings: &EditorSettings) -> Element<'_, Message> {
             divider(),
             utility::description("Switching to software requires a restart."),
             utility::description("Hardware diagnostic mode helps diagnose graphics issues."),
+            divider(),
+            described_row(
+                "Maximum FPS",
+                format!(
+                    "Limits drawing to {}–{} frames per second while the window changes.",
+                    EditorSettings::MIN_FPS,
+                    EditorSettings::MAX_FPS
+                ),
+                number_input(
+                    &EditorSettings::DEFAULT_MAX_FPS.to_string(),
+                    &dialog.max_fps_input,
+                    Message::DraftMaxFpsChanged
+                ),
+            ),
+            divider(),
+            described_toggle(
+                "VSync",
+                "Synchronizes Vulkan presentation with the display's refresh rate.",
+                settings.vsync,
+                Message::DraftVsyncToggled,
+            ),
         ]
         .spacing(12)
         .into()
@@ -559,7 +581,7 @@ fn editor_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             column![
                 described_toggle(
                     "Smooth scrolling",
-                    "Animate mouse wheel scrolling.",
+                    "Animate mouse wheel and touchpad scrolling.",
                     settings.smooth_scrolling,
                     Message::DraftSmoothScrollingToggled,
                 ),

@@ -438,7 +438,7 @@ fn fade_and_emphasis_reverse_in_both_directions_without_jumping() {
                 outbound / 2,
                 outbound - Duration::from_millis(1),
                 outbound,
-                outbound + FRAME,
+                outbound + window::frame_interval(),
             ] {
                 let mut transition = Transition {
                     value: initial,
@@ -545,7 +545,7 @@ fn rapid_input_during_fades_requests_a_frame_without_postponing_it() {
 }
 
 #[test]
-fn fade_redraws_keep_frame_deadlines_and_stop_at_both_endpoints() {
+fn fade_redraws_request_next_frames_and_stop_at_both_endpoints() {
     let renderer = renderer();
     let mut element = strip();
     let (mut tree, node) = mount(&mut element, &renderer);
@@ -555,7 +555,7 @@ fn fade_redraws_keep_frame_deadlines_and_stop_at_both_endpoints() {
         (pointer(Point::new(50.0, 15.0)), now, FADE_IN, 1.0),
         (
             mouse::Cursor::Unavailable,
-            now + FADE_IN + FRAME,
+            now + FADE_IN + window::frame_interval(),
             FADE_OUT,
             0.0,
         ),
@@ -569,11 +569,7 @@ fn fade_redraws_keep_frame_deadlines_and_stop_at_both_endpoints() {
             cursor,
         );
         for (elapsed, expected_value, expected_redraw) in [
-            (
-                duration / 2,
-                0.5,
-                window::RedrawRequest::At(start + duration / 2 + FRAME),
-            ),
+            (duration / 2, 0.5, window::RedrawRequest::NextFrame),
             (duration, target, window::RedrawRequest::Wait),
         ] {
             let (_, redraw, _) = dispatch(

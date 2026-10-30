@@ -11,6 +11,7 @@ pub struct SettingsDialogState {
     pub system_dark: bool,
     pub wrap_column_input: String,
     pub recent_file_limit_input: String,
+    pub max_fps_input: String,
     pub result_limit_input: String,
     pub preview_chars_input: String,
     pub context_before_input: String,
@@ -143,6 +144,7 @@ impl SettingsDialogState {
                 .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
                 .to_string(),
             recent_file_limit_input: settings.recent_file_limit.to_string(),
+            max_fps_input: settings.max_fps.to_string(),
             result_limit_input: settings.search_results.result_limit.to_string(),
             preview_chars_input: settings.search_results.preview_chars.to_string(),
             context_before_input: settings.search_results.context_before.to_string(),
@@ -161,6 +163,7 @@ impl SettingsDialogState {
             .unwrap_or(EditorSettings::DEFAULT_WRAP_COLUMN)
             .to_string();
         self.recent_file_limit_input = settings.recent_file_limit.to_string();
+        self.max_fps_input = settings.max_fps.to_string();
         self.sync_search_result_inputs();
         self.category = SettingsCategory::General;
         self.shortcut_group = ShortcutGroup::File;
@@ -177,6 +180,19 @@ impl SettingsDialogState {
     }
 
     pub fn validation_error(&self) -> Option<String> {
+        if self
+            .max_fps_input
+            .parse::<u32>()
+            .ok()
+            .filter(|value| (EditorSettings::MIN_FPS..=EditorSettings::MAX_FPS).contains(value))
+            .is_none()
+        {
+            return Some(format!(
+                "Maximum FPS must be between {} and {}.",
+                EditorSettings::MIN_FPS,
+                EditorSettings::MAX_FPS
+            ));
+        }
         if self
             .recent_file_limit_input
             .parse::<usize>()

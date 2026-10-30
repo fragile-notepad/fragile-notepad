@@ -12,6 +12,14 @@ use crate::task::{self, Task};
 
 /// An operation to be performed on some window.
 pub enum Action {
+    /// Change frame timing and synchronization for all windows.
+    SetFrameSettings {
+        /// Maximum redraws per second, clamped to 1 through 1000.
+        max_fps: u32,
+        /// Whether supported backends synchronize with the display.
+        vsync: bool,
+    },
+
     /// Open a new window with some [`Settings`].
     Open(Id, Settings, oneshot::Sender<Id>),
 
@@ -266,6 +274,15 @@ pub fn close_requests() -> Subscription<Id> {
 /// Reachable negative coordinates are preserved. Unsupported on Wayland.
 pub fn ensure_visible<T>(id: Id) -> Task<T> {
     task::effect(crate::Action::Window(Action::EnsureVisible(id)))
+}
+
+/// Sets the redraw limit (1 through 1000 FPS) and VSync for all windows.
+/// Idle windows remain asleep. VSync follows the display when supported.
+pub fn set_frame_settings(max_fps: u32, vsync: bool) -> Task<()> {
+    task::effect(crate::Action::Window(Action::SetFrameSettings {
+        max_fps,
+        vsync,
+    }))
 }
 
 /// Opens a new window with the given [`Settings`]; producing the [`Id`]

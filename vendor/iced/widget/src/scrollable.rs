@@ -610,7 +610,7 @@ where
                 let _ = notify_scroll(state, &self.on_scroll, bounds, content_bounds, shell);
             }
             if state.smooth_motion.is_some() {
-                shell.request_redraw_at(*now + Duration::from_millis(16));
+                shell.request_redraw();
             }
         }
 

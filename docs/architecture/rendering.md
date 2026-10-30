@@ -21,9 +21,8 @@ requests are suppressed. A failed handoff retains software and disables further
 attempts for that application session. Selecting software does not reverse an
 already active GPU handoff.
 
-Startup disables antialiasing and vsync. The Vulkan handoff enables vsync and
-4× multisample antialiasing for vector icon meshes. Text, images, and quads use
-their existing rendering paths. All windows share the selected renderer backend.
+Startup disables antialiasing. Vulkan enables 4× MSAA for vector icons and uses
+the saved VSync setting. All windows share the selected renderer backend.
 
 ## Theme transitions
 

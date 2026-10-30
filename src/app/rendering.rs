@@ -91,7 +91,7 @@ impl App {
         );
 
         match start_gpu_boost(&mut self.rendering, policy) {
-            BoostStart::Started => configure_hardware_backend(policy),
+            BoostStart::Started => configure_hardware_backend(policy, self.settings.vsync),
             BoostStart::Ignored(suppression) => {
                 if matches!(
                     suppression,
@@ -318,7 +318,7 @@ fn complete_gpu_boost_state(state: &mut RenderingState, failure: Option<RenderFa
 }
 
 #[cfg(feature = "hybrid-rendering")]
-fn configure_hardware_backend(policy: RenderBackendPolicy) -> Task<Message> {
+fn configure_hardware_backend(policy: RenderBackendPolicy, vsync: bool) -> Task<Message> {
     use iced::Backend;
     use iced::backend::Api;
 
@@ -330,13 +330,13 @@ fn configure_hardware_backend(policy: RenderBackendPolicy) -> Task<Message> {
         },
         // Smooth vector icon edges with the mesh pipeline's antialiasing.
         antialiasing: true,
-        vsync: true,
+        vsync,
     })
     .map(Message::BackendBoostConfigured)
 }
 
 #[cfg(not(feature = "hybrid-rendering"))]
-fn configure_hardware_backend(_policy: RenderBackendPolicy) -> Task<Message> {
+fn configure_hardware_backend(_policy: RenderBackendPolicy, _vsync: bool) -> Task<Message> {
     Task::done(Message::BackendBoostConfigured(Err(
         backend::StrictHandoffError {
             phase: backend::StrictHandoffPhase::Preparing,
@@ -356,6 +356,26 @@ mod tests {
         render_backend_policy, start_gpu_boost,
     };
     use crate::core::{EditorSettings, HardwareAccelerationMode};
+
+    #[cfg(feature = "hybrid-rendering")]
+    #[test]
+    fn hardware_handoff_uses_the_selected_vsync_setting() {
+        use futures::StreamExt;
+
+        for vsync in [false, true] {
+            let task = super::configure_hardware_backend(RenderBackendPolicy::LazyGpu, vsync);
+            let mut actions = iced_runtime::task::into_stream(task).unwrap();
+            let action = futures::executor::block_on(actions.next()).unwrap();
+            let iced_runtime::Action::Backend(iced::backend::Action::PrepareWarmAndCommit(
+                configured,
+                _,
+            )) = action
+            else {
+                panic!("hardware handoff should prepare the selected backend");
+            };
+            assert_eq!(configured.vsync, vsync);
+        }
+    }
 
     #[test]
     fn render_backend_override_values_are_explicit() {

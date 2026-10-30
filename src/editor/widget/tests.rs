@@ -813,7 +813,7 @@ fn folding_gutter_hover_schedules_frames_until_fade_settles() {
             if enabled && changed {
                 assert_eq!(request, iced::window::RedrawRequest::NextFrame);
             } else if fading {
-                assert!(matches!(request, iced::window::RedrawRequest::At(_)));
+                assert_eq!(request, iced::window::RedrawRequest::NextFrame);
             } else {
                 assert_eq!(request, iced::window::RedrawRequest::Wait);
             }

@@ -29,6 +29,28 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+static MAX_FPS: AtomicU32 = AtomicU32::new(120);
+static VSYNC: AtomicBool = AtomicBool::new(true);
+
+/// The target time between frames, shared by window animations.
+pub fn frame_interval() -> crate::time::Duration {
+    crate::time::Duration::from_nanos(1_000_000_000 / u64::from(MAX_FPS.load(Ordering::Relaxed)))
+}
+
+/// Changes the shared animation timing. The native runtime also updates surfaces.
+#[doc(hidden)]
+pub fn update_frame_settings(max_fps: u32, vsync: bool) {
+    MAX_FPS.store(max_fps.clamp(1, 1000), Ordering::Relaxed);
+    VSYNC.store(vsync, Ordering::Relaxed);
+}
+
+/// The synchronization preference from startup or the latest frame settings.
+#[doc(hidden)]
+pub fn vsync() -> bool {
+    VSYNC.load(Ordering::Relaxed)
+}
 
 pub use raw_window_handle;
 

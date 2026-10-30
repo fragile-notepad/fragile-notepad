@@ -26,7 +26,6 @@ const MIN_THUMB_WIDTH: f32 = 32.0;
 const FADE_IN: Duration = Duration::from_millis(120);
 const FADE_OUT: Duration = Duration::from_millis(200);
 const EMPHASIS_DURATION: Duration = Duration::from_millis(100);
-const FRAME: Duration = Duration::from_millis(16);
 
 #[cfg(test)]
 pub(super) fn view<'a>(tabs: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -541,15 +540,12 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
 
         let animating = state.reveal.started.is_some() || state.emphasis.started.is_some();
         let values_changed = previous_values != (state.reveal.value, state.emphasis.value);
-        // Repeated input must not keep pushing the next frame into the future.
-        // It can also advance a transition to its endpoint, which still needs
-        // painting even though neither transition is animating anymore.
-        if !matches!(event, Event::Window(window::Event::RedrawRequested(_)))
-            && (animating || values_changed)
+        // Input can finish a transition between frames; repaint its final value.
+        if animating
+            || (!matches!(event, Event::Window(window::Event::RedrawRequested(_)))
+                && values_changed)
         {
             shell.request_redraw();
-        } else if animating {
-            shell.request_redraw_at(now + FRAME);
         }
         if offset.is_some() || was_dragging != dragging {
             shell.request_redraw();

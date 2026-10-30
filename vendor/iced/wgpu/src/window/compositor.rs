@@ -404,9 +404,15 @@ impl graphics::Compositor for Compositor {
                 height,
                 alpha_mode: self.alpha_mode,
                 view_formats: vec![],
-                desired_maximum_frame_latency: 1,
+                // Allow CPU recording and GPU drawing to overlap instead of
+                // requiring both to finish within a single display refresh.
+                desired_maximum_frame_latency: 2,
             },
         );
+    }
+
+    fn set_vsync(&mut self, vsync: bool) -> bool {
+        self.settings.set_vsync(vsync, present_mode_from_env())
     }
 
     fn information(&self) -> compositor::Information {
@@ -515,6 +521,19 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    fn set_vsync(&mut self, vsync: bool, override_mode: Option<wgpu::PresentMode>) -> bool {
+        let present_mode = override_mode.unwrap_or(if vsync {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        });
+        let changed = self.present_mode != present_mode;
+        self.present_mode = present_mode;
+        changed
+    }
+}
+
 impl From<backend::Settings> for Settings {
     fn from(settings: backend::Settings) -> Self {
         let backends = settings
@@ -566,5 +585,36 @@ pub fn present_mode_from_env() -> Option<wgpu::PresentMode> {
         "fifo_relaxed" => Some(wgpu::PresentMode::FifoRelaxed),
         "mailbox" => Some(wgpu::PresentMode::Mailbox),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+    use crate::core::backend;
+
+    #[test]
+    fn live_vsync_compares_the_existing_backend_mode() {
+        let mut settings = Settings::from(backend::Settings {
+            vsync: false,
+            ..backend::Settings::default()
+        });
+
+        assert!(settings.set_vsync(true, None));
+        assert_eq!(settings.present_mode, wgpu::PresentMode::AutoVsync);
+        assert!(!settings.set_vsync(true, None));
+        assert!(settings.set_vsync(false, None));
+        assert_eq!(settings.present_mode, wgpu::PresentMode::AutoNoVsync);
+    }
+
+    #[test]
+    fn an_explicit_present_mode_keeps_vsync_changes_from_reconfiguring_surfaces() {
+        let mut settings = Settings::default();
+        let override_mode = Some(wgpu::PresentMode::Mailbox);
+
+        assert!(settings.set_vsync(true, override_mode));
+        assert!(!settings.set_vsync(false, override_mode));
+        assert!(!settings.set_vsync(true, override_mode));
+        assert_eq!(settings.present_mode, wgpu::PresentMode::Mailbox);
     }
 }

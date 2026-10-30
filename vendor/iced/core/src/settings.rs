@@ -52,6 +52,10 @@ pub struct Settings {
     ///
     /// By default, it is enabled.
     pub vsync: bool,
+
+    /// Maximum redraws per second for each window, from 1 through 1000. Defaults to 120.
+    /// Windows without pending changes do not redraw continuously.
+    pub max_fps: u32,
 }
 
 impl Default for Settings {
@@ -67,6 +71,7 @@ impl Default for Settings {
             power_preference: backend::PowerPreference::None,
             antialiasing: true,
             vsync: true,
+            max_fps: 120,
         }
     }
 }

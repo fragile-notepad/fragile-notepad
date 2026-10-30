@@ -375,6 +375,10 @@ where
         }
     }
 
+    fn set_vsync(&mut self, vsync: bool) -> bool {
+        delegate!(self, compositor, compositor.set_vsync(vsync))
+    }
+
     fn load_font(&mut self, font: Cow<'static, [u8]>) -> Result<(), font::Error> {
         delegate!(self, compositor, compositor.load_font(font))
     }

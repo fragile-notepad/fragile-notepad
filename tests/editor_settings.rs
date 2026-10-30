@@ -6,6 +6,46 @@ use iced::widget::text_editor::LineEnding;
 use std::path::PathBuf;
 
 #[test]
+fn frame_settings_round_trip_and_old_settings_use_vsync_at_120_fps() {
+    for (max_fps, vsync) in [(1, true), (144, false), (1000, true)] {
+        let settings = EditorSettings {
+            max_fps,
+            vsync,
+            ..EditorSettings::default()
+        };
+        assert_eq!(
+            EditorSettings::from_xml_str(&settings.to_xml_string()),
+            settings
+        );
+    }
+
+    for xml in [
+        "<fragile-notepad-settings />",
+        "<fragile-notepad-settings><general /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><general max-fps=\"unknown\" vsync=\"maybe\" /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><general max-fps=\"-1\" /></fragile-notepad-settings>",
+        "<fragile-notepad-settings><general max-fps=\"4294967296\" /></fragile-notepad-settings>",
+    ] {
+        let settings = EditorSettings::from_xml_str(xml);
+        assert_eq!(settings.max_fps, 120);
+        assert!(settings.vsync);
+    }
+}
+
+#[test]
+fn saved_frame_rate_is_clamped_to_the_supported_range() {
+    for (max_fps, expected) in [
+        (0, EditorSettings::MIN_FPS),
+        (1001, EditorSettings::MAX_FPS),
+    ] {
+        let settings = EditorSettings::from_xml_str(&format!(
+            "<fragile-notepad-settings><general max-fps=\"{max_fps}\" /></fragile-notepad-settings>"
+        ));
+        assert_eq!(settings.max_fps, expected);
+    }
+}
+
+#[test]
 fn new_file_defaults_round_trip_all_supported_encodings_and_line_endings() {
     for &encoding in TextEncoding::ALL {
         for line_ending in [

@@ -48,6 +48,7 @@ These patches adapt Iced to Fragile Notepad's
 
 ## Application patches
 
+- Add runtime FPS/VSync controls, fixed redraw pacing, and two frames in flight.
 - Add optional tooltip fades with a small vertical movement. Keep the tooltip
   visible until its exit finishes, reverse interrupted fades, and request frames
   only during the hover delay or animation. Status-bar tooltips use this option.

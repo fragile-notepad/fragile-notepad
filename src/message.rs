@@ -201,6 +201,8 @@ message_catalog! {
         DraftSearchResultsReset => Reject,
         DraftAppearanceSelected(arg0: AppearanceMode) => Reject,
         DraftHardwareAccelerationSelected(arg0: HardwareAccelerationMode) => Reject,
+        DraftMaxFpsChanged(arg0: String) => Reject,
+        DraftVsyncToggled(arg0: bool) => Reject,
         DraftIndentationSelected(arg0: IndentationMode) => Reject,
         DraftLineNumbersToggled(arg0: bool) => Reject,
         DraftVisibleSpacesToggled(arg0: bool) => Reject,

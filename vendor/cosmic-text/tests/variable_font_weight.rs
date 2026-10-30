@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use cosmic_text::{fontdb, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight};
+use cosmic_text::{
+    fontdb, Attrs, Buffer, Fallback as _, Family, FontSystem, Metrics, PlatformFallback, Shaping,
+    Weight,
+};
 
 /// Variable fonts must be matched at all weights within their `wght` axis
 /// range, not just the default weight they register at in fontdb, otherwise
@@ -45,6 +48,56 @@ fn variable_font_all_weights_match() {
                 family.contains("Inter"),
                 "Weight {w}: expected Inter, got \"{family}\""
             );
+        }
+    }
+}
+
+#[test]
+fn static_family_keeps_its_closest_weight() {
+    let mut db = fontdb::Database::new();
+    db.load_font_data(include_bytes!("../fonts/Inter-Regular.ttf").to_vec());
+    db.load_font_data(include_bytes!("../fonts/FiraMono-Medium.ttf").to_vec());
+    // Give the competing medium face a platform fallback alias. It must
+    // not replace the requested family's regular face just for its weight.
+    let mut fallback = db
+        .faces()
+        .find(|face| face.weight == Weight::MEDIUM)
+        .unwrap()
+        .clone();
+    db.remove_face(fallback.id);
+    fallback.families.push((
+        PlatformFallback.common_fallback()[0].to_owned(),
+        fontdb::Language::English_UnitedStates,
+    ));
+    let _ = db.push_face_info(fallback);
+    db.set_sans_serif_family("Inter");
+    let mut system = FontSystem::new_with_locale_and_db("en-US".into(), db);
+
+    for family in [Family::SansSerif, Family::Name("Inter")] {
+        for weight in [Weight::MEDIUM, Weight::SEMIBOLD] {
+            for shaping in [Shaping::Basic, Shaping::Advanced] {
+                let mut buffer = Buffer::new(&mut system, Metrics::new(16.0, 20.0));
+                buffer.set_text(
+                    "Search results and previews.",
+                    &Attrs::new().family(family).weight(weight),
+                    shaping,
+                    None,
+                );
+                buffer.shape_until_scroll(&mut system, false);
+                let mut glyphs = buffer
+                    .layout_runs()
+                    .flat_map(|run| run.glyphs.iter())
+                    .peekable();
+                assert!(glyphs.peek().is_some());
+                for glyph in glyphs {
+                    let face = system.db().face(glyph.font_id).unwrap();
+                    assert!(
+                        face.families.iter().any(|(name, _)| name == "Inter"),
+                        "{family:?}, {weight:?}, {shaping:?}: {}",
+                        face.post_script_name
+                    );
+                }
+            }
         }
     }
 }

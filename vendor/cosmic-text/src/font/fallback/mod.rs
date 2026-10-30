@@ -280,9 +280,10 @@ impl<'a> FontFallbackIter<'a> {
         let default_family = self.default_families[self.default_i - 1];
         let default_family_name = self.font_system.db().family_name(default_family);
 
+        // The requested family's best face is first, even when that family
+        // has no exact weight. Keep it ahead of unrelated fallback families.
         self.font_match_keys
             .iter()
-            .filter(|m_key| m_key.font_weight_diff == 0 || m_key.variable_weight_match)
             .find(|m_key| self.face_contains_family(m_key.id, default_family_name))
     }
 

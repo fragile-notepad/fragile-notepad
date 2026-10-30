@@ -14,6 +14,13 @@ Set default family names before loading system fonts so Fontconfig's generic
 family choices survive initialization. Iced selects an installed Linux font
 when a configured family is missing.
 
+## Requested font weights
+
+Keep the requested family's closest face when its exact weight is unavailable.
+Previously, a medium or semibold request could skip the UI family and select an
+unrelated fallback font. Variable fonts and exact weight matches still use the
+existing font database ordering.
+
 ## Optical-size overrides
 
 `FontSystem::set_font_optical_size` lets the application configure a fixed `opsz`

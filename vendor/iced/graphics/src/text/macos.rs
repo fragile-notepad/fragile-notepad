@@ -31,8 +31,8 @@ pub(super) fn configure(font_system: &mut FontSystem) {
 fn configure_sans_serif(font_system: &mut FontSystem, family: &'static str) {
     font_system.db_mut().set_sans_serif_family(family);
     if matches!(family, "Lucida Grande" | "Helvetica Neue") {
-        // Cosmic's fallback iterator requires an exact static weight. Lucida's
-        // regular/bold faces are 500/600, so a normal 400 request falls through.
+        // Map UI weights to installed faces. Lucida's regular and bold faces
+        // use weights 500 and 600.
         let weights = std::array::from_fn(|index| {
             let weight = Weight((index as u16 + 1) * 100);
             font_system

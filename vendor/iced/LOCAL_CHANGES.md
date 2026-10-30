@@ -106,4 +106,5 @@ These patches adapt Iced to Fragile Notepad's
   preserving glyph positions when fold placeholders add color spans.
 - Software rounded quads honor pixel-grid snapping after scaling and translation,
   keeping fold placeholder backgrounds inside their painted bounds.
+- Include stroke thickness in software path.
 - Clip negative text bitmap origins to prevent repeated edge pixels in software rendering.

@@ -272,6 +272,34 @@ fn check_rotation(renderer: &mut Renderer) {
     }
 }
 
+fn check_straight_strokes(renderer: &mut Renderer) {
+    for size in [10.0, 14.0] {
+        for scale in [1.0, 1.25, 1.5] {
+            for rotation in [0.0, std::f32::consts::FRAC_PI_2] {
+                begin(renderer, scale);
+                let bounds = Rectangle::new(Point::new(12.0, 10.0), Size::new(size, size));
+                hero::draw(
+                    renderer,
+                    HeroIcon::Minus,
+                    bounds,
+                    bounds,
+                    Color::BLACK,
+                    Radians(rotation),
+                );
+                let frame = capture(renderer, scale, Color::WHITE);
+                let ink = frame.ink(bounds);
+                assert!(
+                    !ink.is_empty(),
+                    "minus icon disappeared: size={size}, scale={scale}, rotation={rotation}"
+                );
+                let (width, height) = extent(&ink);
+                let length = if rotation == 0.0 { width } else { height };
+                assert!(length as f32 >= size * scale * 0.4);
+            }
+        }
+    }
+}
+
 fn check_clipping(renderer: &mut Renderer) {
     let scale = 1.5;
     let bounds = Rectangle::new(Point::new(12.0, 10.0), Size::new(44.0, 44.0));
@@ -307,6 +335,7 @@ fn check_vector_icons(renderer: &mut Renderer) {
     check_disabled_icons(renderer);
     check_magnifier_center(renderer);
     check_rotation(renderer);
+    check_straight_strokes(renderer);
     check_clipping(renderer);
 }
 

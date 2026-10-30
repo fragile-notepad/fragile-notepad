@@ -8,6 +8,12 @@ The upstream package source, manifests, tests, fixtures, and license files are
 preserved here. The application supplies fonts from the operating system; this
 patch does not contain or generate Apple font data.
 
+## Linux generic fonts
+
+Set default family names before loading system fonts so Fontconfig's generic
+family choices survive initialization. Iced selects an installed Linux font
+when a configured family is missing.
+
 ## Optical-size overrides
 
 `FontSystem::set_font_optical_size` lets the application configure a fixed `opsz`

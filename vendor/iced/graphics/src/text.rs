@@ -3,6 +3,9 @@ pub mod cache;
 pub mod editor;
 pub mod paragraph;
 
+#[cfg(any(target_os = "linux", test))]
+mod linux;
+
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -439,6 +442,9 @@ pub fn font_system() -> &'static RwLock<FontSystem> {
 
         #[cfg(target_os = "macos")]
         macos::configure(&mut raw);
+
+        #[cfg(target_os = "linux")]
+        linux::configure(raw.db_mut());
 
         #[cfg(target_os = "windows")]
         {

@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 use std::{mem, slice};
 
@@ -132,11 +132,7 @@ fn convert_scancode(scancode: u8) -> (PhysicalKey, Option<NamedKey>) {
 }
 
 fn element_state(pressed: bool) -> event::ElementState {
-    if pressed {
-        event::ElementState::Pressed
-    } else {
-        event::ElementState::Released
-    }
+    if pressed { event::ElementState::Pressed } else { event::ElementState::Released }
 }
 
 bitflags! {
@@ -442,7 +438,7 @@ impl<T: 'static> EventLoop<T> {
                     event: event::WindowEvent::MouseWheel {
                         device_id: event::DeviceId(DeviceId),
                         delta: event::MouseScrollDelta::LineDelta(x as f32, y as f32),
-                        phase: event::TouchPhase::Moved,
+                        phase: event::TouchPhase::Moved.into(),
                     },
                 });
             },

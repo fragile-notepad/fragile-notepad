@@ -583,6 +583,7 @@ mod profile {
                             8.0
                         };
                         events.push(Event::Mouse(mouse::Event::WheelScrolled {
+                            phase: mouse::ScrollPhase::Moved,
                             delta: mouse::ScrollDelta::Lines {
                                 x: 0.0,
                                 y: direction,

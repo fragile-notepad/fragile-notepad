@@ -30,6 +30,10 @@ pub enum EditorAction {
     JoinLines,
     ScrollLines(i32),
     ScrollToRow(usize),
+    ScrollToHorizontal {
+        /// Absolute horizontal offset in pixels multiplied by 1000.
+        offset_milli: u64,
+    },
     ViewportChanged {
         visible_rows: usize,
         text_width: u32,

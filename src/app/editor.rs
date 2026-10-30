@@ -229,6 +229,14 @@ impl App {
                 document.scroll.first_visible_row = row.min(max);
                 false
             }
+            EditorAction::ScrollToHorizontal { offset_milli } => {
+                document.scroll.horizontal_px = if document.word_wrap() {
+                    0.0
+                } else {
+                    offset_milli as f32 / 1000.0
+                };
+                false
+            }
             EditorAction::ViewportChanged {
                 visible_rows,
                 text_width,

@@ -834,6 +834,7 @@ impl Document {
         character_width: f32,
     ) {
         let caret_was_visible = self.caret_is_in_view();
+        let previous_visible_rows = self.viewport_visible_rows;
         self.viewport_visible_rows = visible_rows.max(1);
         self.viewport_text_width = text_width.max(1.0);
         self.viewport_character_width = character_width.max(1.0);
@@ -845,7 +846,9 @@ impl Document {
             self.preferred_vertical_column = None;
             self.rebuild_viewport();
         }
-        if self.word_wrap && caret_was_visible {
+        if caret_was_visible
+            && (self.word_wrap || self.viewport_visible_rows < previous_visible_rows)
+        {
             self.ensure_caret_visible();
         }
     }

@@ -294,7 +294,7 @@ pub enum WindowEvent {
     CursorLeft { device_id: DeviceId },
 
     /// A mouse wheel movement or touchpad scroll occurred.
-    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: TouchPhase },
+    MouseWheel { device_id: DeviceId, delta: MouseScrollDelta, phase: ScrollPhase },
 
     /// An mouse button press has been received.
     MouseInput { device_id: DeviceId, state: ElementState, button: MouseButton },
@@ -303,7 +303,7 @@ pub enum WindowEvent {
     ///
     /// ## Platform-specific
     ///
-    /// - Only available on **macOS** and **iOS**.
+    /// - Available on **macOS**, **iOS**, and Windows precision touchpads.
     /// - On iOS, not recognized by default. It must be enabled when needed.
     PinchGesture {
         device_id: DeviceId,
@@ -834,6 +834,37 @@ pub enum TouchPhase {
     Cancelled,
 }
 
+/// Describes wheel and touchpad scrolling, including native momentum.
+///
+/// Platforms without gesture boundaries report only [`ScrollPhase::Moved`].
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ScrollPhase {
+    /// Fingers started a scrolling gesture.
+    Started,
+    /// The wheel or fingers moved.
+    Moved,
+    /// Fingers left the touchpad; native momentum may follow.
+    ContactEnded,
+    /// The platform supplied momentum after the fingers left the touchpad.
+    Momentum,
+    /// The gesture and any native momentum ended.
+    Ended,
+    /// The platform cancelled the gesture.
+    Cancelled,
+}
+
+impl From<TouchPhase> for ScrollPhase {
+    fn from(phase: TouchPhase) -> Self {
+        match phase {
+            TouchPhase::Started => Self::Started,
+            TouchPhase::Moved => Self::Moved,
+            TouchPhase::Ended => Self::Ended,
+            TouchPhase::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
 /// Represents a touch event
 ///
 /// Every time the user touches the screen, a new [`TouchPhase::Started`] event with an unique
@@ -1076,7 +1107,7 @@ mod tests {
                 with_window_event(MouseWheel {
                     device_id: did,
                     delta: event::MouseScrollDelta::LineDelta(0.0, 0.0),
-                    phase: event::TouchPhase::Started,
+                    phase: event::ScrollPhase::Started,
                 });
                 with_window_event(MouseInput {
                     device_id: did,

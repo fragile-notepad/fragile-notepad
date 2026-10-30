@@ -569,7 +569,7 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
             cursor
         };
         let wheel_event = match event {
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if over_strip => {
+            Event::Mouse(mouse::Event::WheelScrolled { delta, phase }) if over_strip => {
                 let delta = match *delta {
                     // Scrollable already swaps line axes for Shift on Windows
                     // and Linux. macOS sends those packets with swapped axes.
@@ -583,7 +583,12 @@ impl Widget<Message, Theme, Renderer> for ScrollStrip<'_> {
                     }
                     _ => None,
                 };
-                delta.map(|delta| Event::Mouse(mouse::Event::WheelScrolled { delta }))
+                delta.map(|delta| {
+                    Event::Mouse(mouse::Event::WheelScrolled {
+                        delta,
+                        phase: *phase,
+                    })
+                })
             }
             _ => None,
         };

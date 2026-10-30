@@ -665,6 +665,7 @@ fn dragging_preserves_the_grab_point_clamps_and_suppresses_tab_release() {
         &node,
         &renderer,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: -1.0, y: 0.0 },
         }),
         pointer(Point::new(150.0, 15.0)),
@@ -795,6 +796,7 @@ fn vertical_wheel_scrolls_tabs_both_ways_over_the_body_and_top_lane() {
                 &node,
                 &renderer,
                 Event::Mouse(mouse::Event::WheelScrolled {
+                    phase: mouse::ScrollPhase::Moved,
                     delta: mouse::ScrollDelta::Lines { x: 0.0, y: steps },
                 }),
                 cursor,
@@ -856,7 +858,10 @@ fn vertical_precise_input_keeps_fractions_and_prefers_existing_horizontal_motion
             &mut tree,
             &node,
             &renderer,
-            Event::Mouse(mouse::Event::WheelScrolled { delta }),
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta,
+                phase: mouse::ScrollPhase::Moved,
+            }),
             cursor,
         );
         assert!(captured);
@@ -881,6 +886,7 @@ fn vertical_wheel_does_not_scroll_or_capture_when_tabs_fit_or_pointer_is_outside
             &node,
             &renderer,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
             }),
             cursor,
@@ -913,6 +919,7 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         &node,
         &renderer,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: -1.0, y: 0.0 },
         }),
         cursor,
@@ -957,6 +964,7 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         &node,
         &renderer,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Pixels { x: -12.5, y: 0.0 },
         }),
         cursor,
@@ -981,6 +989,7 @@ fn wheel_over_the_top_lane_keeps_native_easing_and_precise_input() {
         &node,
         &renderer,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: if cfg!(target_os = "macos") {
                 mouse::ScrollDelta::Lines { x: -0.5, y: 0.0 }
             } else {
@@ -1011,6 +1020,7 @@ fn wheel_reverses_mid_scroll_in_both_directions_without_jumping() {
         );
         let wheel = |x| {
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x, y: 0.0 },
             })
         };

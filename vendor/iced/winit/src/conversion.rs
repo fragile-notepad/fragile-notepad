@@ -210,24 +210,33 @@ pub fn window_event(
                 winit::event::ElementState::Released => mouse::Event::ButtonReleased(button),
             }))
         }
-        WindowEvent::MouseWheel { delta, .. } => match delta {
+        WindowEvent::MouseWheel { delta, phase, .. } => match delta {
             winit::event::MouseScrollDelta::LineDelta(delta_x, delta_y) => {
                 Some(Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Lines {
                         x: delta_x,
                         y: delta_y,
                     },
+                    phase: scroll_phase(phase),
                 }))
             }
             winit::event::MouseScrollDelta::PixelDelta(position) => {
+                let position = position.to_logical::<f64>(f64::from(scale_factor));
                 Some(Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Pixels {
                         x: position.x as f32,
                         y: position.y as f32,
                     },
+                    phase: scroll_phase(phase),
                 }))
             }
         },
+        WindowEvent::PinchGesture { delta, phase, .. } => {
+            Some(Event::Mouse(mouse::Event::Pinched {
+                delta: delta as f32,
+                phase: pinch_phase(phase),
+            }))
+        }
         // Ignore keyboard presses/releases during window focus/unfocus
         WindowEvent::KeyboardInput { is_synthetic, .. } if is_synthetic => None,
         WindowEvent::KeyboardInput { event, .. } => Some(Event::Keyboard({
@@ -336,6 +345,21 @@ pub fn window_event(
         }
         _ => None,
     }
+}
+
+fn scroll_phase(phase: winit::event::ScrollPhase) -> mouse::ScrollPhase {
+    match phase {
+        winit::event::ScrollPhase::Started => mouse::ScrollPhase::Started,
+        winit::event::ScrollPhase::Moved => mouse::ScrollPhase::Moved,
+        winit::event::ScrollPhase::ContactEnded => mouse::ScrollPhase::ContactEnded,
+        winit::event::ScrollPhase::Momentum => mouse::ScrollPhase::Momentum,
+        winit::event::ScrollPhase::Ended => mouse::ScrollPhase::Ended,
+        winit::event::ScrollPhase::Cancelled => mouse::ScrollPhase::Cancelled,
+    }
+}
+
+fn pinch_phase(phase: winit::event::TouchPhase) -> mouse::ScrollPhase {
+    scroll_phase(phase.into())
 }
 
 /// Converts a [`window::Level`] into a [`winit`] window level.
@@ -1175,4 +1199,95 @@ pub fn ime_purpose(purpose: input_method::Purpose) -> winit::window::ImePurpose 
 // See: https://en.wikipedia.org/wiki/Private_Use_Areas
 fn is_private_use(c: char) -> bool {
     ('\u{E000}'..='\u{F8FF}').contains(&c)
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+    use winit::event::{DeviceId, MouseScrollDelta, ScrollPhase, TouchPhase, WindowEvent};
+
+    #[test]
+    fn pinch_conversion_keeps_scale_changes_and_native_phases() {
+        for (phase, expected_phase) in [
+            (TouchPhase::Started, mouse::ScrollPhase::Started),
+            (TouchPhase::Moved, mouse::ScrollPhase::Moved),
+            (TouchPhase::Ended, mouse::ScrollPhase::Ended),
+            (TouchPhase::Cancelled, mouse::ScrollPhase::Cancelled),
+        ] {
+            let event = window_event(
+                WindowEvent::PinchGesture {
+                    device_id: DeviceId::dummy(),
+                    delta: 0.25,
+                    phase,
+                },
+                2.0,
+                winit::keyboard::ModifiersState::empty(),
+            );
+            assert_eq!(
+                event,
+                Some(Event::Mouse(mouse::Event::Pinched {
+                    delta: 0.25,
+                    phase: expected_phase,
+                }))
+            );
+        }
+    }
+
+    #[test]
+    fn wheel_conversion_keeps_native_phases_and_scales_physical_pixels() {
+        for (phase, expected_phase) in [
+            (ScrollPhase::Started, mouse::ScrollPhase::Started),
+            (ScrollPhase::Moved, mouse::ScrollPhase::Moved),
+            (ScrollPhase::ContactEnded, mouse::ScrollPhase::ContactEnded),
+            (ScrollPhase::Momentum, mouse::ScrollPhase::Momentum),
+            (ScrollPhase::Ended, mouse::ScrollPhase::Ended),
+            (ScrollPhase::Cancelled, mouse::ScrollPhase::Cancelled),
+        ] {
+            for scale in [1.0, 1.5, 2.0] {
+                let event = window_event(
+                    WindowEvent::MouseWheel {
+                        device_id: DeviceId::dummy(),
+                        delta: MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(
+                            15.0, -30.0,
+                        )),
+                        phase,
+                    },
+                    scale,
+                    winit::keyboard::ModifiersState::empty(),
+                );
+                assert_eq!(
+                    event,
+                    Some(Event::Mouse(mouse::Event::WheelScrolled {
+                        delta: mouse::ScrollDelta::Pixels {
+                            x: 15.0 / scale,
+                            y: -30.0 / scale
+                        },
+                        phase: expected_phase,
+                    }))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wheel_line_units_do_not_change_with_display_scale() {
+        for scale in [1.0, 1.5, 2.0] {
+            let event = window_event(
+                WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0.25, -0.5),
+                    phase: ScrollPhase::Moved,
+                },
+                scale,
+                winit::keyboard::ModifiersState::empty(),
+            );
+            assert_eq!(
+                event,
+                Some(Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Lines { x: 0.25, y: -0.5 },
+                    phase: mouse::ScrollPhase::Moved,
+                }))
+            );
+        }
+    }
 }

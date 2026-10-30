@@ -109,6 +109,15 @@ impl SettingsPersistence {
 }
 
 impl App {
+    pub(super) fn zoom_by_factor(&mut self, factor: f32) -> Task<Message> {
+        self.menu.close();
+        self.settings_persistence
+            .edit(&mut self.settings, SettingsEdit::Zoom, |settings| {
+                settings.set_zoom(settings.zoom * factor)
+            });
+        self.persist_settings()
+    }
+
     pub(super) fn update_settings(&mut self, message: SettingsMessage) -> Task<Message> {
         let task = self.dispatch_settings(message);
         self.settings_dialog.sync_shortcut_notice_animation();

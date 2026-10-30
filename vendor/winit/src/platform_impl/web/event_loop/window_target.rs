@@ -1,14 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::clone::Clone;
-use std::collections::vec_deque::IntoIter as VecDequeIter;
 use std::collections::VecDeque;
+use std::collections::vec_deque::IntoIter as VecDequeIter;
 use std::iter;
 use std::rc::{Rc, Weak};
 
 use web_sys::Element;
 
-use super::super::monitor::MonitorHandle;
 use super::super::KeyEventExtra;
+use super::super::monitor::MonitorHandle;
 use super::device::DeviceId;
 use super::runner::{EventWrapper, Execution};
 use super::window::WindowId;
@@ -19,8 +19,8 @@ use crate::event::{
 use crate::event_loop::{ControlFlow, DeviceEvents};
 use crate::keyboard::ModifiersState;
 use crate::platform::web::{CustomCursorFuture, PollStrategy, WaitUntilStrategy};
-use crate::platform_impl::platform::cursor::CustomCursor;
 use crate::platform_impl::platform::r#async::Waker;
+use crate::platform_impl::platform::cursor::CustomCursor;
 use crate::window::{
     CustomCursor as RootCustomCursor, CustomCursorSource, Theme, WindowId as RootWindowId,
 };
@@ -506,7 +506,7 @@ impl ActiveEventLoop {
                     event: WindowEvent::MouseWheel {
                         device_id: RootDeviceId(DeviceId(pointer_id)),
                         delta,
-                        phase: TouchPhase::Moved,
+                        phase: TouchPhase::Moved.into(),
                     },
                 },
             )));
@@ -615,13 +615,8 @@ impl ActiveEventLoop {
     }
 
     pub fn system_theme(&self) -> Option<Theme> {
-        backend::is_dark_mode(self.runner.window()).map(|is_dark_mode| {
-            if is_dark_mode {
-                Theme::Dark
-            } else {
-                Theme::Light
-            }
-        })
+        backend::is_dark_mode(self.runner.window())
+            .map(|is_dark_mode| if is_dark_mode { Theme::Dark } else { Theme::Light })
     }
 
     pub(crate) fn set_control_flow(&self, control_flow: ControlFlow) {

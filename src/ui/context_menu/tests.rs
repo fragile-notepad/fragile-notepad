@@ -628,6 +628,7 @@ fn dismissing_or_switching_submenus_tolerates_cursor_queries_with_previous_layou
     let mut shell = Shell::new(&iced::window::Headless, Waker::noop(), &mut messages);
     menu.update(
         &Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         }),
         Layout::new(&old_node),
@@ -670,6 +671,7 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
     let cursor = mouse::Cursor::Available(Point::new(80.0, 80.0));
     let wheel = || {
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         })
     };
@@ -700,7 +702,7 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
     assert_eq!(menu.state.offsets[0], ROW_HEIGHT * 9.0);
     assert!(menu.state.scroll_motion.is_none());
     // Begin another gesture after the synthetic animation's completion.
-    menu.state.wheel_input = iced::widget::scrollable::WheelScrollInput::default();
+    menu.state.wheel_input = mouse::WheelScrollInput::default();
     let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
     assert!(menu.state.scroll_motion.is_some());
     let _ = dispatch(&mut menu, &renderer, viewport, key(Named::Home), cursor);
@@ -713,6 +715,7 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
         &renderer,
         viewport,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -12.0 },
         }),
         cursor,
@@ -740,6 +743,7 @@ fn context_menu_touchpad_line_stream_is_direct_and_preserves_whole_packets() {
             &renderer,
             viewport,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: delta },
             }),
             cursor,
@@ -757,6 +761,7 @@ fn context_menu_touchpad_line_stream_is_direct_and_preserves_whole_packets() {
             &renderer,
             viewport,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: delta },
             }),
             cursor,

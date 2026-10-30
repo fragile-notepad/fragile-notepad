@@ -22,7 +22,7 @@ use xkbcommon_dl::xkb_mod_mask_t;
 use crate::dpi::{PhysicalPosition, PhysicalSize};
 use crate::event::{
     DeviceEvent, ElementState, Event, Ime, InnerSizeWriter, MouseButton, MouseScrollDelta,
-    RawKeyEvent, Touch, TouchPhase, WindowEvent,
+    RawKeyEvent, ScrollPhase, Touch, TouchPhase, WindowEvent,
 };
 use crate::event_loop::ActiveEventLoop as RootAEL;
 use crate::keyboard::ModifiersState;
@@ -1089,7 +1089,7 @@ impl EventProcessor {
                     7 => MouseScrollDelta::LineDelta(-1.0, 0.0),
                     _ => unreachable!(),
                 },
-                phase: TouchPhase::Moved,
+                phase: ScrollPhase::Moved,
             },
             8 => WindowEvent::MouseInput { device_id, state, button: MouseButton::Back },
 
@@ -1142,40 +1142,16 @@ impl EventProcessor {
             None => return,
         };
 
-        let mut events = Vec::new();
         let mut value = event.valuators.values;
-        for i in 0..event.valuators.mask_len * 8 {
-            if !xinput2::XIMaskIsSet(mask, i) {
-                continue;
-            }
-
-            let x = unsafe { *value };
-
-            let event = if let Some(&mut (_, ref mut info)) =
-                physical_device.scroll_axes.iter_mut().find(|&&mut (axis, _)| axis == i as _)
-            {
-                let delta = (x - info.position) / info.increment;
-                info.position = x;
-                // X11 vertical scroll coordinates are opposite to winit's
-                let delta = match info.orientation {
-                    ScrollOrientation::Horizontal => {
-                        MouseScrollDelta::LineDelta(-delta as f32, 0.0)
-                    },
-                    ScrollOrientation::Vertical => MouseScrollDelta::LineDelta(0.0, -delta as f32),
-                };
-
-                WindowEvent::MouseWheel { device_id, delta, phase: TouchPhase::Moved }
-            } else {
-                WindowEvent::AxisMotion { device_id, axis: i as u32, value: unsafe { *value } }
-            };
-
-            events.push(Event::WindowEvent { window_id, event });
-
-            value = unsafe { value.offset(1) };
-        }
-
-        for event in events {
-            callback(&self.target, event);
+        let valuators = (0..event.valuators.mask_len * 8)
+            .filter(|&axis| xinput2::XIMaskIsSet(mask, axis))
+            .map(|axis| {
+                let position = unsafe { *value };
+                value = unsafe { value.offset(1) };
+                (axis, position)
+            });
+        for event in pointer_motion_events(physical_device, device_id, valuators) {
+            callback(&self.target, Event::WindowEvent { window_id, event });
         }
     }
 
@@ -1862,6 +1838,39 @@ impl EventProcessor {
     }
 }
 
+fn pointer_motion_events(
+    device: &mut Device,
+    device_id: crate::event::DeviceId,
+    valuators: impl IntoIterator<Item = (i32, f64)>,
+) -> Vec<WindowEvent> {
+    let mut events = Vec::new();
+    let (mut horizontal, mut vertical) = (0.0, 0.0);
+    for (axis, position) in valuators {
+        if let Some((_, scroll)) = device.scroll_axes.iter_mut().find(|(number, _)| *number == axis)
+        {
+            let delta = ((position - scroll.position) / scroll.increment) as f32;
+            scroll.position = position;
+            // Both X11 scroll axes have the opposite sign to winit.
+            match scroll.orientation {
+                ScrollOrientation::Horizontal => horizontal -= delta,
+                ScrollOrientation::Vertical => vertical -= delta,
+            }
+        } else {
+            events.push(WindowEvent::AxisMotion { device_id, axis: axis as u32, value: position });
+        }
+    }
+    // Keep the two components of one native motion together. Splitting them
+    // changes how gesture direction and precision are interpreted downstream.
+    if horizontal != 0.0 || vertical != 0.0 {
+        events.push(WindowEvent::MouseWheel {
+            device_id,
+            delta: MouseScrollDelta::LineDelta(horizontal, vertical),
+            phase: ScrollPhase::Moved,
+        });
+    }
+    events
+}
+
 fn is_first_touch(first: &mut Option<u64>, num: &mut u32, id: u64, phase: TouchPhase) -> bool {
     match phase {
         TouchPhase::Started => {
@@ -1880,4 +1889,57 @@ fn is_first_touch(first: &mut Option<u64>, num: &mut u32, id: u64, phase: TouchP
     }
 
     *first == Some(id)
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+    use crate::platform_impl::x11::ScrollAxis;
+
+    #[test]
+    fn native_scroll_valuators_keep_both_axes_and_ignore_unchanged_positions() {
+        let device_id = mkdid(42);
+        let mut device = Device {
+            _name: String::new(),
+            scroll_axes: vec![
+                (
+                    2,
+                    ScrollAxis {
+                        increment: 2.0,
+                        orientation: ScrollOrientation::Horizontal,
+                        position: 1.0,
+                    },
+                ),
+                (
+                    3,
+                    ScrollAxis {
+                        increment: 4.0,
+                        orientation: ScrollOrientation::Vertical,
+                        position: 6.0,
+                    },
+                ),
+            ],
+            attachment: 0,
+        };
+        let events = pointer_motion_events(&mut device, device_id, [(2, 1.25), (3, 8.0), (0, 9.0)]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], WindowEvent::AxisMotion { axis: 0, value: 9.0, .. }));
+        assert!(matches!(
+            events[1],
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(-0.125, -0.5),
+                phase: ScrollPhase::Moved,
+                ..
+            }
+        ));
+        assert!(pointer_motion_events(&mut device, device_id, [(2, 1.25), (3, 8.0)]).is_empty());
+        assert!(matches!(
+            pointer_motion_events(&mut device, device_id, [(3, 4.0)])[0],
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(0.0, 1.0),
+                phase: ScrollPhase::Moved,
+                ..
+            }
+        ));
+    }
 }

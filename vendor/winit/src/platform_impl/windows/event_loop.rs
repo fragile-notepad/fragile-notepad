@@ -2,7 +2,7 @@
 
 mod runner;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -17,21 +17,21 @@ use std::{mem, panic, ptr};
 use crate::utils::Lazy;
 
 use windows_sys::Win32::Foundation::{
-    GetLastError, FALSE, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_FAILED, WPARAM,
+    FALSE, GetLastError, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_FAILED, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromRect, MonitorFromWindow, RedrawWindow, ScreenToClient,
-    ValidateRect, MONITORINFO, MONITOR_DEFAULTTONULL, RDW_INTERNALPAINT, SC_SCREENSAVE,
+    GetMonitorInfoW, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromRect, MonitorFromWindow,
+    RDW_INTERNALPAINT, RedrawWindow, SC_SCREENSAVE, ScreenToClient, ValidateRect,
 };
 use windows_sys::Win32::System::Ole::RevokeDragDrop;
 use windows_sys::Win32::System::Threading::{
-    CreateWaitableTimerExW, GetCurrentThreadId, SetWaitableTimer,
-    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, INFINITE, TIMER_ALL_ACCESS,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, GetCurrentThreadId, INFINITE,
+    SetWaitableTimer, TIMER_ALL_ACCESS,
 };
 use windows_sys::Win32::UI::Controls::{HOVER_DEFAULT, WM_MOUSELEAVE};
 use windows_sys::Win32::UI::Input::Ime::{GCS_COMPSTR, GCS_RESULTSTR, ISC_SHOWUICOMPOSITIONWINDOW};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows_sys::Win32::UI::Input::Pointer::{
     POINTER_FLAG_DOWN, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
@@ -44,24 +44,25 @@ use windows_sys::Win32::UI::Input::{
     MOUSE_MOVE_RELATIVE, RAWINPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetCursorPos,
-    GetMenu, LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW,
-    RegisterClassExW, RegisterWindowMessageA, SetCursor, SetWindowPos, TranslateMessage,
-    CREATESTRUCTW, GIDC_ARRIVAL, GIDC_REMOVAL, GWL_STYLE, GWL_USERDATA, HTCAPTION, HTCLIENT,
-    MINMAXINFO, MNC_CLOSE, MSG, MWMO_INPUTAVAILABLE, NCCALCSIZE_PARAMS, PM_REMOVE, PT_PEN,
-    PT_TOUCH, QS_ALLINPUT, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, SC_MINIMIZE, SC_RESTORE,
-    SIZE_MAXIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WHEEL_DELTA, WINDOWPOS,
+    CREATESTRUCTW, CreateWindowExW, DM_POINTERHITTEST, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GIDC_ARRIVAL, GIDC_REMOVAL, GWL_STYLE, GWL_USERDATA, GetClientRect,
+    GetCursorPos, GetMenu, HTCAPTION, HTCLIENT, LoadCursorW, MINMAXINFO, MNC_CLOSE, MSG,
+    MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, NCCALCSIZE_PARAMS, PM_REMOVE, PT_PEN,
+    PT_TOUCH, PeekMessageW, PostMessageW, QS_ALLINPUT, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL,
+    RegisterClassExW, RegisterWindowMessageA, SC_MINIMIZE, SC_RESTORE, SIZE_MAXIMIZED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetWindowPos,
+    TranslateMessage, WHEEL_DELTA, WINDOWPOS, WM_CAPTURECHANGED, WM_CLOSE, WM_CREATE, WM_DESTROY,
+    WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION,
+    WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INPUT,
+    WM_INPUT_DEVICE_CHANGE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MENUCHAR, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCCREATE, WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_PAINT,
+    WM_POINTERDOWN, WM_POINTERUP, WM_POINTERUPDATE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
+    WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE, WM_SIZING, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_TIMER, WM_TOUCH, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WM_XBUTTONDOWN, WM_XBUTTONUP,
     WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_BOTTOMRIGHT, WMSZ_LEFT, WMSZ_RIGHT, WMSZ_TOP, WMSZ_TOPLEFT,
-    WMSZ_TOPRIGHT, WM_CAPTURECHANGED, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
-    WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-    WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MENUCHAR, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCCALCSIZE,
-    WM_NCCREATE, WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_PAINT, WM_POINTERDOWN, WM_POINTERUP,
-    WM_POINTERUPDATE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE,
-    WM_SIZE, WM_SIZING, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TOUCH, WM_WINDOWPOSCHANGED,
-    WM_WINDOWPOSCHANGING, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_OVERLAPPED, WS_POPUP, WS_VISIBLE,
+    WMSZ_TOPRIGHT, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_OVERLAPPED, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::dpi::{PhysicalPosition, PhysicalSize};
@@ -85,15 +86,16 @@ use crate::platform_impl::platform::window_state::{
     CursorFlags, ImeState, WindowFlags, WindowState,
 };
 use crate::platform_impl::platform::{
-    raw_input, util, wrap_device_id, Fullscreen, WindowId, DEVICE_ID,
+    DEVICE_ID, Fullscreen, WindowId, raw_input, util, wrap_device_id,
 };
 use crate::window::{
     CustomCursor as RootCustomCursor, CustomCursorSource, Theme, WindowId as RootWindowId,
 };
 use runner::{EventLoopRunner, EventLoopRunnerShared};
 
-use super::window::set_skip_taskbar;
 use super::SelectedCursor;
+use super::direct_manipulation::{DirectManipulation, UPDATE_TIMER_ID};
+use super::window::set_skip_taskbar;
 
 /// some backends like macos uses an uninhabited `Never` type,
 /// on windows, `UserEvent`s are also dispatched through the
@@ -121,6 +123,7 @@ pub(crate) struct WindowData {
     pub event_loop_runner: EventLoopRunnerShared<UserEventPlaceholder>,
     pub key_event_builder: KeyEventBuilder,
     pub _file_drop_handler: Option<FileDropHandler>,
+    pub(super) direct_manipulation: RefCell<Option<Rc<DirectManipulation>>>,
     pub userdata_removed: Cell<bool>,
     pub recurse_depth: Cell<u32>,
 }
@@ -132,6 +135,34 @@ impl WindowData {
 
     fn window_state_lock(&self) -> MutexGuard<'_, WindowState> {
         self.window_state.lock().unwrap()
+    }
+
+    fn touchpad(&self) -> Option<Rc<DirectManipulation>> {
+        self.direct_manipulation.borrow().clone()
+    }
+
+    fn send_touchpad_events(&self, window: HWND, touchpad: &DirectManipulation) {
+        let events = touchpad.take_events();
+        if events.is_empty() {
+            return;
+        }
+        update_modifiers(window, self);
+        for event in events {
+            if self.userdata_removed.get() {
+                break;
+            }
+            self.send_event(Event::WindowEvent {
+                window_id: RootWindowId(WindowId(window)),
+                event,
+            });
+        }
+    }
+
+    fn cancel_touchpad(&self, window: HWND) {
+        if let Some(touchpad) = self.touchpad() {
+            touchpad.cancel();
+            self.send_touchpad_events(window, &touchpad);
+        }
     }
 }
 
@@ -290,11 +321,7 @@ impl<T: 'static> EventLoop<T> {
         // to meet the safety requirements for calling `runner.set_event_handler()` above.
         runner.reset_runner();
 
-        if exit_code == 0 {
-            Ok(())
-        } else {
-            Err(EventLoopError::ExitFailure(exit_code))
-        }
+        if exit_code == 0 { Ok(()) } else { Err(EventLoopError::ExitFailure(exit_code)) }
     }
 
     pub fn pump_events<F>(&mut self, timeout: Option<Duration>, mut event_handler: F) -> PumpStatus
@@ -607,11 +634,7 @@ fn dur2timeout(dur: Duration) -> u32 {
         .and_then(|ms| ms.checked_add((dur.subsec_nanos() as u64) / 1_000_000))
         .and_then(
             |ms| {
-                if dur.subsec_nanos() % 1_000_000 > 0 {
-                    ms.checked_add(1)
-                } else {
-                    Some(ms)
-                }
+                if dur.subsec_nanos() % 1_000_000 > 0 { ms.checked_add(1) } else { Some(ms) }
             },
         )
         .map(|ms| if ms > u32::MAX as u64 { INFINITE } else { ms as u32 })
@@ -646,11 +669,7 @@ fn create_high_resolution_timer() -> Option<OwnedHandle> {
         // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION is supported only after
         // Win10 1803 but it is already default option for rustc
         // (std uses it to implement `std::thread::sleep`).
-        if handle.is_null() {
-            None
-        } else {
-            Some(OwnedHandle::from_raw_handle(handle))
-        }
+        if handle.is_null() { None } else { Some(OwnedHandle::from_raw_handle(handle)) }
     }
 }
 
@@ -672,11 +691,7 @@ unsafe fn set_high_resolution_timer(timer: RawHandle, timeout: Duration) -> Resu
     let due_time: i64 = -(intervals_to_wait as i64);
     unsafe {
         let set_result = SetWaitableTimer(timer as HANDLE, &due_time, 0, None, ptr::null(), FALSE);
-        if set_result != FALSE {
-            Ok(())
-        } else {
-            Err(GetLastError())
-        }
+        if set_result != FALSE { Ok(()) } else { Err(GetLastError()) }
     }
 }
 
@@ -1038,6 +1053,7 @@ unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
 unsafe fn lose_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::{Focused, ModifiersChanged};
 
+    userdata.cancel_touchpad(window);
     userdata.window_state_lock().modifiers_state = ModifiersState::empty();
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
@@ -1082,14 +1098,6 @@ pub(super) unsafe extern "system" fn public_window_callback(
         // Getting here should quite frankly be impossible,
         // but we'll make window creation fail here just in case.
         (0, WM_CREATE) => return -1,
-        (_, WM_CREATE) => unsafe {
-            let createstruct = &mut *(lparam as *mut CREATESTRUCTW);
-            let initdata = createstruct.lpCreateParams;
-            let initdata = &mut *(initdata as *mut InitData<'_>);
-
-            initdata.on_create();
-            return DefWindowProcW(window, msg, wparam, lparam);
-        },
         (0, _) => return unsafe { DefWindowProcW(window, msg, wparam, lparam) },
         _ => userdata as *mut WindowData,
     };
@@ -1127,6 +1135,9 @@ unsafe fn public_window_callback_inner(
     // Send new modifiers before sending key events.
     let mods_changed_callback = || match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
+            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+                userdata.cancel_touchpad(window);
+            }
             update_modifiers(window, userdata);
             result = ProcResult::Value(0);
         },
@@ -1161,6 +1172,40 @@ unsafe fn public_window_callback_inner(
     // the closure to catch_unwind directly so that the match body indentation wouldn't change and
     // the git blame and history would be preserved.
     let callback = || match msg {
+        WM_CREATE => {
+            let createstruct = unsafe { &mut *(lparam as *mut CREATESTRUCTW) };
+            let initdata = unsafe { &mut *(createstruct.lpCreateParams as *mut InitData<'_>) };
+            unsafe { initdata.on_create() };
+            // COM can dispatch nested window messages. Keep the userdata under
+            // the same recursion protection as every other window message.
+            if !userdata.userdata_removed.get() {
+                match DirectManipulation::new(window) {
+                    Ok(touchpad) if !userdata.userdata_removed.get() => {
+                        *userdata.direct_manipulation.borrow_mut() = Some(Rc::new(touchpad));
+                    },
+                    Ok(touchpad) => touchpad.close(),
+                    Err(error) => tracing::debug!("Precision touchpad input unavailable: {error}"),
+                }
+            }
+        },
+
+        DM_POINTERHITTEST => {
+            if let Some(touchpad) = userdata.touchpad() {
+                if touchpad.set_contact(super::loword(wparam as u32) as u32) {
+                    result = ProcResult::Value(0);
+                }
+                userdata.send_touchpad_events(window, &touchpad);
+            }
+        },
+
+        WM_TIMER if wparam == UPDATE_TIMER_ID => {
+            if let Some(touchpad) = userdata.touchpad() {
+                touchpad.update();
+                userdata.send_touchpad_events(window, &touchpad);
+            }
+            result = ProcResult::Value(0);
+        },
+
         WM_NCCALCSIZE => {
             let window_flags = userdata.window_state_lock().window_flags;
             if wparam == 0 || window_flags.contains(WindowFlags::MARKER_DECORATIONS) {
@@ -1219,6 +1264,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_NCLBUTTONDOWN => {
+            userdata.cancel_touchpad(window);
             if wparam == HTCAPTION as _ {
                 // Prevent the user event loop from pausing when left clicking the title bar.
                 //
@@ -1261,6 +1307,11 @@ unsafe fn public_window_callback_inner(
 
         WM_DESTROY => {
             use crate::event::WindowEvent::Destroyed;
+            let touchpad = userdata.direct_manipulation.borrow_mut().take();
+            if let Some(touchpad) = touchpad {
+                touchpad.close();
+                userdata.send_touchpad_events(window, &touchpad);
+            }
             unsafe { RevokeDragDrop(window) };
             userdata.send_event(Event::WindowEvent {
                 window_id: RootWindowId(WindowId(window)),
@@ -1402,6 +1453,10 @@ unsafe fn public_window_callback_inner(
             let h = super::hiword(lparam as u32) as u32;
 
             let physical_size = PhysicalSize::new(w, h);
+            if let Some(touchpad) = userdata.touchpad() {
+                touchpad.resize(physical_size);
+                userdata.send_touchpad_events(window, &touchpad);
+            }
             let event = Event::WindowEvent {
                 window_id: RootWindowId(WindowId(window)),
                 event: Resized(physical_size),
@@ -1739,7 +1794,7 @@ unsafe fn public_window_callback_inner(
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
                     delta: LineDelta(0.0, value),
-                    phase: TouchPhase::Moved,
+                    phase: TouchPhase::Moved.into(),
                 },
             });
 
@@ -1759,7 +1814,7 @@ unsafe fn public_window_callback_inner(
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
                     delta: LineDelta(value, 0.0),
-                    phase: TouchPhase::Moved,
+                    phase: TouchPhase::Moved.into(),
                 },
             });
 
@@ -1781,6 +1836,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_LBUTTONDOWN => {
+            userdata.cancel_touchpad(window);
             use crate::event::ElementState::Pressed;
             use crate::event::MouseButton::Left;
             use crate::event::WindowEvent::MouseInput;
@@ -1813,6 +1869,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_RBUTTONDOWN => {
+            userdata.cancel_touchpad(window);
             use crate::event::ElementState::Pressed;
             use crate::event::MouseButton::Right;
             use crate::event::WindowEvent::MouseInput;
@@ -1845,6 +1902,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_MBUTTONDOWN => {
+            userdata.cancel_touchpad(window);
             use crate::event::ElementState::Pressed;
             use crate::event::MouseButton::Middle;
             use crate::event::WindowEvent::MouseInput;
@@ -1877,6 +1935,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_XBUTTONDOWN => {
+            userdata.cancel_touchpad(window);
             use crate::event::ElementState::Pressed;
             use crate::event::MouseButton::{Back, Forward, Other};
             use crate::event::WindowEvent::MouseInput;
@@ -2153,6 +2212,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_KILLFOCUS => {
+            userdata.cancel_touchpad(window);
             let active_focus_changed = userdata.window_state_lock().set_focused(false);
             if active_focus_changed {
                 unsafe { lose_active_focus(window, userdata) };
@@ -2167,11 +2227,7 @@ unsafe fn public_window_callback_inner(
                 // provided through the low-order word of lParam. We use that here since
                 // `WM_MOUSEMOVE` seems to come after `WM_SETCURSOR` for a given cursor movement.
                 let in_client_area = super::loword(lparam as u32) as u32 == HTCLIENT;
-                if in_client_area {
-                    Some(window_state.mouse.selected_cursor.clone())
-                } else {
-                    None
-                }
+                if in_client_area { Some(window_state.mouse.selected_cursor.clone()) } else { None }
             };
 
             match set_cursor_to {
@@ -2216,6 +2272,7 @@ unsafe fn public_window_callback_inner(
         // Only sent on Windows 8.1 or newer. On Windows 7 and older user has to log out to change
         // DPI, therefore all applications are closed while DPI is changing.
         WM_DPICHANGED => {
+            userdata.cancel_touchpad(window);
             use crate::event::WindowEvent::ScaleFactorChanged;
 
             // This message actually provides two DPI values - x and y. However MSDN says that

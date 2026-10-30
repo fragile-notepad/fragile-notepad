@@ -1241,7 +1241,7 @@ impl<Message> Update<Message> {
                     }
                     _ => None,
                 },
-                mouse::Event::WheelScrolled { delta } if cursor.is_over(bounds) => {
+                mouse::Event::WheelScrolled { delta, .. } if cursor.is_over(bounds) => {
                     Some(Update::Scroll(match delta {
                         mouse::ScrollDelta::Lines { y, .. } => {
                             if y.abs() > 0.0 {

@@ -9,6 +9,9 @@ mod ios;
 mod linux;
 #[cfg(macos_platform)]
 mod macos;
+#[cfg(all(test, not(macos_platform)))]
+#[path = "macos/scroll.rs"]
+mod macos_scroll_tests;
 #[cfg(orbital_platform)]
 mod orbital;
 #[cfg(web_platform)]

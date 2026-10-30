@@ -31,6 +31,7 @@ pub mod conversion;
 
 mod error;
 mod proxy;
+mod scroll_event;
 mod tab_drag;
 mod trace;
 mod window;
@@ -1875,7 +1876,7 @@ async fn run_instance<P>(
                                 window.state.scale_factor(),
                                 window.state.modifiers(),
                             ) {
-                                events.push((id, event));
+                                scroll_event::push_event(&mut events, id, event);
                             }
                         }
                     }

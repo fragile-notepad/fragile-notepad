@@ -5,9 +5,11 @@ mod button;
 mod cursor;
 mod event;
 mod interaction;
+mod wheel;
 
 pub use button::Button;
 pub use click::Click;
 pub use cursor::Cursor;
-pub use event::{Event, ScrollDelta};
+pub use event::{Event, ScrollDelta, ScrollPhase};
 pub use interaction::Interaction;
+pub use wheel::WheelScrollInput;

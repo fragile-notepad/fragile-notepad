@@ -141,6 +141,17 @@ impl App {
             }
             return Task::none();
         }
+        if let Event::Mouse(mouse::Event::Pinched { delta, phase }) = event {
+            return if phase != mouse::ScrollPhase::Cancelled
+                && delta.is_finite()
+                && delta != 0.0
+                && delta > -1.0
+            {
+                self.zoom_by_factor(1.0 + delta)
+            } else {
+                Task::none()
+            };
+        }
         let advanced_search = self
             .advanced_search_window
             .is_some_and(|search_window| search_window.is(window_id));
@@ -282,7 +293,7 @@ impl App {
         modifiers: keyboard::Modifiers,
     ) -> Option<ShortcutCommand> {
         match event {
-            Event::Mouse(mouse::Event::WheelScrolled { delta })
+            Event::Mouse(mouse::Event::WheelScrolled { delta, .. })
                 if command_or_control(modifiers) =>
             {
                 shortcut_for_scroll(*delta)
@@ -369,6 +380,7 @@ fn should_forward_runtime_event(event: &Event, status: Status) -> bool {
         }
         Event::Keyboard(keyboard::Event::ModifiersChanged(_))
         | Event::Mouse(mouse::Event::WheelScrolled { .. })
+        | Event::Mouse(mouse::Event::Pinched { .. })
         | Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
         | Event::Window(
             window::Event::Focused
@@ -544,8 +556,75 @@ mod tests {
     }
 
     #[test]
+    fn native_pinch_uses_zoom_limits_debounces_saves_and_respects_modal_input() {
+        use crate::app::App;
+        use crate::core::EditorSettings;
+        use iced::event::Status;
+
+        let (mut app, _) = App::new();
+        let _ = app.update(Message::SettingsLoaded(Ok(None)));
+        let native = app.main_window_id.unwrap();
+        let pinch = |delta, phase| Event::Mouse(mouse::Event::Pinched { delta, phase });
+        assert_eq!(
+            app.update_runtime_event(
+                pinch(0.25, mouse::ScrollPhase::Started),
+                Status::Captured,
+                native
+            )
+            .units(),
+            1
+        );
+        assert_eq!(app.settings.zoom, 1.25);
+        assert!(app.settings_persistence.flush_scheduled());
+        assert_eq!(
+            app.update_runtime_event(
+                pinch(0.2, mouse::ScrollPhase::Moved),
+                Status::Captured,
+                native
+            )
+            .units(),
+            0
+        );
+        assert_eq!(app.settings.zoom, 1.5);
+
+        let _ = app.update_runtime_event(
+            pinch(10.0, mouse::ScrollPhase::Moved),
+            Status::Ignored,
+            native,
+        );
+        assert_eq!(app.settings.zoom, EditorSettings::MAX_ZOOM);
+        let _ = app.update_runtime_event(
+            pinch(-0.9, mouse::ScrollPhase::Moved),
+            Status::Ignored,
+            native,
+        );
+        assert_eq!(app.settings.zoom, EditorSettings::MIN_ZOOM);
+        for (delta, phase) in [
+            (0.0, mouse::ScrollPhase::Ended),
+            (0.25, mouse::ScrollPhase::Cancelled),
+            (f32::NAN, mouse::ScrollPhase::Moved),
+            (f32::INFINITY, mouse::ScrollPhase::Moved),
+            (-1.0, mouse::ScrollPhase::Moved),
+            (-2.0, mouse::ScrollPhase::Moved),
+        ] {
+            let task = app.update_runtime_event(pinch(delta, phase), Status::Ignored, native);
+            assert_eq!(task.units(), 0);
+            assert_eq!(app.settings.zoom, EditorSettings::MIN_ZOOM);
+        }
+        app.is_tab_list_visible = true;
+        let task = app.update_runtime_event(
+            pinch(1.0, mouse::ScrollPhase::Moved),
+            Status::Ignored,
+            native,
+        );
+        assert_eq!(task.units(), 0);
+        assert_eq!(app.settings.zoom, EditorSettings::MIN_ZOOM);
+    }
+
+    #[test]
     fn captured_wheel_and_modifier_events_are_forwarded_to_shortcut_processor() {
         let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
         });
         let modifiers =
@@ -639,7 +718,12 @@ mod tests {
             Event::Window(window::Event::FileDropped(PathBuf::from("dropped.txt"))),
             Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::CTRL)),
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -16.0 },
+            }),
+            Event::Mouse(mouse::Event::Pinched {
+                delta: 0.25,
+                phase: mouse::ScrollPhase::Moved,
             }),
             // A captured release must still clear the application's tab drag.
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
@@ -678,6 +762,7 @@ mod tests {
 
         let id = window::Id::unique();
         let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         });
         let release = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));

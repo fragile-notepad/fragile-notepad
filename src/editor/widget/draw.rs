@@ -20,7 +20,9 @@ use super::line_cache::{
 };
 use super::markers::draw_row_markers;
 use super::rich_text::{can_batch_fast_text, draw_row_text};
-use super::scrollbar::vertical_scrollbar_geometry;
+use super::scrollbar::{
+    ScrollbarStatus, horizontal_scrollbar_geometry, vertical_scrollbar_geometry,
+};
 use super::style::EditorStyle;
 
 const LONG_LINE_VISIBLE_MARGIN_COLUMNS: usize = 8;
@@ -558,48 +560,115 @@ pub(super) fn draw_vertical_scrollbar<Renderer>(
     total_visible_rows: usize,
     bounds: Rectangle,
     style: EditorStyle,
+    status: ScrollbarStatus,
 ) where
     Renderer: iced::advanced::Renderer,
 {
     let Some(scrollbar) = vertical_scrollbar_geometry(layout, total_visible_rows) else {
         return;
     };
+    draw_scrollbar(
+        renderer,
+        scrollbar.track,
+        scrollbar.thumb,
+        bounds,
+        style,
+        status,
+        true,
+    );
+}
+
+pub(super) fn draw_horizontal_scrollbar<Renderer>(
+    renderer: &mut Renderer,
+    layout: EditorLayout,
+    max_offset: f32,
+    text_origin_x: f32,
+    bounds: Rectangle,
+    style: EditorStyle,
+    status: ScrollbarStatus,
+) where
+    Renderer: iced::advanced::Renderer,
+{
+    let Some(scrollbar) = horizontal_scrollbar_geometry(layout, max_offset, text_origin_x) else {
+        return;
+    };
+    draw_scrollbar(
+        renderer,
+        scrollbar.track,
+        scrollbar.thumb,
+        bounds,
+        style,
+        status,
+        false,
+    );
+}
+
+fn draw_scrollbar<Renderer>(
+    renderer: &mut Renderer,
+    track: Rectangle,
+    thumb: Rectangle,
+    bounds: Rectangle,
+    style: EditorStyle,
+    status: ScrollbarStatus,
+    vertical: bool,
+) where
+    Renderer: iced::advanced::Renderer,
+{
+    let (thickness, thumb_alpha, track_alpha) = match status {
+        ScrollbarStatus::Idle => (4.0_f32, 0.24, 0.0),
+        ScrollbarStatus::Hovered => (6.0_f32, 0.5, 0.04),
+        ScrollbarStatus::Dragged => (8.0_f32, 0.7, 0.06),
+    };
+    // Paint a slim thumb inside the existing area used for pointer input.
+    let thumb = if vertical {
+        let width = thickness.min(track.width);
+        Rectangle {
+            x: track.x + (track.width - width) / 2.0,
+            width,
+            ..thumb
+        }
+    } else {
+        let height = thickness.min(track.height);
+        Rectangle {
+            y: track.y + (track.height - height) / 2.0,
+            height,
+            ..thumb
+        }
+    };
     let track = Rectangle {
-        x: bounds.x + scrollbar.track.x,
-        y: bounds.y + scrollbar.track.y,
-        width: scrollbar.track.width,
-        height: scrollbar.track.height,
+        x: bounds.x + track.x,
+        y: bounds.y + track.y,
+        ..track
     };
     let thumb = Rectangle {
-        x: bounds.x + scrollbar.thumb.x,
-        y: bounds.y + scrollbar.thumb.y,
-        width: scrollbar.thumb.width,
-        height: scrollbar.thumb.height,
+        x: bounds.x + thumb.x,
+        y: bounds.y + thumb.y,
+        ..thumb
     };
 
-    renderer.fill_quad(
-        renderer::Quad {
-            bounds: track,
-            border: iced::Border {
-                color: style.line_numbers.scale_alpha(0.14),
-                width: 1.0,
-                radius: 3.0.into(),
+    if track_alpha > 0.0 {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: track,
+                border: iced::Border {
+                    radius: (track.width.min(track.height) / 2.0).into(),
+                    ..iced::Border::default()
+                },
+                ..renderer::Quad::default()
             },
-            ..renderer::Quad::default()
-        },
-        Background::Color(style.gutter.scale_alpha(0.78)),
-    );
+            Background::Color(style.line_numbers.scale_alpha(track_alpha)),
+        );
+    }
     renderer.fill_quad(
         renderer::Quad {
             bounds: thumb,
             border: iced::Border {
-                color: style.line_numbers.scale_alpha(0.28),
-                width: 1.0,
-                radius: 3.0.into(),
+                radius: (thumb.width.min(thumb.height) / 2.0).into(),
+                ..iced::Border::default()
             },
             ..renderer::Quad::default()
         },
-        Background::Color(style.line_numbers.scale_alpha(0.42)),
+        Background::Color(style.line_numbers.scale_alpha(thumb_alpha)),
     );
 }
 

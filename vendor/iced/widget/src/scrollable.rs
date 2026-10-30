@@ -39,6 +39,7 @@ use crate::core::{
     Rectangle, Shadow, Shell, Size, Theme, Vector, Widget,
 };
 
+pub use crate::core::mouse::WheelScrollInput;
 pub use operation::scrollable::{AbsoluteOffset, RelativeOffset};
 
 #[cfg(test)]
@@ -572,6 +573,19 @@ where
         const AUTOSCROLL_SMOOTHNESS: f32 = 1.5;
 
         let state = tree.state.downcast_mut::<State>();
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::ContactEnded
+                    | mouse::ScrollPhase::Ended
+                    | mouse::ScrollPhase::Cancelled,
+                ..
+            }) | Event::Window(window::Event::Unfocused)
+        ) {
+            // Gesture endings must reach the retained input state even when
+            // the pointer has left this scrollable or a child captures input.
+            state.wheel_input = WheelScrollInput::default();
+        }
         let bounds = layout.bounds();
         let cursor_over_scrollable = cursor.position_over(bounds);
 
@@ -816,13 +830,17 @@ where
             }
 
             match event {
-                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                    if cursor_over_scrollable.is_none() {
+                Event::Mouse(mouse::Event::WheelScrolled { delta, phase }) => {
+                    if *phase == mouse::ScrollPhase::Cancelled || cursor_over_scrollable.is_none() {
                         return;
                     }
 
                     let animate = self.smooth_scroll
-                        && state.wheel_input.should_animate(*delta, Instant::now());
+                        && state.wheel_input.should_animate_with_phase(
+                            *delta,
+                            *phase,
+                            Instant::now(),
+                        );
                     let delta = match *delta {
                         mouse::ScrollDelta::Lines { x, y } => {
                             let is_shift_pressed = state.keyboard_modifiers.shift();
@@ -1558,45 +1576,6 @@ struct State {
     smooth_motion: Option<SmoothMotion>,
     wheel_input: WheelScrollInput,
     last_id: Option<widget::Id>,
-}
-
-/// Distinguishes whole wheel steps from precise scrolling by their input
-/// pattern. Delta units alone do not identify a device: Windows touchpads also
-/// produce line deltas. Fractional and pixel input stay direct, including later
-/// whole-line packets within that gesture. Event timing does not establish
-/// precision: fast wheel notches and batched events must remain animated.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub struct WheelScrollInput {
-    last_event: Option<Instant>,
-    continuous: bool,
-}
-
-impl WheelScrollInput {
-    /// Records an input packet and reports whether it should receive wheel
-    /// easing. A pause of 250 ms starts a new gesture; fractional line deltas
-    /// and pixel deltas select direct scrolling
-    /// for the remainder of the gesture.
-    pub fn should_animate(&mut self, delta: mouse::ScrollDelta, now: Instant) -> bool {
-        let gap = self
-            .last_event
-            .map(|last| now.saturating_duration_since(last));
-        if gap.is_none_or(|gap| gap >= Duration::from_millis(250)) {
-            self.continuous = false;
-        }
-        let whole_steps = match delta {
-            mouse::ScrollDelta::Lines { x, y } => {
-                x.is_finite()
-                    && y.is_finite()
-                    && x.fract() == 0.0
-                    && y.fract() == 0.0
-                    && (x != 0.0 || y != 0.0)
-            }
-            mouse::ScrollDelta::Pixels { .. } => false,
-        };
-        self.continuous |= !whole_steps;
-        self.last_event = Some(now);
-        !self.continuous
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

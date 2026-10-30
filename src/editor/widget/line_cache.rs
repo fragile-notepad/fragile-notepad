@@ -11,7 +11,11 @@ use crate::editor::layout::{
     scrolled_text_origin_x, visual_column_for_with_offset,
 };
 use crate::editor::position::EditorPosition;
-use crate::editor::render::{RowRenderPlan, SelectionRenderPlan};
+use crate::editor::render::{
+    RowRenderPlan, SelectionRenderPlan, collapsed_delimiter_indicator_bounds,
+    collapsed_fold_indicator_reservation, end_of_line_marker_reservation,
+    fold_delimiter_for_fragment,
+};
 use crate::editor::viewport::ViewportModel;
 
 #[cfg(test)]
@@ -420,6 +424,95 @@ where
         ),
         row_y(visible_row, layout),
     )
+}
+
+/// Finds the right edge of the displayed rows, including inline markers and
+/// room for a caret. Moving vertically to shorter rows preserves the current
+/// horizontal offset while preventing further movement into empty space.
+pub(super) fn horizontal_scroll_limit<Renderer>(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    layout: EditorLayout,
+    renderer: &Renderer,
+    context: Option<&CjkContext>,
+    cache: &mut LineGeometryCache<Renderer::Paragraph>,
+) -> f32
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    if viewport.wrap_columns().is_some() {
+        return 0.0;
+    }
+
+    let row_count = layout.visible_row_capacity();
+    cache.ensure_capacity(row_count);
+    let metrics = layout.metrics;
+    let tab_width = decorations.settings.indent_width;
+    let caret_space = metrics.character_width.max(1.0);
+    let eol_width = if decorations.settings.show_end_of_line_markers {
+        end_of_line_marker_reservation(metrics.character_width)
+    } else {
+        0.0
+    };
+    let text_width = (layout.width - metrics.text_origin_x(decorations) - 14.0).max(1.0);
+    let last_row = layout
+        .scroll
+        .first_visible_row
+        .saturating_add(row_count)
+        .min(viewport.visible_row_count());
+    let mut longest: f32 = 0.0;
+    for row in layout.scroll.first_visible_row..last_row {
+        let Some(line) = viewport.visible_row_to_document_line(row) else {
+            break;
+        };
+        let text = viewport.display_text(line, buffer);
+        let projected = viewport.projection(line).is_some();
+        let fold = decorations
+            .line_decorations
+            .get(line)
+            .filter(|decoration| decoration.is_fold_collapsed && !projected);
+        let delimiter = fold
+            .and_then(|decoration| decoration.fold_delimiter)
+            .and_then(|delimiter| fold_delimiter_for_fragment(delimiter, 0, &text));
+        let slot = cache.ensure(
+            row,
+            0,
+            &text,
+            metrics,
+            renderer,
+            context.and_then(|context| context.language_for_line(line)),
+            tab_width,
+            &editor_font_runs_for_display_fragment(&text, context, line, 0, viewport),
+            projected || delimiter.is_some(),
+        );
+        let geometry = cache
+            .geometry(slot)
+            .expect("cached horizontal row geometry");
+        let mut right = if let Some(delimiter) = delimiter {
+            let anchor = geometry.x_for_byte_column(delimiter.opening_column, tab_width);
+            let indicator = collapsed_delimiter_indicator_bounds(metrics, 0.0, anchor);
+            indicator.x
+                + indicator.width
+                + if eol_width > 0.0 {
+                    metrics.character_width * 0.25
+                } else {
+                    0.0
+                }
+        } else {
+            geometry.x_for_byte_column(text.len(), tab_width)
+        };
+        if fold.is_some() && delimiter.is_none() {
+            // The same space fits ellipses and condition placeholders without
+            // inspecting text inside a collapsed block.
+            right += collapsed_fold_indicator_reservation(metrics.character_width);
+        }
+        longest = longest.max(right + eol_width + caret_space);
+    }
+
+    (longest - text_width)
+        .max(0.0)
+        .max(layout.scroll.horizontal_px)
 }
 
 pub(super) fn fold_needs_measured_geometry(
@@ -944,6 +1037,177 @@ mod tests {
     use crate::editor::decoration::DecorationSettings;
     use crate::editor::fold::FoldModel;
     use crate::editor::layout::ScrollOffset;
+
+    #[test]
+    fn horizontal_limit_uses_visible_rows_and_reuses_their_geometry() {
+        let _font_guard = crate::font_system_test_guard();
+        let buffer =
+            EditorBuffer::from_text(format!("short\n{}\n{}", "x".repeat(40), "x".repeat(5000),));
+        let folds = FoldModel::default();
+        let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);
+        let decorations = DecorationModel::new(DecorationSettings::default());
+        let metrics = EditorMetrics::default();
+        let mut layout = EditorLayout::new(
+            metrics,
+            ScrollOffset::ZERO,
+            metrics.text_origin_x(&decorations) + 14.0 + 80.0,
+            metrics.padding_top + metrics.line_height,
+        );
+        let mut cache = LineGeometryCache::<()>::default();
+        for (rows, expected) in [(1, 0.0), (2, 248.0), (2, 248.0)] {
+            layout.height = metrics.padding_top + rows as f32 * metrics.line_height;
+            assert_eq!(
+                horizontal_scroll_limit(
+                    &buffer,
+                    &viewport,
+                    &decorations,
+                    layout,
+                    &(),
+                    None,
+                    &mut cache,
+                ),
+                expected,
+            );
+        }
+        assert_eq!(cache.build_count(), 2);
+        layout.height = metrics.padding_top + metrics.line_height;
+        layout.scroll.horizontal_px = 300.0;
+        assert_eq!(
+            horizontal_scroll_limit(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                &(),
+                None,
+                &mut cache,
+            ),
+            300.0,
+        );
+        let wrapped = ViewportModel::new_wrapped(&buffer, &folds, 10, 4);
+        assert_eq!(
+            horizontal_scroll_limit(
+                &buffer,
+                &wrapped,
+                &decorations,
+                layout,
+                &(),
+                None,
+                &mut cache,
+            ),
+            0.0,
+        );
+        assert_eq!(cache.build_count(), 2);
+    }
+
+    #[test]
+    fn horizontal_limit_includes_unicode_tabs_and_end_markers() {
+        let _font_guard = crate::font_system_test_guard();
+        let buffer = EditorBuffer::from_text("\t漢字é");
+        let viewport = ViewportModel::new_with_buffer(&buffer, &FoldModel::default(), 4);
+        let mut decorations = DecorationModel::new(DecorationSettings::default());
+        let metrics = EditorMetrics::default();
+        let layout = EditorLayout::new(
+            metrics,
+            ScrollOffset::ZERO,
+            metrics.text_origin_x(&decorations) + 14.0 + 40.0,
+            metrics.padding_top + metrics.line_height,
+        );
+        let mut cache = LineGeometryCache::<()>::default();
+        for (tab_width, markers, expected) in [(4, false, 40.0), (4, true, 48.0), (8, true, 80.0)] {
+            decorations.settings.indent_width = tab_width;
+            decorations.settings.show_end_of_line_markers = markers;
+            assert_eq!(
+                horizontal_scroll_limit(
+                    &buffer,
+                    &viewport,
+                    &decorations,
+                    layout,
+                    &(),
+                    None,
+                    &mut cache,
+                ),
+                expected,
+            );
+        }
+        assert_eq!(cache.build_count(), 2);
+        assert!(matches!(
+            cache.geometry(cache.slot_for_row(0)),
+            Some(LineGeometry::Measured { .. }),
+        ));
+    }
+
+    #[test]
+    fn horizontal_limit_includes_fold_placeholders_and_projected_suffixes() {
+        let _font_guard = crate::font_system_test_guard();
+        let range = crate::editor::FoldRange::new(0, 2);
+        for projected in [false, true] {
+            let source = if projected {
+                format!(
+                    "prefix {{\n    {}\n}} suffix suffix suffix",
+                    "x".repeat(5000)
+                )
+            } else {
+                format!("header\n    {}\nend", "x".repeat(5000))
+            };
+            let buffer = EditorBuffer::from_text(source);
+            let mut folds = if projected {
+                crate::editor::IndentBraceFoldProvider::for_syntax(4, "rs")
+                    .compute_fold_model(&buffer)
+            } else {
+                FoldModel::new(vec![range])
+            };
+            folds.set_collapsed(range, true);
+            let viewport = ViewportModel::new_with_buffer(&buffer, &folds, 4);
+            assert_eq!(viewport.projection(0).is_some(), projected);
+            let decorations = DecorationModel::from_folds(
+                DecorationSettings::default(),
+                buffer.line_count(),
+                &folds,
+                vec![],
+            );
+            let metrics = EditorMetrics::default();
+            let layout = EditorLayout::new(
+                metrics,
+                ScrollOffset::ZERO,
+                metrics.text_origin_x(&decorations) + 14.0 + 80.0,
+                metrics.padding_top + metrics.line_height,
+            );
+            let limit = horizontal_scroll_limit(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                &(),
+                None,
+                &mut LineGeometryCache::default(),
+            );
+            assert!(limit > 0.0 && limit < 1000.0);
+            if projected {
+                let end = EditorPosition::new(2, buffer.line(2).unwrap().len());
+                let point = measured_position_point_with_context(
+                    &buffer,
+                    &viewport,
+                    &decorations,
+                    layout,
+                    end,
+                    None,
+                    &(),
+                    None,
+                );
+                let end_x = point.x - metrics.text_origin_x(&decorations);
+                assert!((limit - (end_x + metrics.character_width - 80.0)).abs() < 0.001);
+            } else {
+                let indicator = crate::editor::render::collapsed_fold_indicator_bounds(
+                    metrics,
+                    0.0,
+                    6.0 * metrics.character_width,
+                    false,
+                );
+                assert!(limit >= indicator.x + indicator.width + metrics.character_width - 80.0);
+            }
+        }
+    }
 
     #[test]
     fn cached_caret_geometry_survives_scroll_reversal_and_repositions_ime() {

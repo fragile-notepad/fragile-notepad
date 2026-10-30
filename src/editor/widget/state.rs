@@ -1,7 +1,8 @@
-use iced::Point;
 use iced::advanced::input_method;
 use iced::advanced::widget::{self};
+use iced::mouse::WheelScrollInput;
 use iced::time::Instant;
+use iced::{Point, keyboard};
 use std::cell::{Cell, RefCell};
 
 use crate::editor::EditorBuffer;
@@ -28,7 +29,13 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) drag_scroll_at: Option<Instant>,
     pub(super) last_text_click: Option<TextClick>,
     pub(super) scrollbar_grab_offset_y: Option<f32>,
+    /// Thumb grab offset and scroll limit, in pixels, held through the drag.
+    pub(super) scrollbar_grab_offset_x: Option<(f32, f32)>,
+    pub(super) vertical_scrollbar_hovered: bool,
+    pub(super) horizontal_scrollbar_hovered: bool,
+    pub(super) modifiers: keyboard::Modifiers,
     pub(super) partial_scroll_lines: f32,
+    pub(super) wheel_input: WheelScrollInput,
     pub(super) smooth_scroll: Option<ScrollAnimation>,
     pub(super) viewport_geometry: Option<(u64, usize, u32, u32, u32, Option<u32>)>,
     pub preedit: Option<input_method::Preedit>,
@@ -61,7 +68,12 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             drag_scroll_at: None,
             last_text_click: None,
             scrollbar_grab_offset_y: None,
+            scrollbar_grab_offset_x: None,
+            vertical_scrollbar_hovered: false,
+            horizontal_scrollbar_hovered: false,
+            modifiers: keyboard::Modifiers::empty(),
             partial_scroll_lines: 0.0,
+            wheel_input: WheelScrollInput::default(),
             smooth_scroll: None,
             viewport_geometry: None,
             preedit: None,
@@ -109,6 +121,8 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
             | (u64::from(fast_text) << 3)
             | (u64::from(self.fold_controls_hovered.get()) << 4)
             | (u64::from(self.preedit.is_some()) << 5)
+            | (u64::from(self.vertical_scrollbar_hovered) << 6)
+            | (u64::from(self.horizontal_scrollbar_hovered) << 7)
             | (u64::from(fade.opacity(now).to_bits()) << 8);
         let live = fade.animating(now)
             || self
@@ -118,6 +132,7 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
             || self.text_drag.is_some()
             || self.drag_scroll_at.is_some()
             || self.scrollbar_grab_offset_y.is_some()
+            || self.scrollbar_grab_offset_x.is_some()
             || self.preedit.is_some();
         (key, live)
     }
@@ -153,6 +168,7 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
         self.drag_position = None;
         self.drag_scroll_at = None;
         self.scrollbar_grab_offset_y = None;
+        self.scrollbar_grab_offset_x = None;
     }
 
     pub(super) fn is_caret_visible(&self) -> bool {
@@ -177,6 +193,7 @@ impl<Paragraph> widget::operation::Focusable for AdvancedEditorState<Paragraph> 
 
     fn unfocus(&mut self) {
         self.is_focused = false;
+        self.wheel_input = Default::default();
         self.cancel_pointer_drag();
         self.last_text_click = None;
         self.preedit = None;

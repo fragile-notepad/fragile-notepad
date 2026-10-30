@@ -156,10 +156,13 @@ fn unwrapped_ruler_scrolls_with_text_and_clips_outside_text_area() {
     let origin = metrics.text_origin_x(&document.decorations);
     let unscrolled_x = origin + 80.0 * metrics.character_width;
     let size = Size::new(520, 160);
+    // Horizontal scrolling reserves a 14px lane below the text and ruler.
+    let text_height = size.height - 14;
     for desired_x in [400.0, 312.0] {
         document.scroll.horizontal_px = unscrolled_x - desired_x;
         let changes = guide_difference(&mut renderer, &document, &settings, &Theme::Light, size);
-        assert_guide_at(&changes, desired_x, size.height);
+        assert_guide_at(&changes, desired_x, text_height);
+        assert!(changes.iter().all(|&(_, y)| y < text_height as usize));
     }
     for desired_x in [origin - 10.0, 514.0, 530.0] {
         document.scroll.horizontal_px = unscrolled_x - desired_x;

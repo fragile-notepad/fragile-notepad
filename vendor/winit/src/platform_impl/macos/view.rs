@@ -22,12 +22,13 @@ use super::event::{
     code_to_key, code_to_location, create_key_event, event_mods, lalt_pressed, ralt_pressed,
     scancode_to_physicalkey, KeyEventExtra,
 };
+use super::scroll::ScrollGesture;
 use super::window::WinitWindow;
 use super::DEVICE_ID;
-use crate::dpi::{LogicalPosition, LogicalSize};
+use crate::dpi::{LogicalPosition, LogicalSize, PhysicalPosition};
 use crate::event::{
-    DeviceEvent, ElementState, Ime, KeyEvent, Modifiers, MouseButton, MouseScrollDelta, TouchPhase,
-    WindowEvent,
+    DeviceEvent, ElementState, Ime, KeyEvent, Modifiers, MouseButton, MouseScrollDelta,
+    ScrollPhase, TouchPhase, WindowEvent,
 };
 use crate::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey};
 use crate::platform::macos::OptionAsAlt;
@@ -121,6 +122,7 @@ pub struct ViewState {
     tracking_rect: Cell<Option<NSTrackingRectTag>>,
     ime_state: Cell<ImeState>,
     input_source: RefCell<String>,
+    scroll: Cell<ScrollGesture>,
 
     /// True iff the application wants IME events.
     ///
@@ -434,6 +436,7 @@ define_class!(
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             trace_scope!("keyDown:");
+            self.cancel_scroll();
             {
                 let mut prev_input_source = self.ivars().input_source.borrow_mut();
                 let current_input_source = self.current_input_source();
@@ -658,8 +661,8 @@ define_class!(
 
             self.mouse_motion(event);
 
-            let delta = {
-                let (x, y) = (event.scrollingDeltaX(), event.scrollingDeltaY());
+            let (raw_x, raw_y) = (event.scrollingDeltaX(), event.scrollingDeltaY());
+            let to_delta = |x, y| {
                 if event.hasPreciseScrollingDeltas() {
                     let delta = LogicalPosition::new(x, y).to_physical(self.scale_factor());
                     MouseScrollDelta::PixelDelta(delta)
@@ -668,27 +671,22 @@ define_class!(
                 }
             };
 
-            // The "momentum phase," if any, has higher priority than touch phase (the two should
-            // be mutually exclusive anyhow, which is why the API is rather incoherent). If no momentum
-            // phase is recorded (or rather, the started/ended cases of the momentum phase) then we
-            // report the touch phase.
-            #[allow(non_upper_case_globals)]
-            let phase = match event.momentumPhase() {
-                NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
-                NSEventPhase::Ended | NSEventPhase::Cancelled => TouchPhase::Ended,
-                _ => match event.phase() {
-                    NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
-                    NSEventPhase::Ended | NSEventPhase::Cancelled => TouchPhase::Ended,
-                    _ => TouchPhase::Moved,
-                },
-            };
+            let mut scroll = self.ivars().scroll.get();
+            let filtered = scroll.filter_delta(
+                raw_x, raw_y,
+                event_phase(event.phase()), event_phase(event.momentumPhase()),
+            );
+            self.ivars().scroll.set(scroll);
+            let Some((x, y, phase)) = filtered else { return };
 
             self.update_modifiers(event, false);
 
-            self.ivars().app_delegate.maybe_queue_device_event(DeviceEvent::MouseWheel { delta });
+            self.ivars().app_delegate.maybe_queue_device_event(DeviceEvent::MouseWheel {
+                delta: to_delta(raw_x, raw_y),
+            });
             self.queue_event(WindowEvent::MouseWheel {
                 device_id: DEVICE_ID,
-                delta,
+                delta: to_delta(x, y),
                 phase,
             });
         }
@@ -707,6 +705,10 @@ define_class!(
                 NSEventPhase::Ended => TouchPhase::Ended,
                 _ => return,
             };
+
+            if phase == TouchPhase::Started {
+                self.cancel_scroll();
+            }
 
             self.queue_event(WindowEvent::PinchGesture {
                 device_id: DEVICE_ID,
@@ -794,6 +796,7 @@ impl WinitView {
             tracking_rect: Default::default(),
             ime_state: Default::default(),
             input_source: Default::default(),
+            scroll: Default::default(),
             ime_allowed: Default::default(),
             forward_key_to_app: Default::default(),
             marked_text: Default::default(),
@@ -830,6 +833,19 @@ impl WinitView {
 
     fn queue_event(&self, event: WindowEvent) {
         self.ivars().app_delegate.maybe_queue_window_event(self.window().id(), event);
+    }
+
+    pub(super) fn cancel_scroll(&self) {
+        let mut scroll = self.ivars().scroll.get();
+        let active = scroll.cancel();
+        self.ivars().scroll.set(scroll);
+        if active {
+            self.queue_event(WindowEvent::MouseWheel {
+                device_id: DEVICE_ID,
+                delta: MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 0.0)),
+                phase: ScrollPhase::Cancelled,
+            });
+        }
     }
 
     fn scale_factor(&self) -> f64 {
@@ -1026,6 +1042,14 @@ impl WinitView {
 
                 drop(phys_mod_state);
 
+                if events.iter().any(|event| {
+                    matches!(
+                        event,
+                        WindowEvent::KeyboardInput { event, .. } if event.state == Pressed
+                    )
+                }) {
+                    self.cancel_scroll();
+                }
                 for event in events {
                     self.queue_event(event);
                 }
@@ -1040,6 +1064,9 @@ impl WinitView {
     }
 
     fn mouse_click(&self, event: &NSEvent, button_state: ElementState) {
+        if button_state == ElementState::Pressed {
+            self.cancel_scroll();
+        }
         let button = mouse_button(event);
 
         self.update_modifiers(event, false);
@@ -1076,6 +1103,24 @@ impl WinitView {
             device_id: DEVICE_ID,
             position: view_point.to_physical(self.scale_factor()),
         });
+    }
+}
+
+fn event_phase(phase: NSEventPhase) -> Option<TouchPhase> {
+    if phase.contains(NSEventPhase::Cancelled) {
+        Some(TouchPhase::Cancelled)
+    } else if phase.contains(NSEventPhase::Began) {
+        Some(TouchPhase::Started)
+    } else if phase.contains(NSEventPhase::Ended) {
+        Some(TouchPhase::Ended)
+    } else if phase.contains(NSEventPhase::Changed)
+        || phase.contains(NSEventPhase::Stationary)
+        || phase.contains(NSEventPhase::MayBegin)
+    {
+        // MayBegin identifies native touchpad input without starting a new rail.
+        Some(TouchPhase::Moved)
+    } else {
+        None
     }
 }
 

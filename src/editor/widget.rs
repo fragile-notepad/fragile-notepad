@@ -52,7 +52,7 @@ mod style;
 pub use actions::key_action;
 #[cfg(test)]
 use cache::{RichParagraphCache, SyntaxSpanKey};
-use draw::{draw_plan, draw_vertical_scrollbar};
+use draw::{draw_horizontal_scrollbar, draw_plan, draw_vertical_scrollbar};
 pub(crate) use font::editor_character_width;
 pub use font::{
     EDITOR_FONT, EDITOR_FONT_ROUTE, EDITOR_TEXT_SHAPING, EditorFontRoute, EditorFontRun,
@@ -66,6 +66,7 @@ use line_cache::{LineGeometry, LineGeometryCache, measured_caret_x};
 use line_cache::{byte_to_grapheme_table, measured_selection_x_and_width};
 #[cfg(test)]
 use rich_text::{first_visible_syntax_span, visible_rich_text_range, visible_styled_text_range};
+use scrollbar::{HORIZONTAL_SCROLLBAR_HEIGHT, ScrollbarStatus, horizontal_scrollbar_geometry};
 pub use scrollbar::{
     VerticalScrollbarGeometry, scrollbar_row_for_position, vertical_scrollbar_geometry,
 };
@@ -172,7 +173,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
         self
     }
 
-    /// Animates wheel scrolling. Disabled views move immediately by whole rows.
+    /// Animates mouse-wheel steps. Precise touchpad input follows movement directly.
     pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
         self.smooth_scrolling = enabled;
         self
@@ -240,7 +241,17 @@ where
         let state = tree
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
-        let editor_layout = self.display_layout(state, self.editor_layout(bounds), now);
+        let (editor_layout, max_horizontal_px) = self.scroll_layout(state, bounds, renderer, now);
+        let editor_layout = self.display_layout(state, editor_layout, bounds.height, now);
+        let scrollbar_status = |hovered, dragged| {
+            if dragged {
+                ScrollbarStatus::Dragged
+            } else if hovered {
+                ScrollbarStatus::Hovered
+            } else {
+                ScrollbarStatus::Idle
+            }
+        };
         let fold_controls_hovered = self.fold_controls_hovered(bounds, cursor);
         // A first draw can arrive before a pointer event (e.g. a restored view).
         if state.fold_controls_hovered.replace(fold_controls_hovered) != fold_controls_hovered {
@@ -336,10 +347,14 @@ where
             state.rich_paragraphs[usize::from(theme.palette().is_dark)].borrow_mut();
         let mut line_geometries = state.line_geometries.borrow_mut();
         let record_started = trace_enabled.then(StdInstant::now);
-        renderer.with_layer(bounds, |renderer| {
+        let text_bounds = Rectangle {
+            height: editor_layout.height,
+            ..bounds
+        };
+        renderer.with_layer(text_bounds, |renderer| {
             draw_plan(
                 renderer,
-                bounds,
+                text_bounds,
                 editor_layout,
                 self.decorations,
                 &plan,
@@ -364,6 +379,10 @@ where
                 self.viewport.visible_row_count(),
                 bounds,
                 editor_style,
+                scrollbar_status(
+                    state.vertical_scrollbar_hovered,
+                    state.scrollbar_grab_offset_y.is_some(),
+                ),
             );
             if let Some(drag) = &state.text_drag
                 && let Some((target, row)) = drag.target
@@ -401,6 +420,18 @@ where
                 );
             }
         });
+        draw_horizontal_scrollbar(
+            renderer,
+            editor_layout,
+            max_horizontal_px,
+            self.metrics.text_origin_x(self.decorations),
+            bounds,
+            editor_style,
+            scrollbar_status(
+                state.horizontal_scrollbar_hovered,
+                state.scrollbar_grab_offset_x.is_some(),
+            ),
+        );
         let record_us = record_started.map_or(0, |started| started.elapsed().as_micros());
         rich_paragraphs.prune(frame_id);
 
@@ -425,6 +456,24 @@ where
 
     fn state(&self) -> widget::tree::State {
         widget::tree::State::new(AdvancedEditorState::<Renderer::Paragraph>::default())
+    }
+
+    fn diff(&mut self, tree: &mut widget::Tree) {
+        let state = tree
+            .state
+            .downcast_mut::<AdvancedEditorState<Renderer::Paragraph>>();
+        let mut scroll = self.scroll;
+        if self.viewport.wrap_columns().is_some() {
+            scroll.horizontal_px = 0.0;
+        }
+        if state
+            .smooth_scroll
+            .as_mut()
+            .is_some_and(|motion| !motion.observe_document_scroll(scroll))
+        {
+            state.finish_scrolling();
+            state.partial_scroll_lines = 0.0;
+        }
     }
 
     fn operate(
@@ -473,8 +522,32 @@ where
         if state.fold_fade.get().animating(now) {
             shell.request_redraw_at(now + Duration::from_millis(16));
         }
-        let editor_layout = self.editor_layout(bounds);
-        let display_layout = self.display_layout(state, editor_layout, now);
+        let (editor_layout, max_horizontal_px) = self.scroll_layout(state, bounds, renderer, now);
+        let display_layout = self.display_layout(state, editor_layout, bounds.height, now);
+        let pointer = cursor.position_in(bounds).filter(|_| {
+            state.is_window_focused
+                && !matches!(
+                    event,
+                    Event::Window(iced::window::Event::Unfocused)
+                        | Event::Mouse(mouse::Event::CursorLeft)
+                )
+        });
+        let vertical_hovered =
+            vertical_scrollbar_geometry(display_layout, self.viewport.visible_row_count())
+                .is_some_and(|bar| pointer.is_some_and(|point| bar.track.contains(point)));
+        let horizontal_hovered = horizontal_scrollbar_geometry(
+            display_layout,
+            max_horizontal_px,
+            self.metrics.text_origin_x(self.decorations),
+        )
+        .is_some_and(|bar| pointer.is_some_and(|point| bar.track.contains(point)));
+        if state.vertical_scrollbar_hovered != vertical_hovered
+            || state.horizontal_scrollbar_hovered != horizontal_hovered
+        {
+            state.vertical_scrollbar_hovered = vertical_hovered;
+            state.horizontal_scrollbar_hovered = horizontal_hovered;
+            shell.request_redraw();
+        }
         let outcome = if matches!(
             event,
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -482,9 +555,17 @@ where
             self.hit_collapsed_indicator(bounds, cursor, renderer, display_layout)
         {
             let visible_row = display_layout.scroll.first_visible_row;
+            state.wheel_input = Default::default();
+            let horizontal_milli =
+                scroll::horizontal_offset_milli(display_layout.scroll.horizontal_px);
             state.finish_scrolling();
             if visible_row != self.scroll.first_visible_row {
                 shell.publish((self.on_action)(EditorAction::ScrollToRow(visible_row)));
+            }
+            if horizontal_milli != scroll::horizontal_offset_milli(self.scroll.horizontal_px) {
+                shell.publish((self.on_action)(EditorAction::ScrollToHorizontal {
+                    offset_milli: horizontal_milli,
+                }));
             }
             state.is_focused = true;
             state.reset_caret_blink();
@@ -512,6 +593,7 @@ where
                     caret_row: self.caret_row,
                     scroll_speed: self.scroll_speed,
                     smooth_scrolling: self.smooth_scrolling,
+                    max_horizontal_px,
                     viewport_key: self.viewport_key,
                     cjk_context: self.cjk_context.as_deref(),
                     shortcuts: self.shortcuts,
@@ -554,16 +636,41 @@ where
         let state = tree
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
+        if state.scrollbar_grab_offset_x.is_some() || state.scrollbar_grab_offset_y.is_some() {
+            return mouse::Interaction::Grabbing;
+        }
         if state.text_drag.as_ref().is_some_and(|drag| drag.started) {
             return mouse::Interaction::Grabbing;
         }
-        let editor_layout = self.display_layout(state, self.editor_layout(bounds), Instant::now());
+        let now = Instant::now();
+        let (editor_layout, max_horizontal_px) = self.scroll_layout(state, bounds, renderer, now);
+        let editor_layout = self.display_layout(state, editor_layout, bounds.height, now);
         let Some(position) = cursor.position_in(bounds) else {
             return mouse::Interaction::None;
         };
-        let over_scrollbar =
+        let scrollbar_thumb =
             vertical_scrollbar_geometry(editor_layout, self.viewport.visible_row_count())
-                .is_some_and(|scrollbar| scrollbar.track.contains(position));
+                .filter(|scrollbar| scrollbar.track.contains(position))
+                .map(|scrollbar| scrollbar.thumb)
+                .or_else(|| {
+                    horizontal_scrollbar_geometry(
+                        editor_layout,
+                        max_horizontal_px,
+                        self.metrics.text_origin_x(self.decorations),
+                    )
+                    .filter(|scrollbar| scrollbar.track.contains(position))
+                    .map(|scrollbar| scrollbar.thumb)
+                });
+        if let Some(thumb) = scrollbar_thumb {
+            return if thumb.contains(position) {
+                mouse::Interaction::Grab
+            } else {
+                mouse::Interaction::Pointer
+            };
+        }
+        if position.y >= editor_layout.height {
+            return mouse::Interaction::None;
+        }
         let over_fold_control = position.x < self.metrics.text_origin_x(self.decorations)
             && matches!(
                 hit_test(
@@ -577,8 +684,7 @@ where
                 HitTarget::FoldControl { .. }
             );
 
-        if over_scrollbar
-            || over_fold_control
+        if over_fold_control
             || self
                 .hit_collapsed_indicator(bounds, cursor, renderer, editor_layout)
                 .is_some()
@@ -613,12 +719,20 @@ impl<Message> AdvancedEditor<'_, Message> {
         &self,
         state: &AdvancedEditorState<Paragraph>,
         layout: EditorLayout,
+        viewport_height: f32,
         now: Instant,
     ) -> EditorLayout {
         state
             .smooth_scroll
+            .map(|mut scroll| {
+                if !scroll.animating(now) && scroll.viewport_height() == viewport_height {
+                    scroll.set_text_height(layout.height);
+                }
+                scroll
+            })
             .filter(|scroll| {
-                self.smooth_scrolling
+                (self.smooth_scrolling || !scroll.animating(now))
+                    && scroll.viewport_height() == viewport_height
                     && scroll.matches(
                         layout,
                         self.viewport_key,
@@ -627,6 +741,69 @@ impl<Message> AdvancedEditor<'_, Message> {
                     )
             })
             .map_or(layout, |scroll| scroll.display_layout(now))
+    }
+
+    fn scroll_layout<Renderer>(
+        &self,
+        state: &AdvancedEditorState<Renderer::Paragraph>,
+        bounds: Rectangle,
+        renderer: &Renderer,
+        now: Instant,
+    ) -> (EditorLayout, f32)
+    where
+        Renderer: text::Renderer<Font = Font>,
+    {
+        let mut layout = self.editor_layout(bounds);
+        // Keep the text height unchanged while wheel motion is active. A bar
+        // appearing on a later row must not interrupt the vertical animation.
+        if let Some(scroll) = state.smooth_scroll.filter(|scroll| {
+            if !scroll.animating(now) || scroll.viewport_height() != bounds.height {
+                return false;
+            }
+            let mut expected = layout;
+            expected.height = scroll.text_height();
+            scroll.matches(
+                expected,
+                self.viewport_key,
+                self.viewport.visible_row_count(),
+                self.viewport.wrap_columns(),
+            )
+        }) {
+            layout.height = scroll.text_height();
+            let max_horizontal_px = if layout.height < bounds.height {
+                line_cache::horizontal_scroll_limit(
+                    self.buffer,
+                    self.viewport,
+                    self.decorations,
+                    scroll.display_layout(now),
+                    renderer,
+                    self.cjk_context.as_deref(),
+                    &mut state.line_geometries.borrow_mut(),
+                )
+                .max(layout.scroll.horizontal_px)
+            } else {
+                0.0
+            };
+            return (layout, max_horizontal_px);
+        }
+        let max_horizontal_px = line_cache::horizontal_scroll_limit(
+            self.buffer,
+            self.viewport,
+            self.decorations,
+            self.display_layout(state, layout, bounds.height, now),
+            renderer,
+            self.cjk_context.as_deref(),
+            &mut state.line_geometries.borrow_mut(),
+        )
+        .max(
+            state
+                .scrollbar_grab_offset_x
+                .map_or(0.0, |(_, maximum)| maximum),
+        );
+        if max_horizontal_px > 0.0 {
+            layout.height = (layout.height - HORIZONTAL_SCROLLBAR_HEIGHT).max(0.0);
+        }
+        (layout, max_horizontal_px)
     }
 
     fn hit_collapsed_indicator<Renderer>(
@@ -640,6 +817,9 @@ impl<Message> AdvancedEditor<'_, Message> {
         Renderer: text::Renderer<Font = Font>,
     {
         let position = cursor.position_in(bounds)?;
+        if position.y >= editor_layout.height {
+            return None;
+        }
         let text_right =
             vertical_scrollbar_geometry(editor_layout, self.viewport.visible_row_count())
                 .map_or(bounds.width, |scrollbar| scrollbar.track.x);

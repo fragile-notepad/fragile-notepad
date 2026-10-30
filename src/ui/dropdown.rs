@@ -891,6 +891,7 @@ mod tests {
             &node,
             &renderer,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
             }),
             mouse::Cursor::Available(settled.bounds().center()),

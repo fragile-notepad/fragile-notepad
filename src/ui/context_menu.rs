@@ -33,7 +33,7 @@ pub(super) struct State {
     highlighted: Vec<Option<usize>>,
     offsets: Vec<f32>,
     scroll_motion: Option<ScrollMotion>,
-    wheel_input: iced::widget::scrollable::WheelScrollInput,
+    wheel_input: mouse::WheelScrollInput,
     transitions: Vec<Transition>,
 }
 
@@ -60,7 +60,7 @@ impl State {
         self.highlighted = vec![keyboard.then(|| first_enabled(entries)).flatten()];
         self.offsets = vec![0.0];
         self.scroll_motion = None;
-        self.wheel_input = iced::widget::scrollable::WheelScrollInput::default();
+        self.wheel_input = mouse::WheelScrollInput::default();
         self.transitions = vec![Transition::entering()];
     }
 
@@ -493,6 +493,17 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
         _renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::ContactEnded
+                    | mouse::ScrollPhase::Ended
+                    | mouse::ScrollPhase::Cancelled,
+                ..
+            }) | Event::Window(iced::window::Event::Unfocused)
+        ) {
+            self.state.wheel_input = mouse::WheelScrollInput::default();
+        }
         if self.state.anchor.is_none() {
             return;
         }
@@ -573,7 +584,11 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
             Event::Mouse(mouse::Event::ButtonReleased(_)) => {
                 shell.capture_event();
             }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            Event::Mouse(mouse::Event::WheelScrolled { delta, phase }) => {
+                if *phase == mouse::ScrollPhase::Cancelled {
+                    shell.capture_event();
+                    return;
+                }
                 if let Some((depth, panel)) = layout
                     .children()
                     .take(self.state.path.len() + 1)
@@ -599,11 +614,11 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                     self.state.highlighted.truncate(depth + 1);
                     self.state.transitions.truncate(depth + 1);
                     self.state.highlighted[depth] = None;
-                    if self
-                        .state
-                        .wheel_input
-                        .should_animate(*delta, std::time::Instant::now())
-                    {
+                    if self.state.wheel_input.should_animate_with_phase(
+                        *delta,
+                        *phase,
+                        std::time::Instant::now(),
+                    ) {
                         let base = if pixels * (pending - origin) > 0.0 {
                             origin
                         } else {

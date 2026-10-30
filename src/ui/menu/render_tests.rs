@@ -126,6 +126,7 @@ fn long_menu_scrolls_by_wheel_and_thumb_and_keeps_last_command_clickable() {
         &node,
         &renderer,
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 },
         }),
         mouse::Cursor::Available(initial.scroll_bounds.center()),

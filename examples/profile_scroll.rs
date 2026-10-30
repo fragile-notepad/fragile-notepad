@@ -390,6 +390,7 @@ mod profile {
                 content.as_widget_mut().update(
                     tree,
                     &Event::Mouse(mouse::Event::WheelScrolled {
+                        phase: mouse::ScrollPhase::Moved,
                         delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
                     }),
                     Layout::new(&node),
@@ -461,6 +462,7 @@ mod profile {
                 content.as_widget_mut().update(
                     tree,
                     &Event::Mouse(mouse::Event::WheelScrolled {
+                        phase: mouse::ScrollPhase::Moved,
                         delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
                     }),
                     Layout::new(&node),

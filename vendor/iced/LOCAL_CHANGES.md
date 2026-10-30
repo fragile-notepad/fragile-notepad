@@ -48,6 +48,17 @@ These patches adapt Iced to Fragile Notepad's
 
 ## Application patches
 
+- Keep shared wheel input tracking in `core::mouse::WheelScrollInput`, beside
+  mouse events and click tracking. The scrollable module reexports the type
+  for existing callers.
+- Preserve native scroll gesture phases and convert physical wheel pixels to
+  logical coordinates. Join only complementary legacy Windows line packets;
+  preserve native pixel packets and all other platforms' event order.
+- Keep explicitly phased touchpad gestures direct through pauses and preserve
+  finger-release and momentum boundaries. Use the idle timeout only for wheel
+  streams without native gesture boundaries.
+- Forward native pinch scale changes and phases so applications can retain
+  touchpad zoom without treating it as scroll movement.
 - Add group-opacity drawing to the renderer interface. Software blends a live
   group through reusable pixels; Vulkan draws it to a reusable texture and
   applies opacity once when compositing. Nested clips and groups stay inside

@@ -22,12 +22,15 @@ use sctk::globals::GlobalData;
 use sctk::seat::pointer::{PointerData, PointerEvent, PointerEventKind, PointerHandler};
 
 use crate::dpi::{LogicalPosition, PhysicalPosition};
-use crate::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use crate::event::{ElementState, MouseButton, WindowEvent};
 
 use crate::platform_impl::wayland::state::WinitState;
 use crate::platform_impl::wayland::{self, DeviceId, WindowId};
 
 pub mod relative_pointer;
+mod scroll;
+
+use scroll::PointerScroll;
 
 impl PointerHandler for WinitState {
     fn pointer_frame(
@@ -136,7 +139,14 @@ impl PointerHandler for WinitState {
                     window.pointer_left(Arc::downgrade(themed_pointer));
 
                     // Remove the active surface.
-                    pointer.winit_data().data().inner.lock().unwrap().surface = None;
+                    let mut pointer_data = pointer.winit_data().data().inner.lock().unwrap();
+                    pointer_data.surface = None;
+                    if let Some((delta, phase)) = pointer_data.scroll.cancel() {
+                        self.events_sink.push_window_event(
+                            WindowEvent::MouseWheel { device_id, delta, phase },
+                            window_id,
+                        );
+                    }
 
                     self.events_sink
                         .push_window_event(WindowEvent::CursorLeft { device_id }, window_id);
@@ -163,57 +173,24 @@ impl PointerHandler for WinitState {
                         window_id,
                     );
                 },
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
-                    // Get the current phase.
+                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
                     let mut pointer_data = pointer.winit_data().data().inner.lock().unwrap();
-
-                    let has_value120_scroll = horizontal.value120 != 0 || vertical.value120 != 0;
-                    let has_discrete_scroll = horizontal.discrete != 0 || vertical.discrete != 0;
-
-                    // Figure out what to do about start/ended phases here.
-                    //
-                    // Figure out how to deal with `Started`. Also the `Ended` is not guaranteed
-                    // to be sent for mouse wheels.
-                    let phase = if horizontal.stop || vertical.stop {
-                        TouchPhase::Ended
-                    } else {
-                        match pointer_data.phase {
-                            // Discrete scroll only results in moved events.
-                            _ if has_value120_scroll || has_discrete_scroll => TouchPhase::Moved,
-                            TouchPhase::Started | TouchPhase::Moved => TouchPhase::Moved,
-                            _ => TouchPhase::Started,
-                        }
-                    };
-
-                    // Update the phase.
-                    pointer_data.phase = phase;
-
-                    // Mice events have both pixel and discrete delta's at the same time. So prefer
-                    // the discrete values if they are present.
-                    let delta = if has_value120_scroll {
-                        // NOTE: Wayland sign convention is the inverse of winit.
-                        MouseScrollDelta::LineDelta(
-                            (-horizontal.value120) as f32 / 120.,
-                            (-vertical.value120) as f32 / 120.,
-                        )
-                    } else if has_discrete_scroll {
-                        // NOTE: Wayland sign convention is the inverse of winit.
-                        MouseScrollDelta::LineDelta(
-                            (-horizontal.discrete) as f32,
-                            (-vertical.discrete) as f32,
-                        )
-                    } else {
-                        // NOTE: Wayland sign convention is the inverse of winit.
-                        MouseScrollDelta::PixelDelta(
-                            LogicalPosition::new(-horizontal.absolute, -vertical.absolute)
-                                .to_physical(scale_factor),
-                        )
-                    };
-
-                    self.events_sink.push_window_event(
-                        WindowEvent::MouseWheel { device_id, delta, phase },
-                        window_id,
-                    )
+                    if let Some((delta, phase)) =
+                        pointer_data.scroll.cancel_for_source_change(horizontal, vertical, source)
+                    {
+                        self.events_sink.push_window_event(
+                            WindowEvent::MouseWheel { device_id, delta, phase },
+                            window_id,
+                        );
+                    }
+                    if let Some((delta, phase)) =
+                        pointer_data.scroll.update(horizontal, vertical, source, scale_factor)
+                    {
+                        self.events_sink.push_window_event(
+                            WindowEvent::MouseWheel { device_id, delta, phase },
+                            window_id,
+                        );
+                    }
                 },
             }
         }
@@ -324,8 +301,7 @@ pub struct WinitPointerDataInner {
     /// Currently focused window.
     surface: Option<WindowId>,
 
-    /// Current axis phase.
-    phase: TouchPhase,
+    scroll: PointerScroll,
 }
 
 impl Drop for WinitPointerDataInner {
@@ -347,7 +323,7 @@ impl Default for WinitPointerDataInner {
             locked_pointer: None,
             confined_pointer: None,
             latest_button_serial: 0,
-            phase: TouchPhase::Ended,
+            scroll: PointerScroll::default(),
         }
     }
 }

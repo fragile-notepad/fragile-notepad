@@ -338,6 +338,7 @@ fn wheel_motion_survives_rebuilds_accumulates_and_finishes_without_idle_frames()
     let cursor = mouse::Cursor::Available(BOUNDS.center());
     let wheel = || {
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: -1.0, y: -1.0 },
         })
     };
@@ -433,6 +434,7 @@ fn reversal_bounds_resize_and_programmatic_scroll_do_not_leave_pending_travel() 
 fn pixel_input_drag_and_focus_loss_interrupt_wheel_easing() {
     for interruption in [
         Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -12.0 },
         }),
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
@@ -452,6 +454,7 @@ fn pixel_input_drag_and_focus_loss_interrupt_wheel_easing() {
             &mut tree,
             &node,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
             }),
             cursor,
@@ -486,6 +489,7 @@ fn wheel_at_boundary_bubbles_to_parent_without_scheduling_animation() {
     widget.update(
         &mut tree,
         &Event::Mouse(mouse::Event::WheelScrolled {
+            phase: mouse::ScrollPhase::Moved,
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
         }),
         Layout::new(&node),
@@ -496,29 +500,6 @@ fn wheel_at_boundary_bubbles_to_parent_without_scheduling_animation() {
     );
     assert!(!shell.is_event_captured());
     assert!(tree.state.downcast_ref::<State>().smooth_motion.is_none());
-}
-
-#[test]
-fn continuous_input_stays_direct_through_whole_line_packets_and_resets_after_pause() {
-    let now = Instant::now();
-    let line = |y| mouse::ScrollDelta::Lines { x: 0.0, y };
-    let mut input = WheelScrollInput::default();
-    assert!(!input.should_animate(line(-0.125), now));
-    assert!(!input.should_animate(line(-1.0), now + Duration::from_millis(60)));
-    assert!(!input.should_animate(line(1.0), now + Duration::from_millis(120)));
-    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(400)));
-    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(460)));
-    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(470)));
-    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(570)));
-    assert!(!input.should_animate(
-        mouse::ScrollDelta::Pixels { x: 0.0, y: -1.0 },
-        now + Duration::from_millis(900)
-    ));
-    assert!(!input.should_animate(line(-1.0), now + Duration::from_millis(950)));
-    assert!(!input.should_animate(
-        mouse::ScrollDelta::Lines { x: 0.25, y: 0.0 },
-        now + Duration::from_millis(1300)
-    ));
 }
 
 #[test]
@@ -545,6 +526,7 @@ fn fractional_touchpad_streams_move_immediately_without_easing_or_a_tail() {
                 &mut tree,
                 &node,
                 Event::Mouse(mouse::Event::WheelScrolled {
+                    phase: mouse::ScrollPhase::Moved,
                     delta: mouse::ScrollDelta::Lines { x, y },
                 }),
                 cursor,
@@ -600,6 +582,7 @@ fn precise_input_interrupts_at_displayed_position_without_flushing_pending_dista
             &mut tree,
             &node,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
             }),
             cursor,
@@ -630,6 +613,7 @@ fn precise_input_interrupts_at_displayed_position_without_flushing_pending_dista
             &mut tree,
             &node,
             Event::Mouse(mouse::Event::WheelScrolled {
+                phase: mouse::ScrollPhase::Moved,
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: next },
             }),
             cursor,
@@ -657,13 +641,63 @@ fn precise_input_interrupts_at_displayed_position_without_flushing_pending_dista
 }
 
 #[test]
-fn mouse_wheel_speed_and_batched_delivery_never_change_easing_mode() {
-    let now = Instant::now();
-    let mut input = WheelScrollInput::default();
-    for milliseconds in [0, 0, 8, 24, 63, 104, 165, 200, 500, 501] {
-        assert!(input.should_animate(
-            mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-            now + Duration::from_millis(milliseconds)
-        ));
+fn ending_a_native_gesture_resets_wheel_mode_and_discards_cancelled_movement() {
+    let cursor = mouse::Cursor::Available(BOUNDS.center());
+    for phase in [
+        mouse::ScrollPhase::ContactEnded,
+        mouse::ScrollPhase::Ended,
+        mouse::ScrollPhase::Cancelled,
+    ] {
+        for terminal_cursor in [mouse::Cursor::Unavailable, cursor] {
+            let mut widget = smooth_widget();
+            let mut tree = Tree::empty();
+            tree.diff(&mut widget as &mut dyn Widget<(), Theme, ()>);
+            let node = widget.layout(
+                &mut tree,
+                &(),
+                &layout::Limits::new(Size::ZERO, BOUNDS.size()),
+            );
+            let _ = update(
+                &mut widget,
+                &mut tree,
+                &node,
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 0.0 },
+                    phase: mouse::ScrollPhase::Started,
+                }),
+                cursor,
+            );
+            let _ = update(
+                &mut widget,
+                &mut tree,
+                &node,
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -9.0 },
+                    phase,
+                }),
+                terminal_cursor,
+            );
+            let expected =
+                if terminal_cursor.is_over(BOUNDS) && phase != mouse::ScrollPhase::Cancelled {
+                    9.0
+                } else {
+                    0.0
+                };
+            assert_eq!(
+                tree.state.downcast_ref::<State>().offset_y,
+                Offset::Absolute(expected)
+            );
+            let _ = update(
+                &mut widget,
+                &mut tree,
+                &node,
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+                    phase: mouse::ScrollPhase::Moved,
+                }),
+                cursor,
+            );
+            assert!(tree.state.downcast_ref::<State>().smooth_motion.is_some());
+        }
     }
 }

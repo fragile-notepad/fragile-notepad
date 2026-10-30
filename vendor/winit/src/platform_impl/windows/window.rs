@@ -1,6 +1,6 @@
 #![cfg(windows_platform)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::mem::{self, MaybeUninit};
 use std::sync::mpsc::channel;
@@ -1224,6 +1224,7 @@ impl InitData<'_> {
             event_loop_runner: self.event_loop.runner_shared.clone(),
             key_event_builder: KeyEventBuilder::default(),
             _file_drop_handler: file_drop_handler,
+            direct_manipulation: RefCell::new(None),
             userdata_removed: Cell::new(false),
             recurse_depth: Cell::new(0),
         }

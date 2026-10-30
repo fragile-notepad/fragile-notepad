@@ -1,6 +1,81 @@
 use super::test_support::*;
 
 #[test]
+fn horizontal_scroll_preserves_fractional_pixels_without_changing_document_or_vertical_scroll() {
+    let (mut app, _) = App::new();
+    app.settings.set_word_wrap(false);
+    let id = app.workspace.active_document_id();
+    set_active_document_text(
+        &mut app,
+        &"abcdefghijklmnopqrstuvwxyz\n".repeat(20),
+        EditorSelection::new(EditorPosition::new(2, 3), EditorPosition::new(2, 3)),
+    );
+    app.workspace.document_mut(id).unwrap().set_word_wrap(false);
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::InsertText("!".into()),
+    ));
+    let _ = app.update(Message::EditorAction(id, EditorAction::InsertNewline));
+    let _ = app.update(Message::Undo);
+    let (selections, history, text, revision, dirty) = {
+        let document = app.workspace.document_mut(id).unwrap();
+        assert!(document.can_undo());
+        assert!(document.can_redo());
+        document.scroll.first_visible_row = 7;
+        document.set_selection_set(crate::editor::SelectionSet::from_ranges(
+            vec![
+                EditorSelection::new(EditorPosition::new(2, 1), EditorPosition::new(2, 4)),
+                EditorSelection::new(EditorPosition::new(3, 2), EditorPosition::new(3, 5)),
+            ],
+            1,
+        ));
+        (
+            document.selection_set().clone(),
+            document.history.clone(),
+            document.text(),
+            document.revision(),
+            document.is_dirty,
+        )
+    };
+
+    for (offset_milli, expected_px) in [(12_375, 12.375), (4_125, 4.125), (0, 0.0)] {
+        let _ = app.update(Message::EditorAction(
+            id,
+            EditorAction::ScrollToHorizontal { offset_milli },
+        ));
+        let document = app.workspace.document(id).unwrap();
+        assert_eq!(document.scroll.horizontal_px, expected_px);
+        assert_eq!(document.scroll.first_visible_row, 7);
+        assert_eq!(document.selection_set(), &selections);
+        assert_eq!(document.history, history);
+        assert_eq!(document.text(), text);
+        assert_eq!(document.revision(), revision);
+        assert_eq!(document.is_dirty, dirty);
+    }
+}
+
+#[test]
+fn horizontal_scroll_keeps_wrapped_documents_at_zero() {
+    let (mut app, _) = App::new();
+    app.settings.set_word_wrap(true);
+    let id = app.workspace.active_document_id();
+    app.workspace.document_mut(id).unwrap().set_word_wrap(true);
+    assert!(app.workspace.document(id).unwrap().word_wrap());
+
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::ScrollToHorizontal {
+            offset_milli: 12_375,
+        },
+    ));
+
+    assert_eq!(
+        app.workspace.document(id).unwrap().scroll.horizontal_px,
+        0.0
+    );
+}
+
+#[test]
 fn drag_move_updates_search_and_undo_through_app_messages() {
     let (mut app, _) = App::new();
     let id = app.workspace.active_document_id();

@@ -220,6 +220,13 @@ features = [
 
 [target.'cfg(target_os = "windows")'.dependencies]
 unicode-segmentation = "1.7.1"
+windows-core = "0.62.2"
+windows = { version = "0.62.2", features = [
+    "Win32_Graphics_DirectManipulation",
+    "Win32_System_Com",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 version = "0.61"

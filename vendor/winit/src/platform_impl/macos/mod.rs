@@ -11,6 +11,7 @@ mod ffi;
 mod menu;
 mod monitor;
 mod observer;
+mod scroll;
 mod view;
 mod window;
 mod window_delegate;

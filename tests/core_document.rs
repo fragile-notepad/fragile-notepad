@@ -633,6 +633,42 @@ fn set_decoration_settings_refreshes_document_view_models() {
 }
 
 #[test]
+fn shrinking_an_unwrapped_view_keeps_a_previously_visible_bottom_caret_in_view() {
+    let text = format!("{}\n", "abcdefghijklmnopqrstuvwxyz".repeat(20)).repeat(40);
+    let mut document = Document::from_path(DocumentId::new(13), fixture_path("long.txt"), &text);
+    document.update_viewport_geometry(10, 240.0, 8.0);
+    document.set_main_selection(caret(9, 20));
+    document.scroll.first_visible_row = 0;
+    document.scroll.horizontal_px = 80.0;
+
+    document.update_viewport_geometry(9, 240.0, 8.0);
+
+    assert!(!document.word_wrap());
+    assert_eq!(document.viewport_visible_rows, 9);
+    assert_eq!(document.scroll.first_visible_row, 1);
+    assert_eq!(document.scroll.horizontal_px, 80.0);
+    assert_eq!(document.main_selection(), caret(9, 20));
+    assert_eq!(document.text(), text);
+}
+
+#[test]
+fn shrinking_an_unwrapped_view_preserves_scrolling_away_from_the_caret() {
+    let text = format!("{}\n", "abcdefghijklmnopqrstuvwxyz".repeat(20)).repeat(40);
+    let mut document = Document::from_path(DocumentId::new(14), fixture_path("long.txt"), &text);
+    document.update_viewport_geometry(10, 240.0, 8.0);
+    document.set_main_selection(caret(2, 20));
+    document.scroll.first_visible_row = 20;
+    document.scroll.horizontal_px = 80.0;
+
+    document.update_viewport_geometry(9, 240.0, 8.0);
+
+    assert_eq!(document.viewport_visible_rows, 9);
+    assert_eq!(document.scroll.first_visible_row, 20);
+    assert_eq!(document.scroll.horizontal_px, 80.0);
+    assert_eq!(document.main_selection(), caret(2, 20));
+}
+
+#[test]
 fn reveal_line_scrolls_target_near_viewport_with_context() {
     let text = (0..120)
         .map(|line| format!("line {line}"))

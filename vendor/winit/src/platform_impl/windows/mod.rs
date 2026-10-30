@@ -183,6 +183,7 @@ unsafe fn set_window_long(hwnd: HWND, nindex: WINDOW_LONG_PTR_INDEX, dwnewlong: 
 mod util;
 mod dark_mode;
 mod definitions;
+mod direct_manipulation;
 mod dpi;
 mod drop_handler;
 mod event_loop;

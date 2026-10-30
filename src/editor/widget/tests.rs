@@ -159,9 +159,10 @@ fn collapsed_indicator_click_stops_wheel_motion_at_the_displayed_row() {
         editor.viewport_key,
         editor.viewport.visible_row_count(),
         editor.viewport.wrap_columns(),
+        node.bounds().height,
         started,
     );
-    scroll.scroll_by(20.0, started);
+    scroll.scroll_by(20.0, 0.0, 0.0, started);
     editor.scroll.first_visible_row = scroll.target_row();
     let mut tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
     tree.state
@@ -185,6 +186,168 @@ fn collapsed_indicator_click_stops_wheel_motion_at_the_displayed_row() {
             .smooth_scroll
             .is_none()
     );
+}
+
+#[test]
+fn vertical_animation_keeps_text_height_when_horizontal_overflow_changes() {
+    let _font_guard = crate::font_system_test_guard();
+    let long_line = format!("{}\n", "x".repeat(80));
+    let source = "short\n".repeat(25) + &long_line.repeat(30);
+    let fixture = FoldPointerFixture::new(&source, FoldModel::default());
+    let node = fold_test_node();
+    let bounds = node.bounds();
+    for (first_row, target_row) in [(0, 25), (25, 0)] {
+        let mut editor = fixture.editor();
+        editor.scroll.first_visible_row = first_row;
+        let mut state = AdvancedEditorState::<()>::default();
+        let started = Instant::now();
+        let (initial_layout, initial_limit) = editor.scroll_layout(&state, bounds, &(), started);
+        assert_eq!(initial_limit > 0.0, first_row == 25);
+        let mut scroll = scroll::ScrollAnimation::new(
+            initial_layout,
+            editor.viewport_key,
+            editor.viewport.visible_row_count(),
+            editor.viewport.wrap_columns(),
+            bounds.height,
+            started,
+        );
+        scroll.scroll_by(
+            target_row as f32 - first_row as f32,
+            0.0,
+            initial_limit,
+            started,
+        );
+        editor.scroll.first_visible_row = scroll.target_row();
+        state.smooth_scroll = Some(scroll);
+
+        for elapsed_ms in [40, 80] {
+            let now = started + Duration::from_millis(elapsed_ms);
+            let (layout, _) = editor.scroll_layout(&state, bounds, &(), now);
+            assert_eq!(layout.height, initial_layout.height);
+            let displayed = editor.display_layout(&state, layout, bounds.height, now);
+            assert!(displayed.scroll.first_visible_row > 0);
+            assert!(displayed.scroll.first_visible_row < 25);
+            assert!(scroll.matches(
+                layout,
+                editor.viewport_key,
+                editor.viewport.visible_row_count(),
+                editor.viewport.wrap_columns(),
+            ));
+        }
+
+        let finished = started + scroll::SCROLL_DURATION;
+        let (layout, final_limit) = editor.scroll_layout(&state, bounds, &(), finished);
+        assert_eq!(final_limit > 0.0, target_row == 25);
+        let expected_height = if target_row == 25 {
+            bounds.height - scrollbar::HORIZONTAL_SCROLLBAR_HEIGHT
+        } else {
+            bounds.height
+        };
+        assert_eq!(layout.height, expected_height);
+        assert_eq!(
+            editor
+                .display_layout(&state, layout, bounds.height, finished)
+                .scroll
+                .first_visible_row,
+            target_row,
+        );
+    }
+}
+
+#[test]
+fn precise_vertical_position_survives_horizontal_scrollbar_appearance_and_disappearance() {
+    let _font_guard = crate::font_system_test_guard();
+    let long_line = format!("{}\n", "x".repeat(80));
+    let source = "short\n".repeat(25) + &long_line.repeat(30);
+    let fixture = FoldPointerFixture::new(&source, FoldModel::default());
+    let bounds = fold_test_node().bounds();
+    for smooth in [false, true] {
+        for (first_row, target_row) in [(0, 25), (25, 0)] {
+            let mut editor = fixture.editor().smooth_scrolling(smooth);
+            editor.scroll.first_visible_row = first_row;
+            let mut state = AdvancedEditorState::<()>::default();
+            let now = Instant::now();
+            let (initial_layout, initial_limit) = editor.scroll_layout(&state, bounds, &(), now);
+            assert_eq!(initial_limit > 0.0, first_row == 25);
+            let mut scroll = scroll::ScrollAnimation::new(
+                initial_layout,
+                editor.viewport_key,
+                editor.viewport.visible_row_count(),
+                editor.viewport.wrap_columns(),
+                bounds.height,
+                now,
+            );
+            scroll.scroll_direct(
+                target_row as f32 + 0.5 - first_row as f32,
+                0.0,
+                initial_limit,
+                now,
+            );
+            editor.scroll.first_visible_row = scroll.target_row();
+            state.smooth_scroll = Some(scroll);
+
+            let (layout, limit) = editor.scroll_layout(&state, bounds, &(), now);
+            let displayed = editor.display_layout(&state, layout, bounds.height, now);
+
+            assert_eq!(limit > 0.0, target_row == 25);
+            assert_eq!(displayed.scroll.first_visible_row, target_row);
+            assert_eq!(
+                displayed.vertical_offset_px,
+                editor.metrics.line_height / 2.0
+            );
+            assert_eq!(
+                displayed.height,
+                if target_row == 25 {
+                    bounds.height - scrollbar::HORIZONTAL_SCROLLBAR_HEIGHT
+                } else {
+                    bounds.height
+                },
+            );
+            assert!(!scroll.animating(now));
+        }
+    }
+}
+
+#[test]
+fn horizontal_extent_includes_a_long_row_revealed_by_fractional_vertical_scrolling() {
+    let _font_guard = crate::font_system_test_guard();
+    let source = "short\n".repeat(5) + &format!("{}\n{}", "x".repeat(80), "short\n".repeat(10));
+    let fixture = FoldPointerFixture::new(&source, FoldModel::default());
+    let bounds = fold_test_node().bounds();
+    for smooth in [false, true] {
+        let editor = fixture.editor().smooth_scrolling(smooth);
+        let mut state = AdvancedEditorState::<()>::default();
+        let now = Instant::now();
+        let (initial_layout, initial_limit) = editor.scroll_layout(&state, bounds, &(), now);
+        assert_eq!(initial_limit, 0.0);
+        let mut scroll = scroll::ScrollAnimation::new(
+            initial_layout,
+            editor.viewport_key,
+            editor.viewport.visible_row_count(),
+            editor.viewport.wrap_columns(),
+            bounds.height,
+            now,
+        );
+        scroll.scroll_direct(16.0 / editor.metrics.line_height, 0.0, 0.0, now);
+        state.smooth_scroll = Some(scroll);
+
+        let (layout, limit) = editor.scroll_layout(&state, bounds, &(), now);
+        let displayed = editor.display_layout(&state, layout, bounds.height, now);
+
+        assert!(limit > 0.0);
+        assert_eq!(displayed.vertical_offset_px, 16.0);
+        assert!(
+            horizontal_scrollbar_geometry(
+                displayed,
+                limit,
+                editor.metrics.text_origin_x(editor.decorations),
+            )
+            .is_some()
+        );
+        let long_row_y = row_y(5, displayed);
+        assert!(long_row_y < displayed.height);
+        assert!(long_row_y + editor.metrics.line_height > displayed.height);
+    }
 }
 
 #[test]
@@ -1091,7 +1254,7 @@ fn measured_selection_bounds_use_unicode_glyph_advances() {
 #[test]
 fn wheel_line_delta_scrolls_a_little_faster_than_raw_delta() {
     assert_eq!(
-        scroll_delta_lines(mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 1.5),
+        scroll_delta_lines(mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 1.5, 20.0),
         3.0
     );
 }
@@ -1099,15 +1262,15 @@ fn wheel_line_delta_scrolls_a_little_faster_than_raw_delta() {
 #[test]
 fn wheel_pixel_delta_keeps_fractional_scroll_accumulation() {
     assert_eq!(
-        scroll_delta_lines(mouse::ScrollDelta::Pixels { x: 0.0, y: -8.0 }, 1.5),
-        0.75
+        scroll_delta_lines(mouse::ScrollDelta::Pixels { x: 0.0, y: -8.0 }, 1.5, 20.0),
+        0.4
     );
 }
 
 #[test]
 fn wheel_delta_uses_configured_scroll_speed() {
     assert_eq!(
-        scroll_delta_lines(mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 0.5),
+        scroll_delta_lines(mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 0.5, 20.0),
         1.0
     );
 }

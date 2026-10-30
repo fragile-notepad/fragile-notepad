@@ -32,7 +32,38 @@ pub enum Event {
     WheelScrolled {
         /// The scroll movement.
         delta: ScrollDelta,
+
+        /// The current stage of the gesture, when supplied by the platform.
+        phase: ScrollPhase,
     },
+
+    /// A two-finger pinch changed magnification.
+    Pinched {
+        /// The relative scale change: `0.1` magnifies by a factor of `1.1`.
+        delta: f32,
+        /// The current stage of the gesture.
+        phase: ScrollPhase,
+    },
+}
+
+/// The current stage of a wheel or touchpad gesture.
+///
+/// Platforms without gesture boundaries report only [`ScrollPhase::Moved`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollPhase {
+    /// The fingers started a gesture.
+    Started,
+    /// The wheel or fingers moved.
+    #[default]
+    Moved,
+    /// Fingers left the touchpad; native momentum may follow.
+    ContactEnded,
+    /// The platform supplied momentum after the fingers left the touchpad.
+    Momentum,
+    /// The gesture ended, including any platform inertia.
+    Ended,
+    /// The platform cancelled the scrolling gesture.
+    Cancelled,
 }
 
 /// A scroll movement.
@@ -46,7 +77,7 @@ pub enum ScrollDelta {
         /// The number of vertical lines scrolled
         y: f32,
     },
-    /// A pixel-based scroll movement
+    /// A scroll movement measured in logical pixels.
     Pixels {
         /// The number of horizontal pixels scrolled
         x: f32,

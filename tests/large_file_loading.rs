@@ -623,30 +623,45 @@ fn windows_ntdll_binary_load_applies_as_normal_text_without_chunk_stall() {
 }
 
 #[test]
-fn chunked_loader_delivers_finished_after_many_droppable_chunks() {
+fn chunked_loader_delivers_finished_after_many_chunks() {
     let path = temp_file_path("many-chunks");
     let bytes = vec![b'x'; DEFAULT_CHUNK_SIZE * 32];
     fs::write(&path, &bytes).expect("write temp input");
 
     let document_id = DocumentId::new(44);
     let generation = DocumentLoadGeneration::next();
-    let events = collect_load_events(FileLoadRequest {
-        document_id,
-        generation,
-        path: path.clone(),
-        chunk_size: 1,
+    let (finished, streamed_bytes, chunk_count) = futures::executor::block_on(async {
+        let stream = load_file_chunks(FileLoadRequest {
+            document_id,
+            generation,
+            path: path.clone(),
+            chunk_size: 1024,
+        });
+        pin_mut!(stream);
+        let mut finished = None;
+        let mut streamed_bytes = 0;
+        let mut chunk_count = 0;
+        while let Some(event) = stream.next().await {
+            match event {
+                FileLoadEvent::Chunk(chunk) => {
+                    streamed_bytes += chunk.text.len();
+                    chunk_count += 1;
+                }
+                FileLoadEvent::Finished(result) => {
+                    finished = Some(result.expect("load many-chunk input"));
+                }
+                FileLoadEvent::Progress(_) => {}
+            }
+        }
+        (finished, streamed_bytes, chunk_count)
     });
 
     let _ = fs::remove_file(&path);
 
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            FileLoadEvent::Finished(Ok(finished))
-                if finished.document_id == document_id
-                    && finished.generation == generation
-                    && finished.bytes_read == bytes.len() as u64
-        )),
-        "terminal finished event should not be dropped when the bounded stream is full"
-    );
+    let finished = finished.expect("terminal finished event should not be dropped");
+    assert_eq!(finished.document_id, document_id);
+    assert_eq!(finished.generation, generation);
+    assert_eq!(finished.bytes_read, bytes.len() as u64);
+    assert_eq!(streamed_bytes, bytes.len());
+    assert!(chunk_count >= 1024, "input should produce many chunks");
 }

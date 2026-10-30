@@ -6,15 +6,16 @@
 
 use fragile_notepad::{
     core::{
-        AppearanceMode, Document, DocumentId, EditorSettings, SearchMode, SearchResultSettings,
-        ShortcutCommand, ShortcutConflict, ShortcutGroup, Workspace,
+        AppearanceMode, DiskState, Document, DocumentId, EditorSettings, SearchMode,
+        SearchResultSettings, ShortcutCommand, ShortcutConflict, ShortcutGroup, Workspace,
     },
+    editor::{EditorPosition, EditorSelection},
     message::{AdvancedSearchTab, Menu, Message, SettingsCategory, WindowTarget},
     search_dialog::SearchDialogState,
     settings_dialog::SettingsDialogState,
     ui::{
-        advanced_search_panel, go_to_line_prompt, settings_panel, styles, tab_list_dialog, tabs,
-        toolbar,
+        advanced_search_panel, go_to_line_prompt, settings_panel, status_bar, styles,
+        tab_list_dialog, tabs, toolbar,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -27,7 +28,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "Usage: preview_dialogs [--panel <name>]
-Panels: all (default), settings, search, go-to-line, windows, tabs, editor, toolbar, menus
+Panels: all (default), settings, search, go-to-line, windows, tabs, editor, toolbar, menus, status-bar
 Output: target/dialog-review/
 Use --help to display this help.";
 
@@ -42,6 +43,7 @@ enum PreviewPanel {
     Editor,
     Toolbar,
     Menus,
+    StatusBar,
 }
 
 impl PreviewPanel {
@@ -56,6 +58,7 @@ impl PreviewPanel {
             "editor" => Some(Self::Editor),
             "toolbar" => Some(Self::Toolbar),
             "menus" => Some(Self::Menus),
+            "status-bar" => Some(Self::StatusBar),
             _ => None,
         }
     }
@@ -109,6 +112,9 @@ fn main() -> ExitCode {
         (AppearanceMode::Dark, "dark"),
     ] {
         let theme = styles::modern_theme(appearance).unwrap();
+        if selected.includes(PreviewPanel::StatusBar) {
+            render_status_bars(&mut renderer, &theme, appearance, name);
+        }
         for (width, height, size_name) in [(900, 600, "normal"), (640, 364, "minimum")] {
             if selected.includes(PreviewPanel::Menus) {
                 let mut workspace = Workspace::new();
@@ -564,6 +570,49 @@ fn main() -> ExitCode {
     }
     println!("Screenshots: target/dialog-review/");
     ExitCode::SUCCESS
+}
+
+fn render_status_bars(
+    renderer: &mut Renderer,
+    theme: &Theme,
+    appearance: AppearanceMode,
+    name: &str,
+) {
+    let mut document = Document::untitled(DocumentId::new(5));
+    let text =
+        ["A line of text long enough to put the cursor in column fifty-two."; 177].join("\r\n");
+    document.buffer.append_text(&text);
+    document.line_ending = Some(iced::widget::text_editor::LineEnding::CrLf);
+    document.mark_dirty();
+    let caret = EditorPosition::new(28, 51);
+    document.set_main_selection(EditorSelection::new(caret, caret));
+    let settings = EditorSettings {
+        appearance,
+        word_wrap: false,
+        ..EditorSettings::default()
+    };
+    let mut missing = document.clone();
+    missing.set_path("notes.txt");
+    missing.disk_state = DiskState::Missing;
+    for width in [1120, 900, 640, 360] {
+        for (preview_document, file_status, state) in [
+            (&document, None, "unsaved"),
+            (&missing, None, "missing"),
+            (
+                &document,
+                Some("Save failed: the destination folder is read-only."),
+                "message",
+            ),
+        ] {
+            render(
+                renderer,
+                status_bar::view(Some(preview_document), &settings, file_status),
+                theme,
+                Size::new(width, 28),
+                &format!("status-bar-{state}-{name}-{width}"),
+            );
+        }
+    }
 }
 
 fn editor_preview<'a>(

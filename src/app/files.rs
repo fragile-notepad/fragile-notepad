@@ -144,6 +144,7 @@ impl App {
                 if self.workspace.document(document_id).is_some() {
                     let auto_save = self.auto_save_before_switch(Some(document_id));
                     if self.workspace.select(document_id) {
+                        self.file_status = None;
                         let load = self.activate_document(document_id);
 
                         return Task::batch([auto_save, load]);
@@ -172,6 +173,7 @@ impl App {
                 if self.workspace.document(document_id).is_some() {
                     let auto_save = self.auto_save_before_switch(Some(document_id));
                     if self.workspace.select(document_id) {
+                        self.file_status = None;
                         let load = self.activate_document(document_id);
 
                         return Task::batch([auto_save, load]);
@@ -214,6 +216,7 @@ impl App {
                     return Task::batch([cancel, self.new_editor_window()]);
                 }
                 let auto_save = self.auto_save_before_switch(None);
+                self.file_status = None;
                 self.workspace.create_untitled();
 
                 Task::batch([

@@ -102,6 +102,7 @@ impl App {
                 self.switch_editor(owner);
                 self.last_active_editor = Some(owner);
             }
+            self.file_status = None;
             self.workspace.select(id);
             let activate = self.activate_document(id);
             let focus = self
@@ -299,9 +300,11 @@ impl App {
                 self.files.forget_disk_check(finished.document_id);
                 document.set_had_decoding_errors(finished.had_errors);
 
-                self.file_status = finished.had_errors.then(|| {
-                    String::from("Decoding errors; use Save As to save to a different file, or reopen with the correct encoding.")
-                });
+                if self.workspace.active_document_id() == finished.document_id {
+                    self.file_status = finished.had_errors.then(|| {
+                        String::from("Decoding errors; use Save As to save to a different file, or reopen with the correct encoding.")
+                    });
+                }
                 self.record_open_history(opened_path)
             }
             Err(failure) => self.load_failed(failure),
@@ -335,7 +338,9 @@ impl App {
                     _ => crate::core::DiskState::Changed,
                 };
             }
-            self.file_status = Some(format!("Open failed: {}", failure.error.summary()));
+            if self.workspace.active_document_id() == failure.document_id {
+                self.file_status = Some(format!("Open failed: {}", failure.error.summary()));
+            }
         }
 
         Task::none()
@@ -426,6 +431,61 @@ fn same_file_path(a: &std::path::Path, b: &std::path::Path) -> bool {
 mod tests {
     use super::*;
     use crate::app::tests::test_support::{TestFile, run_task};
+
+    #[test]
+    fn open_error_clears_when_creating_a_note_or_switching_tabs() {
+        let mut app = App::new().0;
+        let original = app.workspace.active_document_id();
+        let error = crate::services::types::FileError::Io(std::io::ErrorKind::NotFound);
+        let _ = app.update(Message::FilePicked(Err(error.clone())));
+        assert!(
+            app.file_status
+                .as_deref()
+                .unwrap()
+                .starts_with("Open failed:")
+        );
+
+        let _ = app.update(Message::NewFile);
+        let new_note = app.workspace.active_document_id();
+        assert!(app.file_status.is_none());
+        assert!(app.workspace.active_document().unwrap().path.is_none());
+
+        let _ = app.update(Message::FilePicked(Err(error.clone())));
+        let _ = app.update(Message::TabSelected(original));
+        assert!(app.file_status.is_none());
+
+        let _ = app.update(Message::FilePicked(Err(error)));
+        let _ = app.update(Message::TabPressed(
+            new_note,
+            iced::Point::new(10.0, 60.0),
+            iced::keyboard::Modifiers::default(),
+        ));
+        assert_eq!(app.workspace.active_document_id(), new_note);
+        assert!(app.file_status.is_none());
+    }
+
+    #[test]
+    fn background_load_failure_does_not_relabel_the_active_note() {
+        let mut app = App::new().0;
+        let (failed, generation) = app.workspace.insert_loading_file("missing.txt");
+        let _ = app.update(Message::NewFile);
+        let active = app.workspace.active_document_id();
+        let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+            document_id: failed,
+            generation,
+            path: "missing.txt".into(),
+            error: crate::services::types::FileError::Io(std::io::ErrorKind::NotFound),
+        })));
+        assert_eq!(app.workspace.active_document_id(), active);
+        assert!(app.file_status.is_none());
+        assert!(app.workspace.active_document().unwrap().path.is_none());
+        let _ = app.update(Message::TabSelected(failed));
+        assert_eq!(app.workspace.active_document_id(), failed);
+        assert!(matches!(
+            app.workspace.active_document().unwrap().load_state,
+            DocumentLoadState::Failed { .. }
+        ));
+    }
 
     #[test]
     fn decoding_protection_tracks_streamed_load_and_lossless_reload() {

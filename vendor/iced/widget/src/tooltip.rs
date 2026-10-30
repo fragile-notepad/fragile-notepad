@@ -70,6 +70,7 @@ where
     padding: f32,
     snap_within_viewport: bool,
     delay: Duration,
+    animation: Duration,
     class: Theme::Class<'a>,
 }
 
@@ -97,6 +98,7 @@ where
             padding: Self::DEFAULT_PADDING,
             snap_within_viewport: true,
             delay: Duration::ZERO,
+            animation: Duration::ZERO,
             class: Theme::default(),
         }
     }
@@ -118,6 +120,15 @@ where
     /// Set to [`Duration::ZERO`] to be shown immediately.
     pub fn delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
+        self
+    }
+
+    /// Fades the tooltip in and out with a small vertical movement.
+    ///
+    /// The duration covers a full entrance or exit. The default is
+    /// [`Duration::ZERO`], which shows and hides the tooltip immediately.
+    pub fn animation(mut self, duration: Duration) -> Self {
+        self.animation = duration;
         self
     }
 
@@ -191,13 +202,16 @@ where
     ) {
         if let Event::Mouse(_) | Event::Window(window::Event::RedrawRequested(_)) = event {
             let state = tree.state.downcast_mut::<State>();
-            let now = Instant::now();
+            let now = match event {
+                Event::Window(window::Event::RedrawRequested(at)) => *at,
+                _ => Instant::now(),
+            };
             let cursor_position = cursor.position_over(layout.bounds());
 
-            match (*state, cursor_position) {
+            match (&mut *state, cursor_position) {
                 (State::Idle, Some(cursor_position)) => {
                     if self.delay == Duration::ZERO {
-                        *state = State::Open { cursor_position };
+                        *state = State::open(cursor_position, now, self.animation);
                         shell.invalidate_layout();
                     } else {
                         *state = State::Hovered { at: now };
@@ -208,33 +222,83 @@ where
                 (State::Hovered { .. }, None) => {
                     *state = State::Idle;
                 }
-                (State::Hovered { at, .. }, _) if at.elapsed() < self.delay => {
-                    shell.request_redraw_at(now + self.delay - at.elapsed());
+                (State::Hovered { at, .. }, _)
+                    if now.saturating_duration_since(*at) < self.delay =>
+                {
+                    shell.request_redraw_at(*at + self.delay);
                 }
                 (State::Hovered { .. }, Some(cursor_position)) => {
-                    *state = State::Open { cursor_position };
+                    *state = State::open(cursor_position, now, self.animation);
                     shell.invalidate_layout();
                 }
                 (
                     State::Open {
                         cursor_position: last_position,
+                        hovered,
+                        last_frame,
+                        ..
                     },
                     Some(cursor_position),
-                ) if self.position == Position::FollowCursor
-                    && last_position != cursor_position =>
-                {
-                    *state = State::Open { cursor_position };
-                    shell.request_redraw();
-                }
-                (State::Open { .. }, None) => {
-                    *state = State::Idle;
-                    shell.invalidate_layout();
-
-                    if !matches!(event, Event::Window(window::Event::RedrawRequested(_)),) {
+                ) => {
+                    if self.position == Position::FollowCursor && *last_position != cursor_position
+                    {
+                        *last_position = cursor_position;
                         shell.request_redraw();
                     }
+                    if !*hovered {
+                        *hovered = true;
+                        *last_frame = now;
+                    }
                 }
-                (State::Open { .. }, Some(_)) | (State::Idle, None) => (),
+                (
+                    State::Open {
+                        hovered,
+                        last_frame,
+                        ..
+                    },
+                    None,
+                ) => {
+                    if self.animation == Duration::ZERO {
+                        *state = State::Idle;
+                        shell.invalidate_layout();
+                        shell.request_redraw();
+                    } else if *hovered {
+                        *hovered = false;
+                        *last_frame = now;
+                    }
+                }
+                (State::Idle, None) => (),
+            }
+
+            if let State::Open {
+                opacity,
+                hovered,
+                last_frame,
+                ..
+            } = state
+            {
+                let target = if *hovered { 1.0 } else { 0.0 };
+                if *opacity != target {
+                    let step = if self.animation == Duration::ZERO {
+                        1.0
+                    } else {
+                        now.saturating_duration_since(*last_frame).as_secs_f32()
+                            / self.animation.as_secs_f32()
+                    };
+                    *opacity = if *hovered {
+                        (*opacity + step).min(1.0)
+                    } else {
+                        (*opacity - step).max(0.0)
+                    };
+                }
+                *last_frame = now;
+                if !*hovered && *opacity == 0.0 {
+                    *state = State::Idle;
+                    shell.invalidate_layout();
+                    shell.request_redraw();
+                } else if *opacity != target {
+                    shell.request_redraw();
+                }
             }
         }
 
@@ -307,7 +371,12 @@ where
             translation,
         );
 
-        let tooltip = if let State::Open { cursor_position } = *state {
+        let tooltip = if let State::Open {
+            cursor_position,
+            opacity,
+            ..
+        } = *state
+        {
             Some(overlay::Element::new(Box::new(Overlay {
                 position: layout.position() + translation,
                 tooltip: &mut self.tooltip,
@@ -319,6 +388,7 @@ where
                 gap: self.gap,
                 padding: self.padding,
                 class: &self.class,
+                opacity: opacity * opacity * (3.0 - 2.0 * opacity),
             })))
         } else {
             None
@@ -392,7 +462,21 @@ enum State {
     },
     Open {
         cursor_position: Point,
+        opacity: f32,
+        hovered: bool,
+        last_frame: Instant,
     },
+}
+
+impl State {
+    fn open(cursor_position: Point, now: Instant, duration: Duration) -> Self {
+        Self::Open {
+            cursor_position,
+            opacity: if duration == Duration::ZERO { 1.0 } else { 0.0 },
+            hovered: true,
+            last_frame: now,
+        }
+    }
 }
 
 struct Overlay<'a, 'b, Message, Theme, Renderer>
@@ -410,6 +494,7 @@ where
     gap: f32,
     padding: f32,
     class: &'b Theme::Class<'a>,
+    opacity: f32,
 }
 
 impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -506,20 +591,34 @@ where
     ) {
         let style = theme.style(self.class);
 
-        container::draw_background(renderer, &style, layout.bounds());
-
         let defaults = renderer::Style {
             text_color: style.text_color.unwrap_or(inherited_style.text_color),
         };
-
-        self.tooltip.as_widget().draw(
-            self.tree,
-            renderer,
-            theme,
-            &defaults,
-            layout.children().next().unwrap(),
-            cursor_position,
-            &Rectangle::with_size(Size::INFINITE),
-        );
+        let draw = |renderer: &mut Renderer| {
+            container::draw_background(renderer, &style, layout.bounds());
+            self.tooltip.as_widget().draw(
+                self.tree,
+                renderer,
+                theme,
+                &defaults,
+                layout.children().next().unwrap(),
+                cursor_position,
+                &Rectangle::with_size(Size::INFINITE),
+            );
+        };
+        if self.opacity >= 1.0 {
+            draw(renderer);
+        } else if self.opacity > 0.0 {
+            let distance = 4.0 * (1.0 - self.opacity);
+            let offset = match self.positioning {
+                Position::Top => Vector::new(0.0, distance),
+                Position::Bottom => Vector::new(0.0, -distance),
+                _ => Vector::ZERO,
+            };
+            renderer.with_translation(offset, |renderer| {
+                // Include the floating card's shadow outside its layout bounds.
+                renderer.with_opacity_layer(layout.bounds().expand(24.0), self.opacity, draw);
+            });
+        }
     }
 }

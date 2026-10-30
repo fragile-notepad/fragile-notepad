@@ -1058,9 +1058,8 @@ pub fn status_bar(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: Some(Background::Color(palette.chrome_high)),
+        background: Some(Background::Color(palette.chrome)),
         text_color: Some(palette.muted_text),
-        border: hairline(palette.border_soft),
         ..container::Style::default()
     }
 }
@@ -1069,9 +1068,7 @@ pub fn status_segment(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: Some(Background::Color(palette.surface_low)),
         text_color: Some(palette.muted_text),
-        border: border(1.0, palette.border_soft, 4.0),
         ..container::Style::default()
     }
 }
@@ -1081,8 +1078,54 @@ pub fn status_path(theme: &Theme) -> container::Style {
 
     container::Style {
         background: None,
-        text_color: Some(palette.muted_text),
+        text_color: Some(palette.text),
         ..container::Style::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StatusTone {
+    Muted,
+    Accent,
+    Success,
+    Warning,
+    Danger,
+}
+
+pub(super) fn status_color(theme: &Theme, tone: StatusTone) -> Color {
+    let palette = VisualPalette::from_theme(theme);
+    match tone {
+        StatusTone::Muted => palette.muted_text,
+        StatusTone::Accent => palette.accent,
+        StatusTone::Success => palette.success,
+        StatusTone::Warning => theme.palette().warning.base.color,
+        StatusTone::Danger => palette.danger,
+    }
+}
+
+pub(super) fn status_selection(theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(VisualPalette::from_theme(theme).accent),
+        ..Default::default()
+    }
+}
+
+pub(super) fn status_action(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: hovered.then_some(palette.surface_high.into()),
+            text_color: if active {
+                palette.accent
+            } else if hovered {
+                palette.text
+            } else {
+                palette.muted_text
+            },
+            border: border(0.0, Color::TRANSPARENT, 3.0),
+            ..Default::default()
+        }
     }
 }
 

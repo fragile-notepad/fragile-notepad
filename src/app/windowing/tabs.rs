@@ -74,6 +74,7 @@ impl App {
         }
         let active_document = self.workspace.active_document_id();
         let auto_save = if active_document != previous_document {
+            self.file_status = None;
             self.queue_auto_save(previous_document)
         } else {
             Task::none()

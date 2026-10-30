@@ -48,6 +48,9 @@ These patches adapt Iced to Fragile Notepad's
 
 ## Application patches
 
+- Add optional tooltip fades with a small vertical movement. Keep the tooltip
+  visible until its exit finishes, reverse interrupted fades, and request frames
+  only during the hover delay or animation. Status-bar tooltips use this option.
 - Keep shared wheel input tracking in `core::mouse::WheelScrollInput`, beside
   mouse events and click tracking. The scrollable module reexports the type
   for existing callers.

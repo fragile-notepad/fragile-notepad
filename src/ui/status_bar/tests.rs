@@ -254,6 +254,59 @@ fn resizing_keeps_labels_inside_the_bar_and_status_actions_work() {
 }
 
 #[test]
+fn visible_details_fit_the_system_font_without_shortening_labels() {
+    let _guard = crate::font_system_test_guard();
+    let renderer = futures::executor::block_on(<Renderer as Headless>::new(
+        renderer::Settings::default(),
+        Some("tiny-skia"),
+    ))
+    .expect("software renderer");
+    let mut document = Document::from_path(DocumentId::new(1), "notes.txt", "hello");
+    // Wide letters expose width estimates that happen to fit narrower labels.
+    document.syntax_token = "WWWWWWWW".to_owned();
+    let settings = EditorSettings::default();
+    let data = StatusBarData::new(&document, &settings, None);
+
+    for width in [1000.0, 640.0, 360.0] {
+        let mut content = status_bar_for_width(&data, width);
+        let mut tree = Tree::empty();
+        tree.diff(content.as_widget_mut());
+        let node = content.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(width, STATUS_BAR_HEIGHT)),
+        );
+        let mut labels = Labels::default();
+        content
+            .as_widget_mut()
+            .operate(&mut tree, Layout::new(&node), &renderer, &mut labels);
+
+        for item in visible_status_items(&data, width) {
+            let label = item.label(&data);
+            let bounds = labels
+                .0
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("{label} should be visible at {width}"))
+                .1;
+            let mut full_text: Element<'_, Message> =
+                status_text(label).ellipsis(text::Ellipsis::None).into();
+            let mut full_tree = Tree::empty();
+            full_tree.diff(full_text.as_widget_mut());
+            let full_node =
+                full_text
+                    .as_widget_mut()
+                    .layout(&mut full_tree, &renderer, &layout::Limits::NONE);
+            assert!(
+                bounds.width >= full_node.size().width,
+                "{label}: {bounds:?} is too narrow for {:?} at {width}",
+                full_node.size(),
+            );
+        }
+    }
+}
+
+#[test]
 fn narrow_layout_preserves_position_and_prioritizes_active_selections() {
     let mut document = Document::from_path(DocumentId::new(1), "notes.txt", "hello");
     document.set_main_selection(EditorSelection::new(

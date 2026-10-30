@@ -1,6 +1,6 @@
+use iced::advanced::{graphics, text::Paragraph as _};
 use iced::widget::{Row, button, column, container, responsive, row, space, text, tooltip};
 use iced::{Center, Element, Fill};
-use unicode_width::UnicodeWidthStr;
 
 use crate::core::{DiskState, Document, DocumentLoadState, EditorSettings};
 use crate::editor::layout::visual_column_for;
@@ -282,9 +282,23 @@ impl StatusItem {
     }
 }
 
-// Leave room around each label, including on platforms with wider UI fonts.
+// Short labels must fit completely; character counts do not predict the width
+// of the system UI font (especially for labels such as "Wrap" or "100%").
 fn label_width(label: &str) -> f32 {
-    label.width() as f32 * 7.5 + ITEM_PADDING * 2.0
+    let paragraph = graphics::text::Paragraph::with_text(iced::advanced::text::Text {
+        content: label,
+        bounds: iced::Size::INFINITE,
+        size: (STATUS_TEXT_SIZE as f32).into(),
+        line_height: text::LineHeight::default(),
+        font: iced::Font::DEFAULT,
+        align_x: text::Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: text::Shaping::default(),
+        wrapping: text::Wrapping::None,
+        ellipsis: text::Ellipsis::None,
+        hint_factor: None,
+    });
+    paragraph.min_width().ceil() + 1.0 + ITEM_PADDING * 2.0
 }
 
 fn status_bar_for_width<'a>(data: &StatusBarData, available_width: f32) -> Element<'a, Message> {

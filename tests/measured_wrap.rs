@@ -30,12 +30,7 @@ fn software_renderer() -> Renderer {
 }
 
 fn metrics(document: &Document, settings: &EditorSettings) -> EditorMetrics {
-    EditorMetrics {
-        line_height: 20.0 * settings.zoom,
-        character_width: 8.8 * settings.zoom,
-        ..EditorMetrics::default()
-    }
-    .with_line_count(document.buffer.line_count())
+    editor::metrics(settings.zoom).with_line_count(document.buffer.line_count())
 }
 
 fn wrap_document(source: &str, zoom: f32, text_width: f32) -> (Document, EditorSettings) {
@@ -57,7 +52,7 @@ fn update_geometry(document: &mut Document, settings: &EditorSettings, text_widt
     document.update_viewport_geometry_with_typography(
         12,
         text_width,
-        8.8 * settings.zoom,
+        editor::metrics(settings.zoom).character_width,
         16.0 * settings.zoom,
         None,
     );
@@ -242,7 +237,8 @@ fn screenshot_farewell_line_fits_120_column_guide_with_actual_fonts() {
 }
 
 fn assert_rows_fit(document: &Document, settings: &EditorSettings, maximal_cjk: bool) {
-    let budget = document.viewport.wrap_columns().unwrap() as f32 * 8.8 * settings.zoom;
+    let budget = document.viewport.wrap_columns().unwrap() as f32
+        * editor::metrics(settings.zoom).character_width;
     let mut last_line = None;
     let mut previous_end = 0;
     for row in 0..document.viewport.visible_row_count() {

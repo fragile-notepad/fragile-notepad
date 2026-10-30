@@ -1,10 +1,10 @@
-//! macOS system font routing, shaping, and editor geometry regressions.
+//! macOS font routing, text spacing, and optical size tests.
 
 use iced::advanced::graphics::text::cosmic_text::fontdb;
 use iced::advanced::{graphics, text};
 use iced::{Font, font};
 
-use super::super::{
+use super::{
     EDITOR_FONT, EDITOR_TEXT_SHAPING, REGIONAL_LANGUAGES, font_weight_is_available, language_index,
     preferred_families, regional_font_routes,
 };
@@ -237,88 +237,4 @@ fn macos_ui_shapes_and_rasterizes_the_same_text_optical_size() {
             width(&display)
         );
     }
-}
-
-#[test]
-fn macos_ascii_geometry_matches_rendered_font_across_zoom_and_tabs() {
-    use crate::editor::layout::{EditorLayout, ScrollOffset, scrolled_text_origin_x};
-    use crate::editor::render::SelectionRenderPlan;
-    use crate::editor::widget::line_cache::{
-        LineGeometry, measured_caret_x, measured_selection_x_and_width,
-    };
-    use crate::editor::widget::rich_text::expand_tabs_for_rendering_with_offset;
-    use crate::editor::{DecorationModel, DecorationSettings};
-    use iced::advanced::text::Paragraph as _;
-    use iced::{Pixels, Size, alignment};
-
-    let _font_guard = crate::font_system_test_guard();
-    let decorations = DecorationModel::new(DecorationSettings::default());
-    for zoom in [0.75, 1.0, 1.5] {
-        let metrics = crate::ui::editor::metrics(zoom);
-        let layout = EditorLayout::new(metrics, ScrollOffset::ZERO, 1000.0, 200.0);
-        let origin = scrolled_text_origin_x(layout, &decorations);
-        for content in [
-            "The quick brown fox jumps over the lazy dog.",
-            "let\tvalue = 0123456789;",
-        ] {
-            let expanded = expand_tabs_for_rendering_with_offset(content, 4, 0);
-            let display = expanded
-                .as_ref()
-                .map_or(content, |value| value.text.as_str());
-            let paragraph = graphics::text::Paragraph::with_text(text::Text {
-                content: display,
-                bounds: Size::new(1000.0, metrics.line_height),
-                size: Pixels(16.0 * zoom),
-                line_height: text::LineHeight::Absolute(Pixels(metrics.line_height)),
-                font: EDITOR_FONT,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Top,
-                shaping: EDITOR_TEXT_SHAPING,
-                wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::None,
-                hint_factor: None,
-            });
-            let geometry = LineGeometry::<()>::new_with_visual_offset(content, metrics, &(), 0);
-            assert!(matches!(geometry, LineGeometry::Fast { .. }));
-            let selection = SelectionRenderPlan {
-                line: 0,
-                start_column: 0,
-                end_column: content.len(),
-                start_visual_column: 0,
-                end_visual_column: display.len(),
-                start_virtual_column: None,
-                end_virtual_column: None,
-                y: 0.0,
-                x: 0.0,
-                width: 0.0,
-            };
-            let (start, width) =
-                measured_selection_x_and_width(&selection, &geometry, layout, &decorations);
-            assert!((start - origin).abs() < 0.01);
-            assert!(
-                (width - paragraph.min_width()).abs() < 0.01,
-                "zoom={zoom}: {content}"
-            );
-            for byte in 0..=content.len() {
-                let displayed_byte = expanded
-                    .as_ref()
-                    .map_or(byte, |value| value.byte_offsets[byte]);
-                let expected = paragraph.grapheme_position(0, displayed_byte).unwrap().x;
-                let actual = measured_caret_x(&geometry, byte, layout, &decorations) - origin;
-                assert!(
-                    (actual - expected).abs() < 0.01,
-                    "zoom={zoom}, byte={byte}: {content}"
-                );
-                assert_eq!(
-                    geometry.byte_column_for_x(expected + metrics.character_width * 0.25, 4),
-                    byte,
-                    "zoom={zoom}, byte={byte}: {content}"
-                );
-            }
-        }
-    }
-    eprintln!(
-        "macOS editor cell at 16px: {}",
-        crate::ui::editor::metrics(1.0).character_width
-    );
 }

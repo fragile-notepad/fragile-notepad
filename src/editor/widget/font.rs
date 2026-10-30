@@ -13,12 +13,15 @@ use crate::editor::fold_projection::ProjectionFragment;
 use crate::editor::render::{RowRenderPlan, clipped_projection_fragments};
 use crate::editor::viewport::ViewportModel;
 
-#[cfg(target_os = "macos")]
-mod macos;
+#[cfg(unix)]
+mod metrics;
 mod profile;
 
-#[cfg(target_os = "macos")]
-pub(crate) use macos::editor_character_width;
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests;
+
+#[cfg(unix)]
+pub(crate) use metrics::editor_character_width;
 
 use profile::{FontProfile, font_weight_is_available};
 
@@ -91,7 +94,7 @@ pub const EDITOR_FONT_ROUTE: EditorFontRoute = EditorFontRoute {
 
 pub const EDITOR_FONT: Font = EDITOR_FONT_ROUTE.primary;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(unix))]
 pub(crate) fn editor_character_width(size: f32) -> f32 {
     size * FALLBACK_CHARACTER_WIDTH_RATIO
 }

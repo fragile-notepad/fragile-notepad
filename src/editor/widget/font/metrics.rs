@@ -1,4 +1,4 @@
-//! Cell metrics for the native macOS monospace family.
+//! Cell width for the installed Unix monospace family.
 
 use std::sync::OnceLock;
 
@@ -11,8 +11,8 @@ use super::{EDITOR_FONT, EDITOR_TEXT_SHAPING, FALLBACK_CHARACTER_WIDTH_RATIO};
 const REFERENCE_SIZE: f32 = 16.0;
 
 pub(crate) fn editor_character_width(size: f32) -> f32 {
-    // The native monospace family is resolved once with the font system.
-    // Cache its advance so ASCII geometry agrees with the rendered font.
+    // Fontconfig can select a different monospace family on each Linux system.
+    // Use its advance for selections, carets, hit testing, and wrapping.
     static CELL_WIDTH_PER_PIXEL: OnceLock<f32> = OnceLock::new();
     size * CELL_WIDTH_PER_PIXEL.get_or_init(measure_cell_width_ratio)
 }

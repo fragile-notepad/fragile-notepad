@@ -629,12 +629,7 @@ fn software_renderer() -> Renderer {
 }
 
 fn editor_metrics(document: &Document, settings: &EditorSettings) -> EditorMetrics {
-    EditorMetrics {
-        line_height: 16.0 * settings.zoom * 1.25,
-        character_width: 16.0 * settings.zoom * 0.55,
-        ..EditorMetrics::default()
-    }
-    .with_line_count(document.buffer.line_count())
+    editor::metrics(settings.zoom).with_line_count(document.buffer.line_count())
 }
 
 fn routed_paragraph(text: &str, language: CjkLanguage, zoom: f32) -> graphics::text::Paragraph {

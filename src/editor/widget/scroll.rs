@@ -104,7 +104,7 @@ impl ScrollAnimation {
         horizontal_px: f32,
         max_horizontal_px: f32,
         now: Instant,
-    ) {
+    ) -> bool {
         let max_row = self
             .row_count
             .saturating_sub(self.layout.complete_visible_row_capacity().max(1));
@@ -133,7 +133,7 @@ impl ScrollAnimation {
         };
         let target_horizontal = horizontal_offset_milli(target_horizontal as f32) as f32 / 1000.0;
         if target == self.target_rows && target_horizontal == self.layout.scroll.horizontal_px {
-            return;
+            return false;
         }
         self.from_rows = current;
         self.target_rows = target;
@@ -144,6 +144,7 @@ impl ScrollAnimation {
         self.last_precise_input = None;
         self.layout.scroll.first_visible_row = target.floor() as usize;
         self.layout.scroll.horizontal_px = target_horizontal;
+        true
     }
 
     pub(super) fn target_row(self) -> usize {
@@ -157,11 +158,32 @@ impl ScrollAnimation {
         horizontal_px: f32,
         max_horizontal_px: f32,
         now: Instant,
-    ) {
+    ) -> bool {
+        let was_animating = self.animating(now);
         self.stop(now);
-        self.scroll_by(lines, horizontal_px, max_horizontal_px, now);
+        let changed = self.scroll_by(lines, horizontal_px, max_horizontal_px, now);
         self.from_rows = self.target_rows;
         self.from_horizontal_px = f64::from(self.layout.scroll.horizontal_px);
+        changed || was_animating
+    }
+
+    /// Applies whole wheel lines without animation, allowing the last row at the top.
+    pub(super) fn scroll_lines(&mut self, lines: i32) -> bool {
+        let target = self
+            .layout
+            .scroll
+            .first_visible_row
+            .saturating_add_signed(lines as isize)
+            .min(self.row_count.saturating_sub(1));
+        if target == self.layout.scroll.first_visible_row {
+            return false;
+        }
+        self.layout.scroll.first_visible_row = target;
+        self.target_rows = target as f64;
+        self.from_rows = self.target_rows;
+        self.precise = false;
+        self.last_precise_input = None;
+        true
     }
 
     /// Spreads precise packets across a short interval while keeping their sum.
@@ -172,7 +194,7 @@ impl ScrollAnimation {
         horizontal_px: f32,
         max_horizontal_px: f32,
         now: Instant,
-    ) {
+    ) -> bool {
         let ((current, current_horizontal), (velocity_rows, velocity_horizontal)) =
             self.position_and_velocity(now);
         let (previous_rows, previous_horizontal) = if self.precise {
@@ -186,14 +208,21 @@ impl ScrollAnimation {
         let max_row = self
             .row_count
             .saturating_sub(self.layout.complete_visible_row_capacity().max(1));
-        self.from_rows = current;
-        self.from_horizontal_px = current_horizontal;
-        self.target_rows = (previous_rows + f64::from(lines)).clamp(0.0, max_row as f64);
-        self.layout.scroll.first_visible_row = self.target_rows.floor() as usize;
+        let target_rows = (previous_rows + f64::from(lines)).clamp(0.0, max_row as f64);
         let horizontal = (previous_horizontal + f64::from(horizontal_px))
             .clamp(0.0, f64::from(max_horizontal_px));
-        self.layout.scroll.horizontal_px =
-            horizontal_offset_milli(horizontal as f32) as f32 / 1000.0;
+        let target_horizontal = horizontal_offset_milli(horizontal as f32) as f32 / 1000.0;
+        if target_rows == self.target_rows && target_horizontal == self.layout.scroll.horizontal_px
+        {
+            // Preserve packet timing without restarting motion already approaching a limit.
+            self.last_precise_input = Some(now);
+            return false;
+        }
+        self.from_rows = current;
+        self.from_horizontal_px = current_horizontal;
+        self.target_rows = target_rows;
+        self.layout.scroll.first_visible_row = target_rows.floor() as usize;
+        self.layout.scroll.horizontal_px = target_horizontal;
         self.duration = self
             .last_precise_input
             .map(|previous| now.saturating_duration_since(previous))
@@ -212,6 +241,7 @@ impl ScrollAnimation {
         self.started = now;
         self.last_precise_input = Some(now);
         self.precise = true;
+        true
     }
 
     /// Ends interpolation at the exact native destination on release or cancel.
@@ -337,6 +367,27 @@ mod tests {
     fn scroll(now: Instant) -> ScrollAnimation {
         let layout = EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 400.0, 94.0);
         ScrollAnimation::new(layout, 1, 1000, None, 94.0, now)
+    }
+
+    #[test]
+    fn unchanged_targets_preserve_motion_while_fractional_changes_are_reported() {
+        let started = Instant::now();
+        let mut motion = scroll(started);
+        assert!(!motion.scroll_by(-1.0, -1.0, 10.0, started));
+        assert!(!motion.scroll_direct(-1.0, -1.0, 10.0, started));
+        assert!(!motion.scroll_precise(-1.0, -1.0, 10.0, started));
+        assert!(motion.scroll_by(0.25, 0.0, 10.0, started));
+        assert_eq!(motion.target_row(), 0);
+
+        let mut motion = scroll(started);
+        assert!(motion.scroll_precise(2000.0, 2000.0, 10.0, started));
+        let previous = motion;
+        let next = started + Duration::from_millis(16);
+        assert!(!motion.scroll_precise(1.0, 1.0, 10.0, next));
+        for elapsed in [16, 24, 32, 48] {
+            let now = started + Duration::from_millis(elapsed);
+            assert_eq!(motion.display_layout(now), previous.display_layout(now));
+        }
     }
 
     #[test]

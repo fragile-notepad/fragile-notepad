@@ -221,7 +221,14 @@ where
         let continuous = self.animated
             && (previous_frame != window::RedrawRequest::Wait
                 || next_frame != window::RedrawRequest::Wait);
-        if !matches!(event, Event::Window(window::Event::RedrawRequested(_)))
+        // Movement leaves widget pixels unchanged. A wheel event can also be
+        // clamped at a scroll limit; let the child request painting when it moves.
+        let input_changes_paint = !matches!(
+            event,
+            Event::Window(window::Event::RedrawRequested(_) | window::Event::Moved(_))
+                | Event::Mouse(mouse::Event::WheelScrolled { .. })
+        );
+        if input_changes_paint
             || previous_due
             || next_frame == window::RedrawRequest::NextFrame
             || continuous
@@ -758,6 +765,60 @@ mod tests {
         );
         assert_eq!((renderer.hits, renderer.misses), (1, 3));
         assert_eq!(widget.updates.get(), 4);
+    }
+
+    #[test]
+    fn movement_and_unchanged_wheel_input_keep_pixels_until_child_requests_redraw() {
+        let widget = TestWidget::default();
+        let mut content = Element::new(RasterCache::new(Element::new(widget.clone())));
+        let mut renderer = RecordingRenderer::default();
+        let (mut tree, node) = mount(&mut content, &renderer, SIZE);
+        let viewport = Rectangle::with_size(SIZE);
+        let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            phase: mouse::ScrollPhase::Moved,
+        });
+        draw_widget(
+            &content,
+            &tree,
+            &node,
+            &mut renderer,
+            &Theme::Light,
+            mouse::Cursor::Unavailable,
+            viewport,
+        );
+        for event in [
+            Event::Window(window::Event::Moved(Point::new(40.0, 60.0))),
+            wheel.clone(),
+        ] {
+            let (redraw, count, _) =
+                update_widget(&mut content, &mut tree, &node, &renderer, event, false);
+            assert_eq!(redraw, window::RedrawRequest::Wait);
+            assert_eq!(count, 0);
+            draw_widget(
+                &content,
+                &tree,
+                &node,
+                &mut renderer,
+                &Theme::Light,
+                mouse::Cursor::Unavailable,
+                viewport,
+            );
+        }
+        assert_eq!((renderer.hits, renderer.misses), (2, 1));
+        widget.next_frame.set(window::RedrawRequest::NextFrame);
+        update_widget(&mut content, &mut tree, &node, &renderer, wheel, false);
+        draw_widget(
+            &content,
+            &tree,
+            &node,
+            &mut renderer,
+            &Theme::Light,
+            mouse::Cursor::Unavailable,
+            viewport,
+        );
+        assert_eq!((renderer.hits, renderer.misses), (2, 2));
+        assert_eq!(widget.updates.get(), 3);
     }
 
     #[test]

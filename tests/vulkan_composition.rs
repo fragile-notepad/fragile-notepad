@@ -689,7 +689,7 @@ fn cached_mesh_instances_repaint_after_changes() {
                 // overwriting the other's transform.
                 let mut reference = [mesh::Cache::new(batch.clone()), mesh::Cache::new(batch)];
                 let mut previous = Vec::new();
-                // Recolor both meshes, then move and remove the second. Each
+                // Recolor and move both meshes, then remove the second. Each
                 // change is followed by a frame that should reuse pixels.
                 for step in 0..8 {
                     if step == 2 {
@@ -702,8 +702,14 @@ fn cached_mesh_instances_repaint_after_changes() {
                     let viewport = begin(&mut cached, SIZE, scale);
                     begin(&mut direct, SIZE, scale);
                     let positions = [
-                        Point::new(8.0, 8.0),
-                        Point::new(if step < 4 { 30.0 } else { 38.0 }, 12.0),
+                        Point::new(
+                            if step < 4 { 8.0 } else { 10.0 },
+                            if step < 4 { 8.0 } else { 9.0 },
+                        ),
+                        Point::new(
+                            if step < 4 { 30.0 } else { 38.0 },
+                            if step < 4 { 12.0 } else { 14.0 },
+                        ),
                     ];
                     for (renderer, caches, cropped) in [
                         (&mut cached, [&shared, &shared], cropped_layers),

@@ -584,6 +584,77 @@ fn close_clean_exits() {
 }
 
 #[test]
+fn session_shutdown_captures_each_editors_latest_native_bounds_before_saving() {
+    use iced_runtime::window::Action;
+
+    let (mut app, _) = App::new_with_options(crate::startup::StartupOptions::default());
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    let _ = app.update(Message::SessionLoaded(Ok(None)));
+    let _ = app.update(Message::StartupReady);
+    let first = app.main_window_id.unwrap();
+    let _ = app.update(Message::NewWindow);
+    let second = app.main_window_id.unwrap();
+    let _ = app.update(Message::ToggleSettingsPanel);
+    let expected = [
+        (first, [120.0, 200.0, 900.0, 700.0]),
+        (second, [-800.0, 80.0, 720.0, 500.0]),
+    ];
+    let bounds_for = |id| expected.iter().find(|(native, _)| *native == id).unwrap().1;
+
+    let task = app.persist_before_exit();
+    assert!(app.lifecycle.is_exiting());
+    let mut actions = iced_runtime::task::into_stream(task).unwrap();
+    let mut sizes = Vec::new();
+    while sizes.len() < expected.len() {
+        match futures::executor::block_on(actions.next()).unwrap() {
+            iced_runtime::Action::Window(Action::GetPosition(id, reply)) => {
+                let bounds = bounds_for(id);
+                reply
+                    .send(Some(iced::Point::new(bounds[0], bounds[1])))
+                    .unwrap();
+            }
+            iced_runtime::Action::Window(Action::GetSize(id, reply)) => sizes.push((id, reply)),
+            other => panic!("expected a native geometry query, got {other:?}"),
+        }
+    }
+    assert!(actions.next().now_or_never().is_none());
+    while let Some((id, reply)) = sizes.pop() {
+        let bounds = bounds_for(id);
+        reply.send(iced::Size::new(bounds[2], bounds[3])).unwrap();
+        if !sizes.is_empty() {
+            assert!(actions.next().now_or_never().is_none());
+        }
+    }
+    let iced_runtime::Action::Output(message @ Message::ShutdownWindowsCaptured(_)) =
+        futures::executor::block_on(actions.next()).unwrap()
+    else {
+        panic!("all geometry replies must precede the final session save");
+    };
+    assert!(
+        app.snapshot_session()
+            .windows
+            .iter()
+            .all(|window| window.bounds.is_none())
+    );
+
+    let save = app.update(message);
+    assert!(save.units() > 0);
+    assert!(app.lifecycle.is_exiting());
+    let snapshot = app.snapshot_session();
+    assert_eq!(snapshot.windows.len(), expected.len());
+    for (native, bounds) in expected {
+        let editor = app.editor_id(native).unwrap();
+        assert_eq!(app.editor_windows[&editor].bounds, Some(bounds));
+        assert!(
+            snapshot
+                .windows
+                .iter()
+                .any(|window| window.bounds == Some(bounds))
+        );
+    }
+}
+
+#[test]
 fn close_dirty_prompts() {
     let (mut app, _) = App::new();
     let document_id = app.workspace.active_document_id();

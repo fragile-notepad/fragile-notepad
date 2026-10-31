@@ -9,7 +9,6 @@ use crate::graphics::mesh::{self, Mesh};
 use crate::nudge;
 
 use rustc_hash::FxHashMap;
-use std::collections::hash_map;
 use std::sync::{Arc, Weak};
 
 const INITIAL_INDEX_COUNT: usize = 1_000;
@@ -57,6 +56,7 @@ impl UploadKey {
 #[derive(Debug, Default)]
 pub struct Storage {
     uploads: FxHashMap<UploadKey, Upload>,
+    unused: FxHashMap<(mesh::Id, usize), Vec<UploadKey>>,
 }
 
 impl Storage {
@@ -86,47 +86,72 @@ impl Storage {
             return;
         }
 
-        match self
-            .uploads
-            .entry(UploadKey::new(cache, new_transformation))
-        {
-            hash_map::Entry::Occupied(entry) => {
-                entry.into_mut().used = true;
-            }
-            hash_map::Entry::Vacant(entry) => {
-                let mut layer = Layer::new(device, solid, gradient);
+        let key = UploadKey::new(cache, new_transformation);
+        if let Some(upload) = self.uploads.get_mut(&key) {
+            upload.used = true;
+            return;
+        }
 
-                layer.prepare(
-                    device,
-                    encoder,
-                    belt,
-                    solid,
-                    gradient,
-                    cache.batch(),
-                    new_transformation,
-                );
-
-                let _ = entry.insert(Upload {
-                    layer,
-                    owner: cache.weak_owner(),
-                    batch: cache.batch().clone(),
-                    used: true,
-                });
-
-                log::debug!(
-                    "New mesh upload: {:?} (total: {})",
-                    cache.id(),
-                    self.uploads.len()
-                );
+        let mut reused = None;
+        if let Some(unused) = self.unused.get_mut(&(key.id, key.version)) {
+            while let Some(previous) = unused.pop() {
+                if self
+                    .uploads
+                    .get(&previous)
+                    .is_some_and(|upload| !upload.used)
+                {
+                    reused = self.uploads.remove(&previous);
+                    break;
+                }
             }
         }
+        let mut upload = if let Some(mut upload) = reused {
+            // Keep vertex/index buffers when only placement changed. Each
+            // position prepared for this paint still owns separate uniforms.
+            // Encoded copies follow earlier draws that used this upload.
+            upload
+                .layer
+                .prepare_transformation(encoder, belt, &upload.batch, new_transformation);
+            upload
+        } else {
+            let mut layer = Layer::new(device, solid, gradient);
+            layer.prepare(
+                device,
+                encoder,
+                belt,
+                solid,
+                gradient,
+                cache.batch(),
+                new_transformation,
+            );
+            log::debug!(
+                "New mesh upload: {:?} (total: {})",
+                cache.id(),
+                self.uploads.len() + 1
+            );
+            Upload {
+                layer,
+                owner: cache.weak_owner(),
+                batch: cache.batch().clone(),
+                used: true,
+            }
+        };
+        upload.used = true;
+        let _ = self.uploads.insert(key, upload);
     }
 
     pub fn trim(&mut self, prepared: bool) {
-        self.uploads.retain(|_key, upload| {
+        self.unused.clear();
+        self.uploads.retain(|key, upload| {
             let retain = upload.owner.strong_count() > 0 && (!prepared || upload.used);
             if prepared {
                 upload.used = false;
+            }
+            if retain && !upload.used {
+                self.unused
+                    .entry((key.id, key.version))
+                    .or_default()
+                    .push(*key);
             }
             retain
         });
@@ -445,6 +470,127 @@ mod tests {
     }
 
     #[test]
+    fn moving_instances_reuse_mesh_buffers_and_keep_separate_uniforms() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = match futures::executor::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        ) {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                let required = match std::env::var("FRAGILE_REQUIRE_GPU_TESTS") {
+                    Ok(value) if value == "1" => true,
+                    Ok(value) if value == "0" => false,
+                    Err(std::env::VarError::NotPresent) => std::env::var_os("CI").is_some(),
+                    value => panic!("invalid FRAGILE_REQUIRE_GPU_TESTS: {value:?}"),
+                };
+                assert!(!required, "no Vulkan adapter for mesh reuse test: {error}");
+                eprintln!("Skipping Vulkan mesh reuse test: {error}");
+                return;
+            }
+        };
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&Default::default()))
+                .expect("create Vulkan mesh reuse test device");
+        let pipeline = Pipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm, None);
+        let mut storage = Storage::new();
+        let mut belt =
+            wgpu::util::StagingBelt::new(device.clone(), crate::buffer::STAGING_CHUNK_SIZE);
+        let mut cache = mesh::Cache::new(Arc::from([
+            mesh(),
+            Mesh::Gradient {
+                buffers: mesh::Indexed {
+                    vertices: [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]]
+                        .map(|position| mesh::GradientVertex2D {
+                            position,
+                            gradient: bytemuck::Zeroable::zeroed(),
+                        })
+                        .to_vec(),
+                    indices: vec![0, 1, 2],
+                },
+                transformation: Transformation::scale(0.75),
+                clip_bounds: Rectangle::with_size(Size::new(10.0, 10.0)),
+            },
+        ]));
+        let buffers = |upload: &Upload| {
+            [
+                upload.layer.index_buffer.raw.clone(),
+                upload.layer.solid.vertices.raw.clone(),
+                upload.layer.gradient.vertices.raw.clone(),
+                upload.layer.solid.uniforms.raw.clone(),
+                upload.layer.gradient.uniforms.raw.clone(),
+            ]
+        };
+        let mut initial = Vec::new();
+        for frame in 0..4 {
+            // Completed-frame reuse must leave the uploads available for a
+            // later paint. Submit changing frames without waiting for the GPU.
+            storage.trim(false);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            for index in 0..3 {
+                let transformation = Transformation::translate(
+                    index as f32 * 8.0,
+                    if index == 0 { 0.0 } else { frame as f32 * 0.3 },
+                );
+                storage.prepare(
+                    &device,
+                    &mut encoder,
+                    &mut belt,
+                    &pipeline.solid,
+                    &pipeline.gradient,
+                    &cache,
+                    transformation,
+                );
+                let current = buffers(storage.get(&cache, transformation).unwrap());
+                if frame == 0 {
+                    initial.push(current);
+                } else {
+                    assert!(initial.contains(&current), "movement replaced mesh buffers");
+                }
+            }
+            assert_eq!(storage.uploads.len(), 3);
+            let active: Vec<_> = storage.uploads.values().map(buffers).collect();
+            for index in 0..active.len() {
+                for previous in &active[..index] {
+                    assert_ne!(active[index][3], previous[3]);
+                    assert_ne!(active[index][4], previous[4]);
+                }
+            }
+            belt.finish();
+            let _ = queue.submit([encoder.finish()]);
+            belt.recall();
+            storage.trim(true);
+        }
+        // Reusing old vertices after a content change would paint stale meshes.
+        cache.update(Arc::from([mesh()]));
+        let mut encoder = device.create_command_encoder(&Default::default());
+        storage.prepare(
+            &device,
+            &mut encoder,
+            &mut belt,
+            &pipeline.solid,
+            &pipeline.gradient,
+            &cache,
+            Transformation::IDENTITY,
+        );
+        assert!(!initial.contains(&buffers(
+            storage.get(&cache, Transformation::IDENTITY).unwrap()
+        )));
+        belt.finish();
+        let _ = queue.submit([encoder.finish()]);
+        belt.recall();
+        storage.trim(true);
+        assert_eq!(storage.uploads.len(), 1);
+        drop(cache);
+        storage.trim(false);
+        assert!(storage.uploads.is_empty());
+        assert!(storage.unused.values().all(Vec::is_empty));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    #[test]
     fn uploads_do_not_extend_cache_lifetime() {
         let mut current = mesh::Cache::new(Arc::from([mesh()]));
         let previous = current.clone();
@@ -591,16 +737,12 @@ impl Layer {
         }
 
         let mut solid_vertex_offset = 0;
-        let mut solid_uniform_offset = 0;
         let mut gradient_vertex_offset = 0;
-        let mut gradient_uniform_offset = 0;
         let mut index_offset = 0;
 
         for mesh in meshes {
             // Snapping vertices here would shift them when the MSAA target resizes.
             // Snap only the physical scissor rectangles.
-            let uniforms = Uniforms::new(transformation * mesh.transformation());
-
             let indices = mesh.indices();
 
             index_offset += self
@@ -615,11 +757,6 @@ impl Layer {
                         solid_vertex_offset,
                         &buffers.vertices,
                     );
-
-                    solid_uniform_offset +=
-                        self.solid
-                            .uniforms
-                            .write(encoder, belt, solid_uniform_offset, &[uniforms]);
                 }
                 Mesh::Gradient { buffers, .. } => {
                     gradient_vertex_offset += self.gradient.vertices.write(
@@ -628,13 +765,35 @@ impl Layer {
                         gradient_vertex_offset,
                         &buffers.vertices,
                     );
+                }
+            }
+        }
+        self.prepare_transformation(encoder, belt, meshes, transformation);
+    }
 
-                    gradient_uniform_offset += self.gradient.uniforms.write(
-                        encoder,
-                        belt,
-                        gradient_uniform_offset,
-                        &[uniforms],
-                    );
+    fn prepare_transformation(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        belt: &mut wgpu::util::StagingBelt,
+        meshes: &[Mesh],
+        transformation: Transformation,
+    ) {
+        let mut solid_offset = 0;
+        let mut gradient_offset = 0;
+        for mesh in meshes {
+            let uniforms = [Uniforms::new(transformation * mesh.transformation())];
+            match mesh {
+                Mesh::Solid { .. } => {
+                    solid_offset +=
+                        self.solid
+                            .uniforms
+                            .write(encoder, belt, solid_offset, &uniforms);
+                }
+                Mesh::Gradient { .. } => {
+                    gradient_offset +=
+                        self.gradient
+                            .uniforms
+                            .write(encoder, belt, gradient_offset, &uniforms);
                 }
             }
         }

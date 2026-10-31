@@ -69,6 +69,9 @@ impl App {
             }
             ApplicationMessage::SessionFlush => self.flush_session(),
             ApplicationMessage::SessionPersisted(result) => self.session_persisted(result),
+            ApplicationMessage::ShutdownWindowsCaptured(windows) => {
+                self.shutdown_windows_captured(windows)
+            }
             ApplicationMessage::ShutdownPersisted(result) => self.shutdown_persisted(result),
             ApplicationMessage::SettingsFlush => self.flush_settings(),
             ApplicationMessage::RefreshLoadingFind => self.refresh_loading_find(),
@@ -80,6 +83,11 @@ impl App {
             ApplicationMessage::Shortcut(shortcut) => self.update_shortcut(shortcut),
             ApplicationMessage::RuntimeEvent(event, status, window_id) => {
                 self.update_runtime_event(event, status, window_id)
+            }
+            ApplicationMessage::RuntimeEvents(events) => {
+                Task::batch(events.into_iter().map(|(event, status, window)| {
+                    self.update(Message::RuntimeEvent(event, status, window))
+                }))
             }
             ApplicationMessage::EditorAction(document_id, action) => {
                 self.update_editor(document_id, action)

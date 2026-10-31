@@ -4,6 +4,69 @@ use super::*;
 use crate::editor::widget::{scroll, scrollbar};
 
 #[test]
+fn wheel_input_at_scroll_limits_keeps_settled_pixels_and_schedules_no_frame() {
+    for smooth in [false, true] {
+        for precise in [false, true] {
+            for at_end in [false, true] {
+                let mut editor = TestEditor::new(&"abcdefgh\n".repeat(100));
+                editor.smooth_scrolling = smooth;
+                editor.max_horizontal_px = 500.0;
+                if at_end {
+                    let visible_rows = if smooth || precise {
+                        editor.layout.complete_visible_row_capacity().max(1)
+                    } else {
+                        1
+                    };
+                    editor.layout.scroll.first_visible_row = editor
+                        .viewport
+                        .visible_row_count()
+                        .saturating_sub(visible_rows);
+                    editor.layout.scroll.horizontal_px = editor.max_horizontal_px;
+                }
+                editor.dispatch(
+                    Event::Window(window::Event::RedrawRequested(editor.now)),
+                    mouse::Cursor::Unavailable,
+                );
+                let before = editor.displayed_layout();
+                let distance = if at_end { -8.0 } else { 8.0 };
+                for _ in 0..3 {
+                    let delta = if precise {
+                        mouse::ScrollDelta::Pixels {
+                            x: distance,
+                            y: distance,
+                        }
+                    } else {
+                        mouse::ScrollDelta::Lines {
+                            x: distance.signum(),
+                            y: distance.signum(),
+                        }
+                    };
+                    let messages = editor.wheel(delta);
+                    assert!(
+                        messages.is_empty(),
+                        "unchanged scroll must publish no action"
+                    );
+                    assert_eq!(editor.last_redraw, window::RedrawRequest::Wait);
+                    assert_eq!(editor.state.scroll_fast_until.get(), None);
+                    assert_eq!(editor.displayed_layout(), before);
+                }
+                let messages = editor.wheel(mouse::ScrollDelta::Pixels {
+                    x: -distance,
+                    y: -distance,
+                });
+                assert!(editor.state.scroll_fast_until.get().is_some());
+                assert_eq!(editor.last_redraw, window::RedrawRequest::NextFrame);
+                assert!(
+                    messages
+                        .iter()
+                        .any(|message| matches!(message, EditorAction::ScrollToHorizontal { .. }))
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn precise_events_in_one_batch_accumulate_before_document_scroll_updates() {
     for smooth in [false, true] {
         let mut editor = TestEditor::new(&format!("{}\n", "abcdefgh".repeat(50)).repeat(100));

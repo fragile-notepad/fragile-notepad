@@ -84,6 +84,7 @@ These patches adapt Iced to Fragile Notepad's
   while in use. Each pass keeps separate blit parameters; discard multisample
   contents after resolving them.
 - Keep separate GPU mesh uploads when one cache appears at several positions.
+  Reuse unused uploads when possible, updating only transform uniforms.
   Remove unused transforms after painting and release uploads when their cache
   owner is dropped, including uploads held by other renderers. Advance index
   offsets when a mesh is clipped out.

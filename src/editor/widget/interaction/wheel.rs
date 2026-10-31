@@ -50,13 +50,13 @@ pub(super) fn scroll_wheel<Message, Paragraph>(
         let scroll = state.smooth_scroll.get_or_insert_with(new_scroll);
         let previous_row = scroll.target_row();
         let previous_horizontal = scroll.target_horizontal_milli();
-        if animate_wheel {
-            scroll.scroll_by(lines, horizontal_px, max_horizontal_px, context.now);
+        let changed = if animate_wheel {
+            scroll.scroll_by(lines, horizontal_px, max_horizontal_px, context.now)
         } else if context.smooth_scrolling && !ended {
-            scroll.scroll_precise(lines, horizontal_px, max_horizontal_px, context.now);
+            scroll.scroll_precise(lines, horizontal_px, max_horizontal_px, context.now)
         } else {
-            scroll.scroll_direct(lines, horizontal_px, max_horizontal_px, context.now);
-        }
+            scroll.scroll_direct(lines, horizontal_px, max_horizontal_px, context.now)
+        };
         if scroll.target_row() != previous_row {
             shell.publish((context.on_action)(EditorAction::ScrollToRow(
                 scroll.target_row(),
@@ -67,25 +67,31 @@ pub(super) fn scroll_wheel<Message, Paragraph>(
                 offset_milli: scroll.target_horizontal_milli(),
             }));
         }
-        mark_scroll_fast(state, shell, context.now);
-        shell.request_redraw();
+        if changed {
+            mark_scroll_fast(state, shell, context.now);
+            shell.request_redraw();
+        }
     } else {
         let lines = lines + state.partial_scroll_lines;
         let whole_lines = lines.trunc() as i32;
         state.partial_scroll_lines = lines.fract();
 
         if whole_lines != 0 {
-            shell.publish((context.on_action)(EditorAction::ScrollLines(whole_lines)));
-            mark_scroll_fast(state, shell, context.now);
+            let scroll = state.smooth_scroll.get_or_insert_with(new_scroll);
+            if scroll.scroll_lines(whole_lines) {
+                shell.publish((context.on_action)(EditorAction::ScrollLines(whole_lines)));
+                mark_scroll_fast(state, shell, context.now);
+            }
         }
         if horizontal_px != 0.0 && max_horizontal_px > 0.0 {
             let scroll = state.smooth_scroll.get_or_insert_with(new_scroll);
-            scroll.scroll_direct(0.0, horizontal_px, max_horizontal_px, context.now);
-            shell.publish((context.on_action)(EditorAction::ScrollToHorizontal {
-                offset_milli: scroll.target_horizontal_milli(),
-            }));
-            mark_scroll_fast(state, shell, context.now);
-            shell.request_redraw();
+            if scroll.scroll_direct(0.0, horizontal_px, max_horizontal_px, context.now) {
+                shell.publish((context.on_action)(EditorAction::ScrollToHorizontal {
+                    offset_milli: scroll.target_horizontal_milli(),
+                }));
+                mark_scroll_fast(state, shell, context.now);
+                shell.request_redraw();
+            }
         }
     }
 }

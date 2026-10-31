@@ -66,7 +66,8 @@ copying remain future work.
 
 Icons reuse cached paths and tessellated meshes when they move. Each backend has
 a limited-size geometry cache. Vulkan keeps separate uploads when one cached mesh
-appears at several positions. Its 4× MSAA passes cover only visible geometry
+appears at several positions and reuses their vertex and index buffers when only
+possible. Its 4× MSAA passes cover only visible geometry
 inside the damaged region. Sequential passes share scratch textures and keep
 separate shader parameters.
 
@@ -87,10 +88,14 @@ retained paths at small dimensions.
 
 ## Application scheduling
 
-Native movement and unhandled runtime events do not publish application messages
-that rebuild every window's view. Identical physical sizes and effective DPI
-preserve the native viewport version, avoiding redundant surface configuration
-during dragging or duplicate resize notifications.
+Native movement waits for 150 ms without another move before publishing a
+placement update. Ordinary wheel events stay in widgets; Ctrl/Command wheel
+zoom still reaches the application. Consecutive queued pinch packets share a
+layout update without delaying new input, preserving their individual zoom
+steps and input order. Closing captures native placement before the final session
+save. Identical physical sizes and effective DPI preserve the native viewport
+version, avoiding redundant surface configuration during dragging or duplicate
+resize notifications.
 
 The workbench retains settled chrome and editor surfaces while forwarding input,
 focus operations, IME, mouse interaction, and overlays. Child deadlines remain

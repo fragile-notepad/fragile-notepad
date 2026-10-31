@@ -13,6 +13,9 @@ use crate::message::Message;
 use super::App;
 use super::windowing::managed::ManagedWindow;
 
+mod events;
+pub(super) use events::subscription;
+
 impl App {
     pub(super) fn update_runtime_event(
         &mut self,

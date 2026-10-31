@@ -106,8 +106,8 @@ field's reduced resolution, and editor optimizations stay enabled in both modes.
 | `--help` | Show all supported options. |
 | `WGPU_ADAPTER_NAME` | Select a Vulkan adapter by a case-insensitive name substring. |
 
-Redraws are forced at no more than 60 Hz. Timestamp readback waits happen outside
-CPU timing. Measurements exclude queued atlas uploads, swapchain presentation,
+Redraws follow `--fps`, which defaults to 120 Hz. Timestamp readback waits happen
+outside CPU timing. Measurements exclude queued atlas uploads, swapchain presentation,
 desktop composition, and background task execution. It measures neither OS GPU
 utilization nor native window-drag latency.
 

@@ -118,6 +118,26 @@ impl App {
             return self.close_documents_for_exit();
         }
         self.lifecycle.begin_shutdown();
+        // A window can close before its delayed move notification arrives.
+        // Read native placement before taking the final session snapshot.
+        Task::batch(self.editor_windows.values().map(|editor| {
+            let id = editor.native;
+            window::position(id)
+                .then(move |position| window::size(id).map(move |size| (id, position, size)))
+        }))
+        .collect()
+        .map(Message::ShutdownWindowsCaptured)
+    }
+
+    pub(super) fn shutdown_windows_captured(
+        &mut self,
+        windows: Vec<(window::Id, Option<iced::Point>, iced::Size)>,
+    ) -> Task<Message> {
+        for (id, position, size) in windows {
+            let _ = self.update_window(crate::message::WindowMessage::WindowGeometry(
+                id, position, size,
+            ));
+        }
         let settings = (!self.settings_persistence.read_failed())
             .then(|| settings_store::save_settings(self.settings.clone()));
         let session = crate::services::session_store::save_session(self.capture_session());

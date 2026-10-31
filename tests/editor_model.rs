@@ -501,6 +501,36 @@ fn editor_model_word_range_ignores_non_word_positions_except_line_end() {
 }
 
 #[test]
+fn editor_model_word_range_keeps_line_byte_columns_and_clamped_positions() {
+    let buffer = EditorBuffer::from_text("first\r\n\u{597d} $value_2\n\r\n\rtail");
+    let expected = Some(EditorRange::new(
+        EditorPosition::new(1, "\u{597d} ".len()),
+        EditorPosition::new(1, "\u{597d} $value_2".len()),
+    ));
+
+    for column in ["\u{597d} ".len(), "\u{597d} $va".len(), usize::MAX] {
+        assert_eq!(
+            word_range_at_position(&buffer, EditorPosition::new(1, column), "php"),
+            expected,
+        );
+    }
+    for position in [
+        EditorPosition::new(1, 1),
+        EditorPosition::new(1, "\u{597d}".len()),
+        EditorPosition::new(2, usize::MAX),
+    ] {
+        assert_eq!(word_range_at_position(&buffer, position, "php"), None);
+    }
+    assert_eq!(
+        word_range_at_position(&buffer, EditorPosition::new(usize::MAX, usize::MAX), "php",),
+        Some(EditorRange::new(
+            EditorPosition::new(3, 0),
+            EditorPosition::new(3, "tail".len()),
+        )),
+    );
+}
+
+#[test]
 fn editor_model_fold_provider_detects_indentation_and_multiline_braces() {
     let buffer =
         EditorBuffer::from_text("fn main() {\n    let x = [\n        1,\n    ];\n}\nlet y = 2;");

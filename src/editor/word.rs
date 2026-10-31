@@ -1,7 +1,7 @@
 //! Syntax-specific word selection, distinct from keyboard word movement rules.
 
 use super::buffer::EditorBuffer;
-use super::position::{EditorPosition, EditorRange, position_for_byte_offset};
+use super::position::{EditorPosition, EditorRange};
 use super::syntax_hints::SyntaxHintSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,26 +57,24 @@ fn word_range_with_characters(
     position: EditorPosition,
     word_characters: &WordCharacters,
 ) -> Option<EditorRange> {
-    let text = buffer.text();
-    let offset = word_offset_at_position(buffer, position, word_characters)?;
+    let position = buffer.clamp_position(position);
+    // Syntax word characters exclude CR/LF, so the word stays on this line.
+    let text = buffer.line(position.line)?;
+    let offset = word_offset_at_column(&text, position.column, word_characters)?;
     let start = word_start_offset(&text, offset, word_characters);
     let end = word_end_offset(&text, offset, word_characters);
 
     Some(EditorRange::new(
-        position_for_byte_offset(&text, start)?,
-        position_for_byte_offset(&text, end)?,
+        EditorPosition::new(position.line, start),
+        EditorPosition::new(position.line, end),
     ))
 }
 
-fn word_offset_at_position(
-    buffer: &EditorBuffer,
-    position: EditorPosition,
+fn word_offset_at_column(
+    text: &str,
+    offset: usize,
     word_characters: &WordCharacters,
 ) -> Option<usize> {
-    let position = buffer.clamp_position(position);
-    let text = buffer.text();
-    let offset = buffer.byte_offset(position);
-
     if text
         .get(offset..)
         .and_then(|tail| tail.chars().next())
@@ -85,15 +83,11 @@ fn word_offset_at_position(
         return Some(offset);
     }
 
-    let line_end = EditorPosition::new(
-        position.line,
-        buffer.line(position.line).unwrap_or_default().len(),
-    );
-    if position != line_end {
+    if offset != text.len() {
         return None;
     }
 
-    let previous = previous_char_offset(&text, offset)?;
+    let previous = previous_char_offset(text, offset)?;
     text[previous..]
         .chars()
         .next()

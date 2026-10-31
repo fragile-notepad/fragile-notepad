@@ -1,8 +1,12 @@
+//! Find navigation and replacement. Literal searches stream rope chunks; regex
+//! searches join them so anchors and captures see the complete input.
+
 use std::collections::VecDeque;
 use std::ops::{ControlFlow, Range};
 
 use regex::{Regex, RegexBuilder};
 
+/// Half-open UTF-8 byte offsets into the complete input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextMatch {
     pub start: usize,
@@ -27,6 +31,7 @@ impl TextMatch {
     }
 }
 
+/// Cached find results. Refresh after changing the text or query options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindState {
     pub query: String,
@@ -43,7 +48,9 @@ pub struct FindState {
     pub matches_stale: bool,
     /// Identifies the source buffer for navigation, when used by an editor.
     pub match_context: Option<u64>,
+    /// Maximum cached results; `None` keeps all results. Replace All ignores it.
     pub match_limit: Option<usize>,
+    /// True only after a match beyond `match_limit` has actually been found.
     pub matches_limited: bool,
 }
 
@@ -131,6 +138,7 @@ impl FindState {
         self.refresh_matches_in_chunks([text]);
     }
 
+    /// Respects `match_limit` and stores regex errors in `error`.
     pub fn refresh_matches_in_chunks<'a>(&mut self, chunks: impl IntoIterator<Item = &'a str>) {
         self.matches_stale = false;
         self.error = None;
@@ -173,6 +181,7 @@ impl FindState {
         clippy::should_implement_trait,
         reason = "Search navigation can wrap and has a matching previous operation; it is not an iterator."
     )]
+    /// Stops at the last result unless `wrap_around` is enabled.
     pub fn next(&mut self) -> Option<TextMatch> {
         if self.matches.is_empty() {
             self.current_match = None;
@@ -206,6 +215,7 @@ impl FindState {
         self.current()
     }
 
+    /// Returns `None` for a missing match or invalid byte range.
     pub fn replace_current(&mut self, text: &str) -> Option<String> {
         let current = self.current()?;
         let replacement = replacement_for_match(
@@ -223,6 +233,8 @@ impl FindState {
         Some(replaced)
     }
 
+    /// Ignores `match_limit` and refreshes cached matches afterward.
+    /// Empty or invalid queries leave the text unchanged.
     pub fn replace_all(&mut self, text: &str) -> (String, usize) {
         let Ok(Some(search)) = PreparedSearch::new(&self.query, self.options()) else {
             self.refresh_matches(text);
@@ -261,7 +273,9 @@ impl FindState {
 pub enum SearchMode {
     #[default]
     Normal,
+    /// Expands `\n`, `\r`, `\t`, `\0`, and `\\` in both strings before use.
     Extended,
+    /// Uses regex syntax for queries and `$name` or `$1` captures in replacements.
     Regex,
 }
 
@@ -273,6 +287,7 @@ pub enum SearchError {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SearchOptions {
     pub case_sensitive: bool,
+    /// Excludes matches adjacent to Unicode alphanumeric characters or `_`.
     pub whole_word: bool,
     pub mode: SearchMode,
 }
@@ -300,6 +315,7 @@ enum PreparedMatcher {
 }
 
 impl PreparedSearch {
+    /// Returns `Ok(None)` for an empty query.
     pub fn new(query: &str, options: SearchOptions) -> Result<Option<Self>, SearchError> {
         if query.is_empty() {
             return Ok(None);
@@ -351,6 +367,7 @@ impl PreparedSearch {
     }
 
     /// Stops scanning as soon as the visitor returns `ControlFlow::Break`.
+    /// Regex scans still collect all input before the first callback.
     pub fn try_for_each_match_in_chunks<'a, B>(
         &self,
         chunks: impl IntoIterator<Item = &'a str>,
@@ -367,6 +384,8 @@ impl PreparedSearch {
         }
     }
 
+    /// Regex captures use the complete `text`. If the range no longer matches,
+    /// returns the replacement literally without expanding captures.
     pub fn replacement_for_match(
         &self,
         text: &str,
@@ -390,6 +409,7 @@ pub fn compute_matches(text: &str, query: &str, case_sensitive: bool) -> Vec<Tex
     compute_matches_with_options(text, query, SearchOptions::normal(case_sensitive, false))
 }
 
+/// Invalid regexes yield no matches; use `try_matches` to receive errors.
 pub fn compute_matches_with_options(
     text: &str,
     query: &str,
@@ -398,6 +418,7 @@ pub fn compute_matches_with_options(
     try_matches(text, query, options).unwrap_or_default()
 }
 
+/// Empty or invalid queries yield no matches.
 pub fn compute_matches_in_chunks<'a>(
     chunks: impl IntoIterator<Item = &'a str>,
     query: &str,
@@ -459,6 +480,7 @@ fn visit_literal_matches_in_chunks<'a, B>(
 
     // Keep a single scan cursor across chunks, plus both word-boundary neighbors.
     // Re-scanning overlapping chunk suffixes can change non-overlap semantics.
+    // Compare equal-length character windows; this is not full Unicode case folding.
     let query_chars: Vec<char> = query.chars().collect();
     let query_folded = query.to_lowercase();
     let width = query_chars.len();
@@ -488,6 +510,8 @@ fn visit_literal_matches_in_chunks<'a, B>(
             || (!before.is_some_and(is_word_char)
                 && !window.get(width).copied().is_some_and(is_word_char));
         let accepted = equal && whole_word;
+        // Match str::match_indices for case-sensitive searches: a literal hit
+        // consumes its full width even when whole-word filtering rejects it.
         let advance = if accepted || (equal && options.case_sensitive) {
             width
         } else {
@@ -529,6 +553,7 @@ fn visit_regex_matches<B>(
     ControlFlow::Continue(())
 }
 
+/// An empty query returns the replacement unchanged.
 pub fn replacement_for_match(
     text: &str,
     text_match: TextMatch,
@@ -576,6 +601,7 @@ fn regex_replacement_for_match(
     Some(expanded)
 }
 
+/// Returns `None` for reversed, out-of-bounds, or non-character-boundary ranges.
 pub fn replace_current(text: &str, text_match: TextMatch, replacement: &str) -> Option<String> {
     if text_match.end > text.len()
         || text_match.start > text_match.end

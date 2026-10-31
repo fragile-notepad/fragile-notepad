@@ -1,9 +1,12 @@
+//! Text encoding and decoding; file I/O lives in `services`.
+
 use std::borrow::Cow;
 
 const UTF8_BOM_BYTES: &[u8] = &[0xef, 0xbb, 0xbf];
 const UTF16BE_BOM_BYTES: &[u8] = &[0xfe, 0xff];
 const UTF16LE_BOM_BYTES: &[u8] = &[0xff, 0xfe];
 
+/// Variants ending in `Bom` write an encoding marker, separate from document text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextEncoding {
     Utf8,
@@ -73,6 +76,7 @@ pub enum EncodingError {
 pub struct DecodedText {
     pub text: String,
     pub encoding: TextEncoding,
+    /// Decoding replaced malformed input or encountered an incomplete UTF-16 unit.
     pub had_errors: bool,
 }
 
@@ -134,6 +138,7 @@ impl TextEncoding {
         Self::Oem869,
     ];
 
+    /// Accepts exact UI labels, not `encoding_rs` aliases.
     pub fn from_label(label: &str) -> Option<Self> {
         Self::ALL
             .iter()
@@ -282,6 +287,8 @@ impl TextEncoding {
     }
 }
 
+/// Removes one BOM and uses its encoding. Without a BOM, tries UTF-8 then
+/// Windows-1252. `had_errors` describes the final decoding pass.
 pub fn decode_bytes(bytes: &[u8]) -> DecodedText {
     if bytes.starts_with(UTF8_BOM_BYTES) {
         let (text, had_errors) = decode_with_encoding(encoding_rs::UTF_8, &bytes[3..]);
@@ -318,6 +325,8 @@ pub fn decode_bytes(bytes: &[u8]) -> DecodedText {
     }
 }
 
+/// Preserves content U+FEFF characters and rejects unmappable text.
+/// Adds a BOM when selected, but no final line ending.
 pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, EncodingError> {
     match encoding {
         TextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
@@ -346,6 +355,8 @@ pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, Encodi
     }
 }
 
+/// Encodes chunks without an intermediate `String`. A supplied final ending is
+/// always appended; the caller must check whether the text already ends with it.
 pub fn encode_utf8_chunks_for_save<'a>(
     chunks: impl IntoIterator<Item = &'a str>,
     append_final_ending: Option<&str>,
@@ -376,6 +387,7 @@ fn decode_with_encoding(encoding: &'static encoding_rs::Encoding, bytes: &[u8]) 
 }
 
 fn decode_utf16(bytes: &[u8], encoding: TextEncoding, big_endian: bool) -> DecodedText {
+    // A trailing odd byte is omitted but still counts as a decoding error.
     let mut had_errors = !bytes.len().is_multiple_of(2);
     let units = bytes.chunks_exact(2).map(|chunk| {
         if big_endian {
@@ -421,6 +433,7 @@ fn encode_utf16(text: &str, big_endian: bool) -> Vec<u8> {
 }
 
 fn encode_iso_8859_1(text: &str) -> Result<Vec<u8>, EncodingError> {
+    // encoding_rs maps Latin-1 labels to Windows-1252; preserve actual Latin-1 here.
     text.chars()
         .map(|ch| {
             let code = ch as u32;

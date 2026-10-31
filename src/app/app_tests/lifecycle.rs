@@ -4,6 +4,32 @@ use iced::backend;
 use iced::event::{Event, Status};
 use iced::mouse;
 
+#[test]
+fn finder_opens_after_last_window_closes() {
+    let (mut app, _) = App::new();
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
+    app.settings.exit_on_last_window_close = false;
+    let _ = app.update(Message::CloseFile);
+    assert!(app.editor_windows.is_empty());
+
+    let paths = vec![
+        std::env::temp_dir().join("finder-first.rs"),
+        std::env::temp_dir().join("finder-second.txt"),
+    ];
+    let task = app.update(Message::OpenPaths(paths.clone()));
+
+    assert!(task.units() > 0);
+    assert_eq!(app.editor_windows.len(), 1);
+    assert!(app.main_window_id.is_some());
+    let opened = app
+        .workspace
+        .documents()
+        .iter()
+        .filter_map(|document| document.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(opened, paths);
+}
+
 fn assert_cancel_restores_focus_without_exit(task: iced::Task<Message>, native: iced::window::Id) {
     let mut actions =
         iced_runtime::task::into_stream(task).expect("cancellation restores editor focus");

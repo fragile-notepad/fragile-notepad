@@ -25,6 +25,7 @@ ln -s libvulkan.1.dylib "$package/lib/libvulkan.dylib"
 cp -L "$molten/lib/libMoltenVK.dylib" "$package/lib/"
 cp "$repo_root/LICENSE" "$package/"
 cp "$repo_root/assets/icons/NOTICE.txt" "$package/ICON-NOTICES.txt"
+cp "$repo_root/assets/icons/file-types/LICENSE" "$package/FILE-TYPE-ICON-NOTICES.txt"
 # Cargo writes the notice for this exact artifact, including the complete OFL.
 # A fresh local build may not have the explicit CI preparation directory.
 font_notices="$repo_root/target/release/FONT-NOTICES.txt"
@@ -82,7 +83,17 @@ done
 # Keep the command-line layout and provide a Finder-launchable application with
 # the user-facing name and icon registered in its bundle metadata.
 app_bundle="$package/Fragile Notepad.app"
-python3 "$repo_root/scripts/create-macos-app.py" "$package" "$app_bundle" --icon "$app_icon"
+version="$(python3 - "$repo_root/Cargo.toml" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+with Path(sys.argv[1]).open("rb") as source:
+    print(tomllib.load(source)["package"]["version"])
+PY
+)"
+python3 "$repo_root/scripts/create-macos-app.py" "$package" "$app_bundle" \
+    --icon "$app_icon" --version "$version"
 codesign --force --sign - --timestamp=none "$app_bundle/Contents/MacOS/Fragile Notepad"
 codesign --force --sign - --timestamp=none "$app_bundle"
 codesign --verify --strict "$app_bundle"

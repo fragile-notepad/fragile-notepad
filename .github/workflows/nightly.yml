@@ -78,13 +78,17 @@ jobs:
             artifact: fragile-notepad-windows-x64
             archive: fragile-notepad-windows-x64.zip
           - name: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact: fragile-notepad-linux-x64
             archive: fragile-notepad-linux-x64.tar.gz
-          - name: macos
+          - name: macos-arm64
             os: macos-latest
-            artifact: fragile-notepad-macos
-            archive: fragile-notepad-macos.tar.gz
+            artifact: fragile-notepad-macos-arm64
+            archive: fragile-notepad-macos-arm64.tar.gz
+          - name: macos-x64
+            os: macos-15-intel
+            artifact: fragile-notepad-macos-x64
+            archive: fragile-notepad-macos-x64.tar.gz
 
     steps:
       - name: Checkout
@@ -101,13 +105,19 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python asset and font tooling
-        run: python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt
+        run: python -m pip install -r scripts/requirements-assets.txt -r scripts/requirements-font-profiles.txt cmake==3.31.6
+
+      - name: Install Windows installer compiler
+        if: runner.os == 'Windows'
+        run: choco install nsis --yes --no-progress
 
       - name: Test font preparation
         run: python -m unittest discover -s scripts -p 'test_*font_profiles.py'
 
       - name: Test package validation tooling
-        run: python -m unittest discover -s scripts -p test_check_package.py
+        run: |
+          python -m unittest discover -s scripts -p test_check_package.py
+          python -m unittest discover -s scripts -p test_create_macos_app.py
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -116,10 +126,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'scripts/*font_profiles*', 'scripts/font_families.py', 'scripts/requirements-font-profiles.txt') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'scripts/*font_profiles*', 'scripts/font_families.py', 'scripts/requirements-font-profiles.txt') }}
           restore-keys: |
-            ${{ runner.os }}-release-
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-release-
 
       - name: Install Linux windowing and software Vulkan dependencies
         if: runner.os == 'Linux'
@@ -140,6 +149,9 @@ jobs:
             vulkan-tools \
             pkg-config \
             fontconfig \
+            dpkg-dev \
+            rpm \
+            desktop-file-utils \
             xvfb \
             xauth
 
@@ -213,6 +225,13 @@ jobs:
           cargo check --locked --no-default-features
 
       - name: Build release
+        if: runner.os != 'Windows'
+        run: cargo build --release --locked -j 1
+
+      - name: Build Windows release with the C runtime included
+        if: runner.os == 'Windows'
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release --locked -j 1
 
       - name: Package Windows artifact
@@ -223,6 +242,7 @@ jobs:
           Copy-Item target\release\fragile-notepad.exe dist\package\
           Copy-Item LICENSE dist\package\
           Copy-Item assets\icons\NOTICE.txt dist\package\ICON-NOTICES.txt
+          Copy-Item assets\icons\file-types\LICENSE dist\package\FILE-TYPE-ICON-NOTICES.txt
           if ((Test-Path target\release\FONT-NOTICES.txt) -and ((Get-Item target\release\FONT-NOTICES.txt).Length -gt 0)) {
             Copy-Item target\release\FONT-NOTICES.txt dist\package\
             if (Test-Path target\font-profiles\prepared\licenses) {
@@ -239,6 +259,7 @@ jobs:
           cp target/release/fragile-notepad dist/package/
           cp LICENSE dist/package/
           cp assets/icons/NOTICE.txt dist/package/ICON-NOTICES.txt
+          cp assets/icons/file-types/LICENSE dist/package/FILE-TYPE-ICON-NOTICES.txt
           if [[ -s target/release/FONT-NOTICES.txt ]]; then
             cp target/release/FONT-NOTICES.txt dist/package/
             if [[ -d target/font-profiles/prepared/licenses ]]; then
@@ -270,12 +291,77 @@ jobs:
         shell: bash
         run: python scripts/check_package.py dist/${{ matrix.archive }}
 
+      - name: Build native installers
+        run: |
+          cmake -S scripts/packaging -B target/installer
+          cpack --config target/installer/CPackConfig.cmake -B dist
+
+      - name: Test Linux desktop entry and package contents
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          desktop-file-validate scripts/packaging/linux/fragile-notepad.desktop
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+          rpm --query --package --requires dist/*.rpm
+          rpm --query --package --list dist/*.rpm
+
+      - name: Test Windows install and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/packaging/check-windows.ps1 -Installer (Get-ChildItem dist/*-setup.exe).FullName
+
+      - name: Test macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        run: python scripts/check_package.py dist/*.dmg
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.archive }}
+          path: |
+            dist/${{ matrix.archive }}
+            dist/*-setup.exe
+            dist/*.deb
+            dist/*.rpm
+            dist/*.dmg
           if-no-files-found: error
+
+  test-linux-installers:
+    name: Install on ${{ matrix.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:12
+            install: apt-get update && apt-get install -y python3 /packages/*.deb
+          - name: Ubuntu 22.04
+            image: ubuntu:22.04
+            install: apt-get update && apt-get install -y python3 /packages/*.deb
+          - name: Fedora 43
+            image: fedora:43
+            install: dnf install -y python3 /packages/*.rpm
+          - name: openSUSE Leap 16.0
+            image: opensuse/leap:16.0
+            install: zypper --non-interactive --no-gpg-checks install python3 /packages/*.rpm
+    steps:
+      - name: Download Linux packages
+        uses: actions/download-artifact@v4
+        with:
+          name: fragile-notepad-linux-x64
+          path: dist
+
+      - name: Install package and check CLI on the target distribution
+        env:
+          DISTRO_IMAGE: ${{ matrix.image }}
+          INSTALL_COMMAND: ${{ matrix.install }}
+        run: |
+          docker run --rm -v "$PWD/dist:/packages:ro" "$DISTRO_IMAGE" \
+            sh -ec "$INSTALL_COMMAND && fragile-notepad --version && fragile-notepad --help"
 
   publish:
     name: Publish prerelease
@@ -283,6 +369,7 @@ jobs:
     needs:
       - check-nightly
       - build
+      - test-linux-installers
     if: ${{ needs.check-nightly.outputs.should_run == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
 
     steps:
@@ -308,9 +395,9 @@ jobs:
           Automated nightly build from ${GITHUB_SHA}.
 
           Artifacts:
-          - Windows x64 zip
-          - Linux x64 tar.gz
-          - macOS app bundle and Vulkan runtime tar.gz
+          - Windows x64 installer and portable zip
+          - Linux x64 DEB, RPM, and portable tar.gz
+          - macOS Apple Silicon and Intel DMG and portable tar.gz
           EOF
           )"
 

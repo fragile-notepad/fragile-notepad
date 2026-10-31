@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Fragile Notepad
+GenericName=Text Editor
+Comment=Edit notes and source files
+Exec=fragile-notepad -- %F
+TryExec=fragile-notepad
+Icon=fragile-notepad
+Terminal=false
+Categories=Utility;TextEditor;Development;
+MimeType=text/plain;text/x-log;text/x-csrc;text/x-chdr;text/x-c++src;text/x-c++hdr;text/x-csharp;text/x-java;text/x-kotlin;text/x-go;text/rust;application/vnd.dart;text/x-objcsrc;text/x-objc++src;text/javascript;application/javascript;application/x-javascript;text/html;application/xhtml+xml;text/css;text/x-python;text/x-python3;application/x-php;application/x-ruby;application/x-shellscript;application/x-powershell;application/sql;text/x-lua;text/markdown;application/json;application/schema+json;application/yaml;application/x-yaml;text/yaml;text/x-yaml;application/xml;application/xslt+xml;image/svg+xml;
+StartupNotify=false

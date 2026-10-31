@@ -6,6 +6,7 @@ cd "$repo_root"
 
 cargo fmt --package fragile-notepad --check
 python3 -m unittest discover -s scripts -p test_check_package.py
+python3 -m unittest discover -s scripts -p test_create_macos_app.py
 python3 -m unittest discover -s scripts -p 'test_*font_profiles.py'
 python3 -m unittest discover -s scripts -p test_compile_vector_icons.py
 case "$(uname -s)" in

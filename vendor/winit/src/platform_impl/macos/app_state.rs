@@ -10,7 +10,9 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSRunningApplication,
 };
-use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol};
+use objc2_foundation::{
+    MainThreadMarker, NSArray, NSNotification, NSObject, NSObjectProtocol, NSURL,
+};
 
 use super::event_handler::EventHandler;
 use super::event_loop::{ActiveEventLoop, PanicInfo, notify_windows_of_exit, stop_app_immediately};
@@ -85,6 +87,17 @@ define_class!(
     unsafe impl NSObjectProtocol for ApplicationDelegate {}
 
     unsafe impl NSApplicationDelegate for ApplicationDelegate {
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, _sender: &NSApplication, urls: &NSArray<NSURL>) {
+            for url in urls {
+                if let Some(string) = url.absoluteString() {
+                    self.maybe_queue_event(Event::PlatformSpecific(PlatformSpecific::MacOS(
+                        MacOS::ReceivedUrl(string.to_string()),
+                    )));
+                }
+            }
+        }
+
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
             if !self.is_running()

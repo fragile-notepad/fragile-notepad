@@ -1,0 +1,57 @@
+cmake_minimum_required(VERSION 3.24)
+
+# Cargo owns the application version. CMake only packages an existing build.
+get_filename_component(FRAGILE_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+file(STRINGS "${FRAGILE_REPO_ROOT}/Cargo.toml" version_line REGEX "^version = \"")
+string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" fragile_version "${version_line}")
+project(FragileNotepadPackages VERSION "${fragile_version}" LANGUAGES NONE)
+
+set(FRAGILE_BINARY "${FRAGILE_REPO_ROOT}/target/release/fragile-notepad${CMAKE_EXECUTABLE_SUFFIX}"
+    CACHE FILEPATH "Release executable built by Cargo")
+get_filename_component(binary_directory "${FRAGILE_BINARY}" DIRECTORY)
+set(font_notices "${binary_directory}/FONT-NOTICES.txt")
+set(font_licenses "${FRAGILE_REPO_ROOT}/target/font-profiles/prepared/licenses")
+
+function(fragile_install_notices destination)
+    install(FILES "${FRAGILE_REPO_ROOT}/LICENSE" DESTINATION "${destination}")
+    install(FILES "${FRAGILE_REPO_ROOT}/assets/icons/NOTICE.txt"
+            DESTINATION "${destination}" RENAME ICON-NOTICES.txt)
+    install(FILES "${FRAGILE_REPO_ROOT}/assets/icons/file-types/LICENSE"
+            DESTINATION "${destination}" RENAME FILE-TYPE-ICON-NOTICES.txt)
+    if(NOT EXISTS "${font_notices}")
+        message(FATAL_ERROR "Missing font notices: ${font_notices}. Build the release executable first.")
+    endif()
+    file(SIZE "${font_notices}" notice_size)
+    if(notice_size GREATER 0)
+        install(FILES "${font_notices}" DESTINATION "${destination}")
+        if(IS_DIRECTORY "${font_licenses}")
+            install(DIRECTORY "${font_licenses}/" DESTINATION "${destination}/font-licenses")
+        endif()
+    endif()
+endfunction()
+
+set(CPACK_PACKAGE_NAME fragile-notepad)
+set(CPACK_PACKAGE_VENDOR "Fragile Notepad authors")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/fragile-notepad/fragile-notepad")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Text editor for notes and source files")
+set(CPACK_PACKAGE_DESCRIPTION "Desktop text editor for notes and source files, with multiple windows, syntax highlighting, and session recovery. Code uses BSD-3-Clause; see the installed artwork notices for separate terms.")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DIRECTORY "${FRAGILE_REPO_ROOT}/dist")
+set(CPACK_RESOURCE_FILE_LICENSE "${FRAGILE_REPO_ROOT}/LICENSE")
+set(CPACK_MONOLITHIC_INSTALL ON)
+set(CPACK_VERBATIM_VARIABLES ON)
+
+if(WIN32)
+    set(CPACK_PACKAGE_FILE_NAME "fragile-notepad-${PROJECT_VERSION}-windows-x64-setup")
+    include(windows.cmake)
+elseif(APPLE)
+    set(CPACK_PACKAGE_FILE_NAME "fragile-notepad-${PROJECT_VERSION}-macos-${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    include(macos.cmake)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CPACK_PACKAGE_FILE_NAME "fragile-notepad-${PROJECT_VERSION}-linux-${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    include(linux.cmake)
+else()
+    message(FATAL_ERROR "Installer packaging supports Windows, Linux, and macOS.")
+endif()
+
+include(CPack)

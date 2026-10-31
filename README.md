@@ -20,8 +20,9 @@ macOS support.
 
 ## Get started
 
-Download an archive from [Releases](https://github.com/fragile-notepad/fragile-notepad/releases),
-extract it, and follow the [getting started guide](docs/getting-started.md).
+Download an installer or portable archive from
+[Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
+and follow the [getting started guide](docs/getting-started.md).
 
 ## Screenshots
 
@@ -48,7 +49,7 @@ extract it, and follow the [getting started guide](docs/getting-started.md).
 | --- | --- |
 | Build the editor | [Build from source](docs/development/building.md) |
 | Validate a change | [Test and validate](docs/development/testing.md) |
-| Create a release archive | [Packaging](docs/development/packaging.md) |
+| Create installers or release archives | [Packaging](docs/development/packaging.md) |
 | Understand the implementation | [Application architecture](docs/architecture/application.md) |
 
 ## License

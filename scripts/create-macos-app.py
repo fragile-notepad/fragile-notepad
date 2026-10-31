@@ -1,6 +1,7 @@
 """Wrap a prepared portable macOS package in its named application bundle."""
 
 import argparse
+import json
 import os
 import plistlib
 import shlex
@@ -11,6 +12,7 @@ from pathlib import Path
 
 
 APP_NAME = "Fragile Notepad"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 MACH_O_MAGIC = (
     b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
     b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
@@ -41,7 +43,7 @@ def copy_runtime(package, runtime):
         source = package / name
         if source.is_dir():
             shutil.copytree(source, runtime / name, symlinks=True)
-    for name in ("LICENSE", "ICON-NOTICES.txt", "FONT-NOTICES.txt"):
+    for name in ("LICENSE", "ICON-NOTICES.txt", "FILE-TYPE-ICON-NOTICES.txt", "FONT-NOTICES.txt"):
         source = package / name
         if source.is_file():
             shutil.copy2(source, runtime / name)
@@ -67,7 +69,26 @@ def install_native_launcher(destination, launcher_binary, compiler, minimum_syst
     destination.chmod(0o755)
 
 
-def write_bundle_metadata(contents, version, minimum_system_version, icon):
+def document_types(icon_directory):
+    entries = json.loads((REPO_ROOT / "assets/icons/file-types/catalog.json").read_text())
+    documents = []
+    for entry in entries:
+        if not entry["extensions"]:
+            continue
+        source = icon_directory / f"{entry['id']}.icns"
+        if not source.is_file():
+            raise ValueError(f"missing generated document icon: {source}")
+        documents.append((source, {
+            "CFBundleTypeName": f"{entry['name']} document",
+            "CFBundleTypeExtensions": [extension.removeprefix(".") for extension in entry["extensions"]],
+            "CFBundleTypeIconFile": f"FileType-{entry['id']}.icns",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+        }))
+    return documents
+
+
+def write_bundle_metadata(contents, version, minimum_system_version, icon, documents):
     metadata = {
         "CFBundleIdentifier": "com.fragilenotepad.app",
         "CFBundleName": APP_NAME,
@@ -79,7 +100,10 @@ def write_bundle_metadata(contents, version, minimum_system_version, icon):
         "CFBundleShortVersionString": version,
         "LSMinimumSystemVersion": minimum_system_version,
         "NSHighResolutionCapable": True,
+        "CFBundleDocumentTypes": [metadata for _, metadata in documents],
     }
+    for source, document in documents:
+        shutil.copy2(source, contents / "Resources" / document["CFBundleTypeIconFile"])
     if icon is not None:
         shutil.copy2(icon, contents / "Resources/FragileNotepad.icns")
         metadata["CFBundleIconFile"] = "FragileNotepad.icns"
@@ -93,6 +117,9 @@ def main():
     parser.add_argument("package", type=Path)
     parser.add_argument("bundle", type=Path)
     parser.add_argument("--icon", type=Path)
+    parser.add_argument("--file-type-icons", type=Path,
+                        default=REPO_ROOT / "target/file-type-icons/macos",
+                        help="directory of generated document .icns files")
     parser.add_argument("--version", default="0.1.0")
     parser.add_argument("--launcher-binary", type=Path,
                         help="prebuilt native macos-app-launcher for cross packaging")
@@ -101,6 +128,7 @@ def main():
         package = args.package.resolve(strict=True)
         bundle = args.bundle.resolve()
         validate_inputs(package, args.icon, args.launcher_binary)
+        documents = document_types(args.file_type_icons)
         compiler = []
         if args.launcher_binary is None:
             compiler = shlex.split(os.environ.get("CC", "cc"))
@@ -121,7 +149,7 @@ def main():
     install_native_launcher(
         macos / APP_NAME, args.launcher_binary, compiler, minimum_system_version,
     )
-    write_bundle_metadata(contents, args.version, minimum_system_version, args.icon)
+    write_bundle_metadata(contents, args.version, minimum_system_version, args.icon, documents)
     print(bundle)
 
 

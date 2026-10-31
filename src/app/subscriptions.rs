@@ -33,6 +33,7 @@ impl App {
         Subscription::batch([
             single_instance_subscription(),
             macos_menu_subscription(),
+            macos_file_subscription(),
             event::listen_reopen().map(|()| Message::ApplicationReopened),
             iced::system::theme_changes().map(Message::SystemColorModeChanged),
             shortcuts::subscription(),
@@ -159,6 +160,31 @@ fn macos_menu_subscription() -> Subscription<Message> {
     }
 }
 
+fn macos_file_subscription() -> Subscription<Message> {
+    #[cfg(any(target_os = "macos", test))]
+    {
+        event::listen_url()
+            .filter_map(|value| file_url_path(&value).map(|path| Message::OpenPaths(vec![path])))
+    }
+    #[cfg(not(any(target_os = "macos", test)))]
+    {
+        Subscription::none()
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn file_url_path(value: &str) -> Option<std::path::PathBuf> {
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "file"
+        || url.host_str().is_some_and(|host| host != "localhost")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    url.to_file_path().ok()
+}
+
 pub fn register_single_instance(instance: PrimaryInstance) {
     let _ = SINGLE_INSTANCE.set(instance);
 }
@@ -219,6 +245,44 @@ mod tests {
     use super::*;
     use futures::channel::mpsc;
     use futures::{FutureExt, StreamExt};
+
+    #[test]
+    fn finder_file_urls_preserve_paths() {
+        let paths = [
+            std::env::temp_dir().join("first file #1.rs"),
+            std::env::temp_dir().join("second-\u{4e8c}.txt"),
+        ];
+        let events = paths.iter().map(|path| {
+            subscription::Event::PlatformSpecific(subscription::PlatformSpecific::MacOS(
+                subscription::MacOS::ReceivedUrl(url::Url::from_file_path(path).unwrap().into()),
+            ))
+        });
+        let recipe = subscription::into_recipes(macos_file_subscription())
+            .pop()
+            .unwrap();
+        let mut output = recipe.stream(futures::stream::iter(events.collect::<Vec<_>>()).boxed());
+        for path in paths {
+            let Some(Some(Message::OpenPaths(opened))) = output.next().now_or_never() else {
+                panic!("expected an open-files message from Finder");
+            };
+            assert_eq!(opened, vec![path]);
+        }
+        assert!(matches!(output.next().now_or_never(), Some(None)));
+    }
+
+    #[test]
+    fn finder_rejects_unsupported_urls() {
+        for value in [
+            "https://example.com/notes.txt",
+            "fragile://open/notes.txt",
+            "file://remote-host/notes.txt",
+            "file:///notes.txt?query",
+            "file:///notes.txt#fragment",
+            "not a URL",
+        ] {
+            assert_eq!(file_url_path(value), None, "{value}");
+        }
+    }
 
     fn moved() -> window::Event {
         window::Event::Moved(iced::Point::new(100.0, 200.0))

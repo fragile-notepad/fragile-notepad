@@ -6,10 +6,24 @@ Windows and Linux are supported; macOS support is experimental.
 
 ## Download and launch
 
-1. Open [Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
-   and choose the archive for your platform. Nightly builds are prereleases.
-2. Extract the complete archive into a directory you can keep in place.
-3. Launch the editor for your platform:
+Open [Releases](https://github.com/fragile-notepad/fragile-notepad/releases)
+and choose an installer or portable archive for your platform. Nightly builds are
+prereleases.
+
+| Platform | Install |
+| --- | --- |
+| Windows x64 | Run `*-setup.exe`, then open Fragile Notepad from the Start menu. Setup requires administrator access. |
+| Debian / Ubuntu | Run `sudo apt install ./fragile-notepad-*.deb`. |
+| Fedora | Run `sudo dnf install ./fragile-notepad-*.rpm`. |
+| openSUSE | Run `sudo zypper install ./fragile-notepad-*.rpm`. |
+| macOS | Open the `.dmg` for Apple Silicon (`arm64`) or Intel (`x86_64`), then drag Fragile Notepad to Applications. |
+
+Choose Fragile Notepad in the OS's default-app settings for text and source files.
+See [package details](development/packaging.md) for document icons, Linux
+requirements, and unsigned downloads.
+
+For a portable archive, extract the complete archive into a directory you can
+keep in place, then launch the editor:
 
 | Platform | Launch |
 | --- | --- |

@@ -44,6 +44,7 @@ from the repository root.
    | `assets/illustrations/macaw-quill.rgba` | 400 × 440 straight RGBA illustration |
    | `assets/illustrations/bunny/*.rgba` | Application, title-bar, and About animation rasters; [sizes and filenames](../../assets/illustrations/bunny/README.md#generated-assets) |
    | `target/app-icons/` | `app.ico`, `app.icns`, and `app.png` |
+   | `target/file-type-icons/windows/` and `target/file-type-icons/macos/` | Document `.ico` and `.icns` files for OS file associations |
    | `target/animation-review/macaw-art-preview.png` | Quill review image |
 
    Generated files are ignored by Git. Keep the editable SVGs as the source of
@@ -69,6 +70,10 @@ icons blend with the toolbar background.
 File-type icons use the large SVG variants, which Cargo renders to images. Update
 [catalog.json](../../assets/icons/file-types/catalog.json) to change which file
 extensions use each icon.
+
+`python scripts/generate_file_type_icons.py` creates the desktop document icons
+used by [installers](packaging.md#default-applications-and-document-icons). It uses
+the small SVG variants at 16–32 pixels and the large variants above that size.
 
 ## Regenerate an illustration family
 

@@ -1024,6 +1024,7 @@ dependencies = [
  "unicode-ident",
  "unicode-segmentation",
  "unicode-width",
+ "url",
  "wgpu",
  "windows-sys 0.61.2",
  "winresource",

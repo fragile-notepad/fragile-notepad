@@ -49,7 +49,14 @@ impl App {
             ApplicationMessage::ForwardedFiles(paths, request, receipt) => {
                 self.forward_files(paths, request, receipt)
             }
-            ApplicationMessage::OpenPaths(paths) => self.open_paths(paths),
+            ApplicationMessage::OpenPaths(paths) => {
+                let show = if self.editor_windows.is_empty() {
+                    self.show_main_window(crate::ipc::ActivationRequest::default())
+                } else {
+                    Task::none()
+                };
+                Task::batch([show, self.open_paths(paths)])
+            }
             ApplicationMessage::StartupReady => self.startup_ready(),
             ApplicationMessage::StartupFrameReady => {
                 crate::startup::report_first_frame_ready();

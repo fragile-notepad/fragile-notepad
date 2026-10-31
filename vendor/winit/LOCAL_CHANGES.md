@@ -60,6 +60,8 @@ window lifecycle events.
 
 - Forward macOS Dock reopening through the application handler and Iced event
   subscription, allowing an editor daemon to reopen after the last window closes.
+- Forward Finder document-opening requests from `application:openURLs:` through
+  the existing URL event, including every selected file.
 
 ## Source preservation
 

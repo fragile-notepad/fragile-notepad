@@ -19,6 +19,7 @@ pub(super) enum Event {
 impl BusEvent for Event {
     type Key = Self;
     fn coalescing_key(&self) -> Option<Self> {
+        // Keep every ordered action; refresh requests read the latest state.
         match self {
             Self::Workspace(
                 WorkspaceEvent::DocumentOpened(_)
@@ -46,6 +47,7 @@ pub(super) enum Work {
     Session,
 }
 
+/// Deduplicates requests; the scheduler chooses their order.
 #[derive(Debug, Default)]
 pub(super) struct PendingWork(u16);
 
@@ -53,6 +55,7 @@ impl PendingWork {
     pub(super) fn request(&mut self, work: Work) {
         self.0 |= 1 << work as u8;
     }
+    /// Clears before execution so a reaction can request itself again.
     pub(super) fn take(&mut self, work: Work) -> bool {
         let bit = 1 << work as u8;
         let pending = self.0 & bit != 0;

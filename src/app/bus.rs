@@ -10,6 +10,7 @@ pub(super) trait BusEvent {
     fn coalescing_key(&self) -> Option<Self::Key>;
 }
 
+/// FIFO events, deduplicated by key only while queued.
 #[derive(Debug)]
 pub(super) struct MessageBus<E: BusEvent> {
     queue: VecDeque<E>,
@@ -39,6 +40,7 @@ impl<E: BusEvent> MessageBus<E> {
         self.queue.is_empty()
     }
 
+    /// Releases the key before delivery so subscribers can immediately publish it again.
     pub(super) fn pop(&mut self) -> Option<E> {
         let event = self.queue.pop_front()?;
         if let Some(key) = event.coalescing_key() {

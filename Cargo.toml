@@ -45,7 +45,7 @@ tiny-skia = "0.11"
 winresource = "0.1"
 
 [package.metadata.winresource]
-FileDescription = "Fragile Notepad is a desktop text editor for notes and source files."
+FileDescription = "Fragile Notepad"
 LegalCopyright = "Copyright (c) 2026, Fragile Notepad authors"
 
 [profile.release]

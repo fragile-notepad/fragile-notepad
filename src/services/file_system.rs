@@ -1,4 +1,4 @@
-//! Disk I/O and encoding helpers.
+//! Whole-file reads, saves, and checks for changes made outside the editor.
 
 use super::types::{FileError, FileOpenResult, FileSaveResult, OpenedFile};
 use crate::core::{DiskState, DocumentId, FileRevision, TextEncoding, decode_bytes, encode_text};
@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Size and modification time cached by polling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileStamp {
     length: u64,
@@ -21,11 +22,12 @@ pub struct FileCheck {
     pub path: PathBuf,
     pub expected: FileRevision,
     pub stamp: Option<FileStamp>,
-    /// None means the file's size and modification time have not changed.
+    /// None means cached size and modification time matched; no bytes were read.
     pub state: Option<DiskState>,
 }
 
-/// Check metadata first during polling; callers omit the stamp to compare bytes.
+/// Compares file bytes with `expected`; a matching `stamp` skips the read.
+/// Set `stamp` to `None` to force a byte comparison.
 pub async fn check_file(mut check: FileCheck) -> FileCheck {
     let previous = check.stamp.take();
     check.state = Some(match tokio::fs::metadata(&check.path).await {
@@ -66,6 +68,7 @@ fn disk_error_state(kind: std::io::ErrorKind) -> DiskState {
     }
 }
 
+/// Decoding errors are returned in `contents.had_errors`, rather than failing the read.
 pub async fn load_file(path: PathBuf) -> FileOpenResult {
     let bytes = tokio::fs::read(&path)
         .await
@@ -79,6 +82,9 @@ pub async fn load_file(path: PathBuf) -> FileOpenResult {
     })
 }
 
+/// Replaces a file only after comparing its current bytes with `expected`.
+/// Missing `expected` returns `UnknownFileRevision`; changed or deleted files
+/// return `FileChanged`. The comparison does not exclude concurrent writers.
 pub async fn save_file_if_unchanged(
     path: PathBuf,
     contents: Vec<u8>,
@@ -112,6 +118,7 @@ async fn disk_revision(path: &std::path::Path) -> std::io::Result<FileRevision> 
     }
 }
 
+/// Replaces the destination bytes without comparing them with a loaded revision.
 pub async fn save_file(path: PathBuf, contents: Vec<u8>) -> FileSaveResult {
     super::atomic_write::write(&path, &contents)
         .await
@@ -120,6 +127,7 @@ pub async fn save_file(path: PathBuf, contents: Vec<u8>) -> FileSaveResult {
     Ok(path)
 }
 
+/// This does not add a final line ending; the document prepares that text first.
 pub fn encode_for_save(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, FileError> {
     encode_text(text, encoding).map_err(FileError::Encoding)
 }

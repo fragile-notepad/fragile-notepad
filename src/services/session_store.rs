@@ -1,4 +1,7 @@
-//! Ordered recovery manifests with bounded, content-addressed text chunks.
+//! Saves session layout separately from recovery text shared by unchanged snapshots.
+//!
+//! Recovery text is written before session metadata; the previous readable snapshot
+//! is kept for fallback. The older format with inline text can still be loaded.
 
 use crate::core::{Session, SessionDocument};
 use serde::{Deserialize, Serialize};
@@ -13,6 +16,7 @@ const CHUNK_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CHUNKS: usize = 100_000;
 
 pub(crate) enum CapturedDocument {
+    /// Keeps unloaded recovery text and an updated pinned flag.
     Deferred(Arc<SessionDocument>, bool),
     Live(Box<SessionDocument>, Option<ropey::Rope>),
 }
@@ -77,6 +81,7 @@ struct Prepared {
 
 #[derive(Default)]
 struct SessionWriter {
+    // The request number prevents an older write from clearing a newer snapshot.
     pending: Mutex<(u64, Option<Arc<SessionSnapshot>>)>,
     writing: tokio::sync::Mutex<()>,
 }
@@ -136,6 +141,7 @@ pub struct LoadedSession {
     pub warning: Option<String>,
 }
 
+/// Tries the previous snapshot if the latest fails, returning a warning on fallback.
 pub async fn load_session() -> Result<LoadedSession, String> {
     load_with_fallback(&session_path()?).await
 }
@@ -164,6 +170,8 @@ async fn load_with_fallback(path: &Path) -> Result<LoadedSession, String> {
     }
 }
 
+/// Queues a snapshot immediately, before the returned future is polled.
+/// Newer snapshots can replace pending work; awaiting the future flushes the queue.
 pub(crate) fn save_session(
     session: impl Into<SessionSnapshot>,
 ) -> impl Future<Output = Result<(), String>> {
@@ -174,6 +182,7 @@ pub(crate) fn save_session(
     }
 }
 
+/// A failed write leaves its snapshot queued so a later call can retry it.
 pub async fn flush_session() -> Result<(), String> {
     writer().flush(&session_path()?).await
 }
@@ -228,7 +237,8 @@ fn decode(bytes: &[u8], root: &Path, chunk_bytes: usize) -> Result<Session, Stri
     decode_snapshot(bytes, root, chunk_bytes, true)
 }
 
-/// Verification keeps only one bounded chunk and a UTF-8 boundary tail in RAM.
+/// Check-only mode keeps one chunk and an incomplete UTF-8 suffix in memory.
+/// Restoration also copies the full recovered text.
 fn decode_snapshot(
     bytes: &[u8],
     root: &Path,
@@ -320,6 +330,7 @@ fn valid_hash(hash: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+// Chunks can split UTF-8 characters; check-only reads carry the suffix between files.
 fn prepare(mut session: Session, chunk_bytes: usize) -> Result<Prepared, String> {
     session.validate()?;
     let texts: Vec<_> = session

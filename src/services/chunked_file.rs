@@ -1,4 +1,6 @@
-//! Chunked file loading for responsive open/drop flows.
+//! Streams decoded file text from blocking readers without holding up the UI.
+//!
+//! Byte counts and the file revision describe source bytes, including any BOM.
 
 use super::types::{
     FileError, FileLoadChunk, FileLoadEvent, FileLoadFailure, FileLoadFinished, FileLoadProgress,
@@ -42,10 +44,16 @@ impl Read for HashedFile {
     }
 }
 
+/// Detects BOMs and otherwise tries UTF-8, retrying malformed input as Windows-1252.
+/// A retry sends `reset: true`: clear earlier preview text even if that chunk is empty.
+/// BOM-marked files keep their encoding when malformed.
 pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoadEvent> {
     load_file_chunks_with_encoding(request, None)
 }
 
+/// Starts a read when polled, optionally forcing an encoding without fallback.
+/// Progress events may be omitted; chunks and completion wait for receiver space.
+/// Dropping the stream cancels further work after any blocking read finishes.
 pub fn load_file_chunks_with_encoding(
     request: FileLoadRequest,
     encoding: Option<TextEncoding>,
@@ -124,6 +132,7 @@ fn load_file_on_thread(
     }
 
     first_read.truncate(read);
+    // Recognize BOMs even when the requested chunk size is one byte.
     while first_read.len() < UTF8_BOM_BYTES.len() {
         if sender.is_closed() {
             return;
@@ -326,6 +335,8 @@ fn strip_initial_bom(bytes: &[u8], encoding: TextEncoding) -> &[u8] {
     bytes.strip_prefix(marker).unwrap_or(bytes)
 }
 
+/// Carries an odd source byte and an unmatched high surrogate between reads.
+/// EOF replaces either unfinished value and sets the error flag.
 struct Utf16ChunkDecoder {
     big_endian: bool,
     pending_byte: Option<u8>,

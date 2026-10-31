@@ -1,3 +1,7 @@
+//! File replacement through a synced temporary file.
+//!
+//! An error after replacement can mean the destination already contains new bytes.
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,12 +23,14 @@ mod windows;
 #[cfg(windows)]
 use windows::replace_file;
 
+/// Follows destination symlinks and preserves supported file metadata.
+/// Dangling links and symlink loops fail.
 pub async fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with_check(path, contents, |_| std::future::ready(Ok(()))).await
 }
 
-/// The check must be repeatable: metadata-preserving saves check both before
-/// copying metadata and after the replacement has finished syncing.
+/// Checks the resolved target before replacement. The callback must be repeatable;
+/// some platforms call it twice. It does not exclude concurrent writers.
 pub async fn write_with_check<E, F>(
     path: &Path,
     contents: &[u8],
@@ -45,6 +51,8 @@ where
     write_with_permissions(&target, contents, false, before_replace).await
 }
 
+/// Uses `0600` on Unix instead of copying destination permissions.
+/// Does not follow destination symlinks.
 pub async fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with_permissions(path, contents, true, |_| std::future::ready(Ok(()))).await
 }

@@ -1,10 +1,12 @@
 //! A live document's text, edit history, and display state.
 
 mod analysis;
+mod line_endings;
 mod loading;
 mod view;
 
 pub use analysis::{DocumentAnalysis, analyze_document};
+pub use line_endings::detect_line_ending;
 pub use loading::{DocumentIndexState, DocumentLoadGeneration, DocumentLoadState};
 
 use analysis::{fold_provider, indent_guides};
@@ -683,31 +685,4 @@ pub fn syntax_token_for_path(path: &Path) -> String {
         .filter(|extension| !extension.is_empty())
         .map(str::to_ascii_lowercase)
         .unwrap_or_else(|| DEFAULT_SYNTAX_TOKEN.to_owned())
-}
-
-pub fn detect_line_ending(text: &str) -> Option<LineEnding> {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' => {
-                return Some(if bytes.get(index + 1) == Some(&b'\n') {
-                    LineEnding::CrLf
-                } else {
-                    LineEnding::Cr
-                });
-            }
-            b'\n' => {
-                return Some(if bytes.get(index + 1) == Some(&b'\r') {
-                    LineEnding::LfCr
-                } else {
-                    LineEnding::Lf
-                });
-            }
-            _ => index += 1,
-        }
-    }
-
-    None
 }

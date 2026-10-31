@@ -4,8 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use iced::widget::text_editor::LineEnding;
-
+use super::line_endings::detect_line_ending_in_chunks;
 use super::{
     Document, DocumentId, MAX_FULL_DOCUMENT_ANALYSIS_BYTES, SyntaxTokenSource, detect_line_ending,
     syntax_token_for_path,
@@ -237,7 +236,7 @@ impl Document {
         self.history = EditorHistory::new("");
         self.metadata_dirty = false;
         self.is_dirty = false;
-        self.line_ending = self.detect_current_line_ending();
+        self.line_ending = detect_line_ending_in_chunks(self.buffer.chunks());
         self.encoding = encoding;
         self.load_state = DocumentLoadState::Complete;
         self.index_state = DocumentIndexState::Complete;
@@ -253,55 +252,5 @@ impl Document {
         self.load_state = DocumentLoadState::Failed { generation };
         self.index_state = DocumentIndexState::Complete;
         true
-    }
-
-    fn detect_current_line_ending(&self) -> Option<LineEnding> {
-        let mut previous_was_cr = false;
-
-        for chunk in self.buffer.chunks() {
-            if chunk.is_empty() {
-                continue;
-            }
-
-            if previous_was_cr {
-                return Some(if chunk.as_bytes().first() == Some(&b'\n') {
-                    LineEnding::CrLf
-                } else {
-                    LineEnding::Cr
-                });
-            }
-
-            let bytes = chunk.as_bytes();
-            let mut index = 0;
-            while index < bytes.len() {
-                match bytes[index] {
-                    b'\r' => {
-                        if index + 1 == bytes.len() {
-                            previous_was_cr = true;
-                            break;
-                        }
-                        return Some(if bytes.get(index + 1) == Some(&b'\n') {
-                            LineEnding::CrLf
-                        } else {
-                            LineEnding::Cr
-                        });
-                    }
-                    b'\n' => {
-                        return Some(if bytes.get(index + 1) == Some(&b'\r') {
-                            LineEnding::LfCr
-                        } else {
-                            LineEnding::Lf
-                        });
-                    }
-                    _ => index += 1,
-                }
-            }
-        }
-
-        if previous_was_cr {
-            return Some(LineEnding::Cr);
-        }
-
-        None
     }
 }

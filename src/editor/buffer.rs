@@ -1,3 +1,5 @@
+//! Rope-backed text whose line index treats CRLF and LFCR as single endings.
+
 use super::position::{EditorPosition, EditorRange, position_after_text};
 use ropey::Rope;
 use std::fmt;
@@ -10,6 +12,7 @@ pub struct EditDelta {
     pub after_text: String,
 }
 
+/// Line reads exclude endings; range reads preserve endings inside the range.
 #[derive(Clone, PartialEq, Eq)]
 pub struct EditorBuffer {
     rope: Rope,
@@ -48,10 +51,12 @@ impl EditorBuffer {
         self.rope.clone()
     }
 
+    /// Chunks may split logical lines.
     pub fn chunks(&self) -> impl Iterator<Item = &str> {
         self.rope.chunks()
     }
 
+    /// Orders and clamps endpoints before copying.
     pub fn slice_text(&self, range: EditorRange) -> String {
         let range = self.clamp_range(range);
         let start = self.char_offset_clamped(range.start);
@@ -60,6 +65,8 @@ impl EditorBuffer {
         self.rope.slice(start..end).to_string()
     }
 
+    /// Rejects offsets outside the text, inside UTF-8 characters, or inside
+    /// CRLF/LFCR pairs. The offset just after the text is accepted.
     pub fn position_for_byte_offset(&self, byte_offset: usize) -> Option<EditorPosition> {
         self.byte_to_char_boundary(byte_offset)?;
         if self.is_inside_paired_line_ending(byte_offset) {
@@ -112,6 +119,7 @@ impl EditorBuffer {
 
     /// Copies bounded context and returns the match's UTF-8 byte range inside it.
     /// Multiline matches are clipped to the first line of the preview.
+    /// Lengths count Unicode scalar values; added ellipses are outside `max_chars`.
     pub fn line_excerpt_with_match(
         &self,
         range: EditorRange,
@@ -148,6 +156,7 @@ impl EditorBuffer {
         Some((excerpt, match_start..match_end))
     }
 
+    /// Updates text and its line index; the caller updates history and document views.
     pub fn replace_range(&mut self, range: EditorRange, replacement: &str) -> EditDelta {
         let before_range = self.clamp_range(range);
         let start_offset = self.char_offset_clamped(before_range.start);
@@ -176,6 +185,7 @@ impl EditorBuffer {
         }
 
         let byte_len = self.rope.len_bytes();
+        // Rescan joins near CR/LF to recognize pairs spanning appends.
         let can_extend_line_index = byte_len > 0
             && !matches!(self.rope.byte(byte_len - 1), b'\r' | b'\n')
             && !text
@@ -197,6 +207,7 @@ impl EditorBuffer {
         }
     }
 
+    /// Rounds columns back to a UTF-8 character boundary, not a grapheme boundary.
     pub fn clamp_position(&self, position: EditorPosition) -> EditorPosition {
         let line = position.line.min(self.line_count().saturating_sub(1));
         let line_start = self
@@ -220,6 +231,7 @@ impl EditorBuffer {
         )
     }
 
+    /// Returns the document-wide byte offset of the clamped position.
     pub fn byte_offset(&self, position: EditorPosition) -> usize {
         let position = self.clamp_position(position);
         self.line_starts
@@ -295,6 +307,7 @@ impl EditorBuffer {
     fn replace_chars(&mut self, start: usize, end: usize, replacement: &str) {
         let start_byte = self.rope.char_to_byte(start);
         let end_byte = self.rope.char_to_byte(end);
+        // Rescan the previous line too: the edit may join or split a CR/LF pair.
         let first_line = self
             .line_starts
             .partition_point(|offset| *offset <= start_byte)
@@ -348,6 +361,7 @@ fn line_starts(text: &str) -> Vec<usize> {
 fn line_starts_from_chunks<'a>(chunks: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
     let mut starts = vec![0];
     let mut index = 0;
+    // Keep a pending CR/LF across chunks to recognize split pairs.
     let mut pending_line_ending = None;
 
     for chunk in chunks {

@@ -1,3 +1,5 @@
+//! Syntax-specific word selection, distinct from keyboard word movement rules.
+
 use super::buffer::EditorBuffer;
 use super::position::{EditorPosition, EditorRange, position_for_byte_offset};
 use super::syntax_hints::SyntaxHintSet;
@@ -39,6 +41,7 @@ pub(super) fn is_default_word_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
 
+/// At line end, selects the word to the left; other separators select nothing.
 pub fn word_range_at_position(
     buffer: &EditorBuffer,
     position: EditorPosition,

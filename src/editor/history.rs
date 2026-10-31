@@ -1,3 +1,5 @@
+//! Undo and redo for already-applied edits; saved state is tracked by revision.
+
 use super::buffer::{EditDelta, EditorBuffer};
 use super::position::{
     EditorPosition, EditorRange, EditorSelection, SelectionSet, position_after_text,
@@ -10,6 +12,7 @@ pub struct EditTransaction {
     pub after_selection: EditorSelection,
 }
 
+/// The caller must apply and record edits in order against the same buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorHistory {
     undo_stack: Vec<RecordedTransaction>,
@@ -30,6 +33,7 @@ struct RecordedTransaction {
 }
 
 impl EditorHistory {
+    /// `clean_text` is unused; a new history starts clean.
     pub fn new(_clean_text: impl Into<String>) -> Self {
         Self {
             undo_stack: Vec::new(),
@@ -41,6 +45,7 @@ impl EditorHistory {
         }
     }
 
+    /// Use `record_with_selection_sets` to preserve multiple or shaped selections.
     pub fn record(&mut self, transaction: EditTransaction) {
         if transaction.is_noop() {
             return;
@@ -54,6 +59,7 @@ impl EditorHistory {
         self.redo_stack.clear();
     }
 
+    /// Selection-only changes can be recorded even when the text stays the same.
     pub fn record_with_selection_sets(
         &mut self,
         transaction: EditTransaction,
@@ -68,6 +74,8 @@ impl EditorHistory {
         self.redo_stack.clear();
     }
 
+    /// Groups adjacent single-character inserts. Replacements, line endings,
+    /// pending redo, and `break_group` end the group.
     pub fn record_with_grouping(&mut self, transaction: EditTransaction) {
         if transaction.is_noop() {
             return;
@@ -98,6 +106,7 @@ impl EditorHistory {
         self.redo_selection_set(buffer).map(Into::into)
     }
 
+    /// The caller must restore the returned selection and refresh document views.
     pub fn undo_selection_set(&mut self, buffer: &mut EditorBuffer) -> Option<SelectionSet> {
         let recorded = self.undo_stack.pop()?;
         let selection = recorded.before_selection_set.clone();
@@ -126,6 +135,7 @@ impl EditorHistory {
         Some(selection)
     }
 
+    /// Ends the typing group and marks this revision saved. `text` is unused.
     pub fn mark_clean(&mut self, _text: &str) {
         self.clean_revision = Some(self.current_revision);
         self.break_group();
@@ -142,6 +152,7 @@ impl EditorHistory {
         self.break_group();
     }
 
+    /// Compares revisions, not text: retyping the same content still counts as changed.
     pub fn is_dirty(&self, _text: &str) -> bool {
         self.clean_revision != Some(self.current_revision)
     }

@@ -1,6 +1,9 @@
+//! Logical text positions and linear or rectangular selections.
+
 use super::buffer::EditorBuffer;
 use super::layout::{byte_column_for, visual_column_for};
 
+/// A zero-based logical line and UTF-8 byte column, independent of wrapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EditorPosition {
     pub line: usize,
@@ -13,6 +16,7 @@ impl EditorPosition {
     }
 }
 
+/// A half-open range after ordering endpoints with `normalized`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EditorRange {
     pub start: EditorPosition,
@@ -60,6 +64,7 @@ impl EditorSelection {
     }
 }
 
+/// Display-cell columns shared by every line of a rectangular selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RectangularSelection {
     pub anchor_visual_column: usize,
@@ -95,6 +100,7 @@ impl SelectionShape {
     }
 }
 
+/// Virtual columns count display cells beyond line ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SelectionRange {
     pub anchor: EditorPosition,
@@ -169,6 +175,8 @@ impl SelectionRange {
         }
     }
 
+    /// Retains rectangular columns beyond short lines. Linear selections include
+    /// their final line even when the range ends at column zero.
     pub fn projected_lines(
         self,
         buffer: &EditorBuffer,
@@ -216,6 +224,8 @@ impl ProjectedSelectionLine {
     }
 }
 
+/// Nonempty and source-ordered, with one main selection. Overlaps and duplicate
+/// carets are retained for the editing caller to handle.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SelectionSet {
     ranges: Vec<SelectionRange>,
@@ -234,6 +244,7 @@ impl SelectionSet {
         Self::from_selection_ranges(ranges.into_iter().map(SelectionRange::from).collect(), main)
     }
 
+    /// Empty input becomes a start caret; an out-of-range `main` selects the last input.
     pub fn from_selection_ranges(ranges: Vec<SelectionRange>, main: usize) -> Self {
         if ranges.is_empty() {
             return Self::new(EditorSelection::new(
@@ -357,6 +368,8 @@ impl From<&SelectionSet> for EditorSelection {
     }
 }
 
+/// Unlike the buffer method, accepts offsets inside CRLF/LFCR pairs and counts
+/// both bytes as one ending only when they precede the offset.
 pub fn position_for_byte_offset(text: &str, byte_offset: usize) -> Option<EditorPosition> {
     if byte_offset > text.len() || !text.is_char_boundary(byte_offset) {
         return None;
@@ -395,6 +408,7 @@ pub fn position_for_byte_offset(text: &str, byte_offset: usize) -> Option<Editor
     Some(EditorPosition::new(line, column))
 }
 
+/// Counts CRLF and LFCR pairs as single endings.
 pub fn position_after_text(start: EditorPosition, text: &str) -> EditorPosition {
     let mut line = start.line;
     let mut column = start.column;

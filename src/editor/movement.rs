@@ -1,3 +1,5 @@
+//! Grapheme-based caret movement; word motions use ASCII letters, digits, and `_`.
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::action::CaretMotion;
@@ -12,6 +14,7 @@ pub fn is_vertical_motion(motion: CaretMotion) -> bool {
     )
 }
 
+/// Page motions move 20 logical lines; paragraphs are separated by blank lines.
 pub fn move_position(
     buffer: &EditorBuffer,
     position: EditorPosition,
@@ -36,6 +39,7 @@ pub fn move_position(
     }
 }
 
+/// `column` is a UTF-8 byte column, not a display column, and is clamped on short lines.
 pub fn move_position_with_column(
     buffer: &EditorBuffer,
     position: EditorPosition,
@@ -59,6 +63,7 @@ pub fn move_position_with_column(
     buffer.clamp_position(EditorPosition::new(line, column))
 }
 
+/// Crosses CRLF/LFCR pairs in one step.
 pub fn previous_grapheme_position(
     buffer: &EditorBuffer,
     position: EditorPosition,
@@ -89,6 +94,7 @@ pub fn next_grapheme_position(
         .map(|column| EditorPosition::new(position.line, column))
 }
 
+/// The byte offset must already lie on a grapheme boundary.
 pub fn previous_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
     text.get(..offset)?
         .grapheme_indices(true)
@@ -96,6 +102,7 @@ pub fn previous_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
+/// The byte offset must already lie on a grapheme boundary.
 pub fn next_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
     let next = text
         .get(offset..)?
@@ -149,6 +156,7 @@ fn previous_word_position(
 
 fn next_word_position(buffer: &EditorBuffer, position: EditorPosition) -> Option<EditorPosition> {
     let mut position = buffer.clamp_position(position);
+    // A line break separates words even without adjacent punctuation or spaces.
     let mut skipping_word = true;
     loop {
         let text = buffer.line(position.line)?;

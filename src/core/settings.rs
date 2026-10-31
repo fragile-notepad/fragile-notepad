@@ -1,3 +1,5 @@
+//! Editor preferences and their XML format.
+
 use iced::highlighter;
 use iced::widget::text_editor::LineEnding;
 
@@ -33,6 +35,7 @@ impl HardwareAccelerationMode {
     }
 }
 
+/// Tabs use the default width for display and folds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndentationMode {
     Tabs,
@@ -54,6 +57,7 @@ impl IndentationMode {
     }
 }
 
+/// Preview lengths count Unicode scalar values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SearchResultSettings {
     pub result_limit: usize,
@@ -70,6 +74,7 @@ impl SearchResultSettings {
     pub const MAX_PREVIEW_CHARS: usize = 2_000;
     pub const DEFAULT_CONTEXT_BEFORE: usize = 40;
 
+    /// Leaves room for a match character after the leading context.
     pub fn normalized(self) -> Self {
         let preview_chars = self
             .preview_chars
@@ -94,9 +99,11 @@ impl Default for SearchResultSettings {
     }
 }
 
+/// Preferences shared by all editor windows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorSettings {
     pub word_wrap: bool,
+    /// Maximum wrap width in columns; `None` lets the viewport width decide.
     pub wrap_column_limit: Option<usize>,
     pub auto_save: bool,
     pub exit_on_last_window_close: bool,
@@ -153,6 +160,7 @@ impl EditorSettings {
         (Self::MIN_WRAP_COLUMN..=Self::MAX_WRAP_COLUMN).contains(&columns)
     }
 
+    /// Ignores non-finite values; clamps to the zoom range.
     pub fn set_zoom(&mut self, zoom: f32) {
         if zoom.is_finite() {
             self.zoom = zoom.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
@@ -171,6 +179,7 @@ impl EditorSettings {
         self.zoom = Self::DEFAULT_ZOOM;
     }
 
+    /// Applies to line-wheel input; pixel-distance input keeps its native distance.
     pub fn set_scroll_speed(&mut self, scroll_speed: f32) {
         if scroll_speed.is_finite() {
             self.scroll_speed = scroll_speed.clamp(Self::MIN_SCROLL_SPEED, Self::MAX_SCROLL_SPEED);
@@ -208,6 +217,7 @@ impl EditorSettings {
         self.decorations.indent_width = indentation.width() as usize;
     }
 
+    /// Derives indent width from `indentation` to avoid a stale value in `decorations`.
     pub fn decoration_settings(&self) -> DecorationSettings {
         DecorationSettings {
             indent_width: self.indentation.width() as usize,
@@ -260,6 +270,7 @@ impl EditorSettings {
         self.decorations.show_folding_controls = show_folding_controls;
     }
 
+    /// Returns whether recent files changed. Compares paths without canonicalizing them.
     pub fn record_open_history_path(&mut self, path: impl Into<PathBuf>) -> bool {
         let path = path.into();
         if path.as_os_str().is_empty() {
@@ -293,6 +304,7 @@ impl EditorSettings {
         }
     }
 
+    /// Unknown XML fields from a loaded file are not preserved.
     pub fn to_xml_string(&self) -> String {
         let search_results = self.search_results.normalized();
         let mut shortcuts = XmlElement::new("shortcuts");
@@ -376,6 +388,8 @@ impl EditorSettings {
             .document()
     }
 
+    /// Loads recognized fields over defaults. Malformed XML or an unexpected root
+    /// returns defaults; individual invalid values are ignored or clamped.
     pub fn from_xml_str(input: &str) -> Self {
         let mut settings = Self::default();
         let Ok(document) = roxmltree::Document::parse(input) else {

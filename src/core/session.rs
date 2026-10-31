@@ -4,15 +4,18 @@ use super::TextEncoding;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Refers to documents by array index, not live IDs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub version: u32,
     pub documents: Vec<SessionDocument>,
+    /// Index into `documents`.
     pub active_index: usize,
     /// Version 2 layout. Document entries remain process-wide so recovery text
     /// is serialized once even while a tab is moving between native windows.
     #[serde(default)]
     pub windows: Vec<SessionWindow>,
+    /// Index into `windows`.
     #[serde(default)]
     pub focused_window: Option<usize>,
 }
@@ -41,6 +44,7 @@ pub struct SessionWindow {
     pub fullscreen: bool,
 }
 
+/// Selection columns are UTF-8 byte offsets within zero-based logical lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionDocument {
@@ -48,10 +52,12 @@ pub struct SessionDocument {
     pub path: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_revision: Option<super::FileRevision>,
+    /// Required for dirty or untitled documents; also protects clean files if deleted.
     pub text: Option<String>,
     #[serde(with = "encoding")]
     pub encoding: TextEncoding,
     pub had_decoding_errors: bool,
+    /// Literal ending, e.g. "\r\n", not the settings label "crlf".
     pub line_ending: Option<String>,
     pub is_pinned: bool,
     pub is_dirty: bool,
@@ -64,6 +70,7 @@ pub struct SessionDocument {
     /// sessions restore `first_visible_row` when this position is absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_visible_position: Option<(usize, usize)>,
+    /// Horizontal scrolling in logical pixels.
     pub horizontal_offset: f32,
     pub syntax_token: Option<String>,
     /// None denotes older sessions which did not record language provenance.
@@ -98,6 +105,7 @@ impl Default for SessionDocument {
 
 impl Session {
     /// Return a uniform layout without mutating legacy recovery metadata.
+    /// Converts version 1 to a single window; does not check saved values.
     pub fn normalized_windows(&self) -> Vec<SessionWindow> {
         if self.version == 1 {
             if self.documents.is_empty() {
@@ -112,6 +120,7 @@ impl Session {
         self.windows.clone()
     }
 
+    /// Checks saved structure and limits, without reading paths or checking text positions.
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(self.version, 1 | 2) {
             return Err(format!("Unsupported session version: {}", self.version));
@@ -288,6 +297,7 @@ mod tests {
 }
 
 mod native_path {
+    // Preserve non-UTF-8 native paths; reject them on a different platform.
     use super::*;
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "format", content = "value")]

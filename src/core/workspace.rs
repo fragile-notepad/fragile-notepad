@@ -1,3 +1,6 @@
+//! Live documents and window tabs. Document lookup spans all windows; tab-local
+//! methods use `current_window` unless given an explicit window ID.
+
 pub mod changes;
 use crate::core::document::{Document, DocumentId, DocumentLoadGeneration};
 use crate::core::encoding::DecodedText;
@@ -68,6 +71,7 @@ impl Workspace {
     pub fn current_window_id(&self) -> EditorWindowId {
         self.current_window
     }
+    /// Changes model scope only; application code must also switch its window UI.
     pub fn set_current_window(&mut self, id: EditorWindowId) -> bool {
         if !self.windows.contains_key(&id) {
             return false;
@@ -86,6 +90,7 @@ impl Workspace {
             .get(&id)
             .map_or(&[], |window| window.tabs.as_slice())
     }
+    /// Returns one window's documents in tab order.
     pub fn window_documents(&self, id: EditorWindowId) -> impl Iterator<Item = &Document> {
         self.window_tab_ids(id)
             .iter()
@@ -102,6 +107,7 @@ impl Workspace {
             .iter()
             .find_map(|(window, state)| state.tabs.contains(&id).then_some(*window))
     }
+    /// Leaves the current window unchanged.
     pub fn create_empty_window(&mut self) -> EditorWindowId {
         let id = EditorWindowId::new(self.next_window_id);
         self.next_window_id += 1;
@@ -141,6 +147,7 @@ impl Workspace {
             .and_then(|window| window.active_document_id)
             .unwrap_or(DocumentId::new(0))
     }
+    /// All windows, ordered by window ID and then tab order.
     pub fn documents(&self) -> &[Document] {
         &self.documents
     }
@@ -153,6 +160,7 @@ impl Workspace {
             edit(document);
         }
     }
+    /// Panics if the ID is already in use or the current window does not exist.
     pub fn push_document(&mut self, document: Document) {
         assert!(
             !self.indices.contains_key(&document.id),
@@ -187,6 +195,7 @@ impl Workspace {
             *window = EditorWindow::default();
         }
     }
+    /// Emits structural events first, then compares each touched document once.
     pub fn publish_changes(&mut self, emit: impl FnMut(WorkspaceEvent)) {
         self.changes.publish(&self.documents, &self.indices, emit);
     }
@@ -241,12 +250,14 @@ impl Workspace {
             .get(&id)
             .and_then(|index| self.documents.get(*index))
     }
+    /// Tracks changes until `publish_changes`; callers must preserve the document ID.
     pub fn document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
         let index = self.index_of(id)?;
         let document = &mut self.documents[index];
         self.changes.touch(document);
         Some(document)
     }
+    /// Switches to the document's window and makes it the only selected tab.
     pub fn select(&mut self, id: DocumentId) -> bool {
         let Some(owner) = self.owner_of(id) else {
             return false;
@@ -254,6 +265,7 @@ impl Workspace {
         self.current_window = owner;
         self.select_in_window(owner, id)
     }
+    /// Leaves the current window unchanged.
     pub fn select_in_window(&mut self, window_id: EditorWindowId, id: DocumentId) -> bool {
         let Some(window) = self.windows.get_mut(&window_id) else {
             return false;
@@ -328,6 +340,7 @@ impl Workspace {
             .push(WorkspaceEvent::WindowTabsChanged(window_id));
         true
     }
+    /// Selects from the saved anchor to `id`, or just `id` when no anchor exists.
     pub fn select_tab_range(&mut self, window_id: EditorWindowId, id: DocumentId) -> bool {
         let Some(window) = self.windows.get_mut(&window_id) else {
             return false;
@@ -348,6 +361,8 @@ impl Workspace {
         true
     }
 
+    /// Creates an untitled replacement if closing leaves the window empty.
+    /// Does not prompt for unsaved changes.
     pub fn close(&mut self, id: DocumentId) -> Option<Document> {
         let owner = self.owner_of(id)?;
         let removed = self.close_without_replacement(id)?;
@@ -361,6 +376,7 @@ impl Workspace {
         }
         Some(removed)
     }
+    /// Unlike `close`, permits an empty window; the caller handles prompts and cleanup.
     pub fn close_without_replacement(&mut self, id: DocumentId) -> Option<Document> {
         let index = self.index_of(id)?;
         let owner = self.owner_of(id)?;
@@ -393,6 +409,8 @@ impl Workspace {
 
     /// Atomically move live documents, preserving IDs, buffers, history and load generations.
     /// `insertion` is a slot in the destination before removing the moving group.
+    /// Follows source tab order, with pinned tabs first. An unchanged order returns
+    /// false but can still update the selection.
     pub fn transfer_tabs(
         &mut self,
         source: EditorWindowId,
@@ -550,9 +568,11 @@ impl Workspace {
         true
     }
 
+    /// Current window only, in tab order.
     pub fn document_ids(&self) -> Vec<DocumentId> {
         self.window_tab_ids(self.current_window).to_vec()
     }
+    /// Every window, in `documents` order.
     pub fn all_document_ids(&self) -> Vec<DocumentId> {
         self.documents.iter().map(|document| document.id).collect()
     }
@@ -595,6 +615,7 @@ impl Workspace {
         self.changes.push(WorkspaceEvent::OrderChanged);
         true
     }
+    /// Moves to the target's former slot; both tabs must share a window and pin state.
     pub fn reorder(&mut self, moved_id: DocumentId, target_id: DocumentId) -> bool {
         if moved_id == target_id {
             return false;

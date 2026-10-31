@@ -43,6 +43,7 @@ struct Stamp {
 
 impl Stamp {
     fn of(document: &Document) -> Self {
+        // Progress alone must not restart work for a load-state change.
         let load = match document.load_state {
             DocumentLoadState::Loading { generation, .. } => DocumentLoadState::Loading {
                 generation,
@@ -96,6 +97,7 @@ impl ChangeJournal {
         self.events.push_back(event);
     }
 
+    // Closed documents already emitted their structural event; skip later comparisons.
     pub(super) fn publish(
         &mut self,
         documents: &[Document],

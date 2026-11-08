@@ -166,7 +166,10 @@ jobs:
         run: |
           brew install molten-vk vulkan-loader vulkan-tools
           source scripts/setup-macos-vulkan.sh
-          vulkaninfo --summary || echo "Vulkan adapter probe failed; GPU tests may be skipped."
+          if ! vulkaninfo --summary; then
+            echo "Vulkan adapter probe failed; disabling drivers for optional GPU tests."
+            echo "VK_LOADER_DRIVERS_DISABLE=*" >> "${GITHUB_ENV}"
+          fi
 
       - name: Configure Windows software Vulkan adapter
         if: runner.os == 'Windows'
